@@ -1,0 +1,13 @@
+:root { color-scheme: light dark; --bg: #fbfaf7; --fg: #1d1c1a; --muted: #5d5a54; --rule: #dedad2; --accent: #8a4b1f; }
+@media (prefers-color-scheme: dark) { :root { --bg: #1a1918; --fg: #e8e5df; --muted: #a39f97; --rule: #3a3835; --accent: #e0a36f; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.6 Georgia, "Iowan Old Style", serif; }
+main { max-width: 38rem; margin: 0 auto; padding: 3rem 1rem 4rem; }
+h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 .25rem; }
+h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; }
+p, li { margin: 0 0 .75rem; }
+.lede { color: var(--muted); margin-bottom: 2rem; }
+a { color: var(--accent); }
+code { font: .9em ui-monospace, "SF Mono", Menlo, monospace; }
+nav { font-size: .9rem; border-top: 1px solid var(--rule); margin-top: 3rem; padding-top: 1rem; color: var(--muted); }
+nav a { margin-right: 1rem; }
