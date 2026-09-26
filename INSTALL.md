@@ -172,7 +172,8 @@ lieer needs a Google OAuth client, and each person makes their own, so quota
 and consent stay under their control. This is the one long human step.
 
 **Agents:** walk the human through it one screen at a time. Open each link
-with `xdg-open`, say what to do on that screen, and wait for "done" before
+with `setsid -f xdg-open '<url>'` (plain `xdg-open` can block until the
+browser exits), say what to do on that screen, and wait for "done" before
 the next one. Every link carries `authuser=<address>` so the Console opens
 as the right Google account, and after the first screen
 `project=<project ID>`.
@@ -346,6 +347,9 @@ Open pneu from the app launcher, or by clicking the bar widget; both run
 **Agents:** run this section as you ran the install, and report what you
 removed, what the human chose to keep, and what the check at the end found.
 
+Stopping the service interrupts a first download that's still running;
+mail kept after that is partial.
+
 ```sh
 omarchy plugin remove pneu --yes                     # turns the widget off, unlinks it, rescans
 systemctl --user disable --now pneu.service
@@ -372,12 +376,13 @@ notmuch.
 ```sh
 pkexec pacman -Rns --noconfirm lieer python-tqdm
 pkexec pacman -Rns --noconfirm notmuch
+rm -rf ~/.cache/go-build                             # with Go: the build cache step 2 filled
 pkexec pacman -Rns --noconfirm go
 rm -rf ~/.cache/yay/lieer                            # yay's build directory
 ```
 
-**(human)** Google keeps two things. Open each link with `xdg-open`, as in
-step 4:
+**(human)** Google keeps two things. Open each link with
+`setsid -f xdg-open '<url>'`, as in step 4:
 
 - **The access you granted:**
   `https://myaccount.google.com/connections?authuser=<address>` → **pneu**
@@ -397,5 +402,7 @@ exist:
 - `omarchy plugin list | grep pneu` and `grep -n pneu ~/.config/omarchy/shell.json`
 - `ss -ltn | grep ':7317 '`
 - `find ~/.config ~/.local ~/.cache -iname '*pneu*'`, apart from this
-  checkout if it lives there
+  checkout and anything named after its path (Claude Code's per-project
+  caches, for instance)
+- `ls ~/Downloads/client_secret_*.json`, in case step 5's `rm` didn't run
 - `pacman -Q go notmuch lieer python-tqdm` lists only what the human kept.
