@@ -130,10 +130,12 @@ func (a Account) Search(ctx context.Context, query string, opts SearchOpts) ([]T
 
 // Oldest is the date of the oldest message in the database, spam and trash
 // included, or the zero time when it is empty. With --sort=oldest-first a
-// summary's timestamp is its thread's oldest date.
+// summary's timestamp is its thread's oldest date. Messages without a
+// parseable Date header are indexed at timestamp 0 and skipped: they'd put
+// the oldest date at 1970.
 func (a Account) Oldest(ctx context.Context) (time.Time, error) {
 	var out []ThreadSummary
-	if err := a.runJSON(ctx, &out, "search", "--format=json", "--output=summary", "--sort=oldest-first", "--exclude=false", "--limit=1", "--", "*"); err != nil {
+	if err := a.runJSON(ctx, &out, "search", "--format=json", "--output=summary", "--sort=oldest-first", "--exclude=false", "--limit=1", "--", "date:@1.."); err != nil {
 		return time.Time{}, err
 	}
 	if len(out) == 0 {

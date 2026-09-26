@@ -415,3 +415,32 @@ func TestIsLockErr(t *testing.T) {
 		t.Error("false positive")
 	}
 }
+
+// A message whose Date notmuch can't parse is indexed at timestamp 0; it
+// must not become the oldest date.
+func TestOldestSkipsUndated(t *testing.T) {
+	a := setup(t)
+	ctx := context.Background()
+	want, err := a.Oldest(ctx)
+	if err != nil || want.IsZero() {
+		t.Fatalf("Oldest = %v, %v", want, err)
+	}
+	cfg, err := os.ReadFile(a.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mail := strings.TrimPrefix(strings.SplitN(string(cfg), "\n", 3)[1], "path=")
+	undated := "From: Spam <spam@example.com>\nSubject: no date\nMessage-ID: <undated@example.com>\n\nbody\n"
+	if err := os.WriteFile(filepath.Join(mail, "cur", "9:2,"), []byte(undated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.run(ctx, nil, "new", "--quiet"); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := a.Count(ctx, "date:@0..@0", false); n != 1 {
+		t.Fatalf("the undated message isn't indexed at timestamp 0 (%d at @0)", n)
+	}
+	if got, err := a.Oldest(ctx); err != nil || !got.Equal(want) {
+		t.Fatalf("Oldest = %v, %v; want %v", got, err, want)
+	}
+}
