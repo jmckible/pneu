@@ -61,8 +61,10 @@ scripts/rehearse shell --serve   # the same, with the browser bridge up for rehe
     against a live server, exactly as on a real machine.
   - `pacman -Q…` queries run for real, because they only read. Any other
     `pacman` command is logged.
-  - `omarchy plugin list` lists the sandbox's plugins directory, so
-    step 7's wait for the rescan sees the linked widget.
+  - `omarchy` does in the sandbox what touches only files under HOME:
+    `plugin list` lists the plugins directory (step 7 waits on it after
+    the rescan), `plugin remove` unlinks, and `hook install` copies.
+    Everything else it only logs.
   - `systemd-run` runs its command in the foreground instead of starting a
     unit, and `journalctl -u` prints that output.
   - When the run ends, the harness prints what each stub would have done.
@@ -92,6 +94,10 @@ scripts/rehearse shell --serve   # the same, with the browser bridge up for rehe
    - the messages are indexed;
    - the next sync went through stubgmi;
    - `status.json` and `theme.css` were written.
+4. **Uninstall.** Without `--serve`, it then runs INSTALL.md's Uninstall
+   section (`rehearse script --uninstall`) and fails if the server is still
+   running or anything named pneu, or `~/mail`, is left in the sandbox's
+   HOME.
 
 With `--fail`, stubgmi runs with `STUBGMI_FAIL=kill,token`. The run then
 checks, in order:

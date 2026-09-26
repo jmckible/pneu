@@ -9,7 +9,8 @@
 #            one account. `systemctl --user enable --now pneu.service`
 #            starts the server the way the unit would, inside the sandbox;
 #            the run then waits for its first pull, opens it through
-#            `pneu open`, and checks the inbox renders.
+#            `pneu open`, and checks the inbox renders. Without --serve it
+#            then runs the Uninstall section and checks nothing is left.
 #   shell    a shell in the sandbox for a person or an agent to follow
 #            INSTALL.md by hand. `rehearse-human-oauth <acct>` stands in for
 #            step 4; `rehearse-serve` shows the server's log (and the
@@ -159,6 +160,17 @@ if [[ ${1:-} == __inner ]]; then
 		grep -q '"lastSync":"[^"]*","failures":0' "$status" || fatal "the server's sync through stubgmi didn't succeed"
 		say "ok  the server synced through stubgmi; status.json written for the bar widget"
 		[[ -s ~/.config/pneu/theme.css ]] && say "ok  theme.css rendered"
+
+		if [[ $serve == 0 ]]; then
+			rehearse script --uninstall INSTALL.md >"$REHEARSE_SANDBOX/uninstall-steps.sh"
+			# shellcheck source=/dev/null
+			source "$REHEARSE_SANDBOX/uninstall-steps.sh"
+			step "Uninstall checks"
+			[[ ! -f $REHEARSE_SANDBOX/run/pneu.pid ]] || fatal "the server is still running after the uninstall"
+			left=$(find ~ -iname '*pneu*' -o -path ~/mail)
+			[[ -z $left ]] || fatal "the uninstall left behind: $left"
+			say "ok  the uninstall stopped the server and left nothing behind"
+		fi
 		if [[ $serve == 1 ]]; then
 			pneu open
 			say "serving; Ctrl-C ends the rehearsal"
@@ -280,12 +292,24 @@ logged='echo "(rehearsal) $(basename "$0") $*: logged, not run" >&2'
 for c in sudo pkexec yay omarchy-shell omarchy-launch-webapp notify-send hyprctl xdg-open loginctl; do
 	stub "$c" "$logged"
 done
-# omarchy: `plugin list` answers from the sandbox's plugins dir (INSTALL.md
-# waits on it after the rescan); everything else is logged.
-stub omarchy 'if [[ $* == "plugin list" ]]; then
+# omarchy: what touches only files under HOME is done in the sandbox, as
+# the real commands do it, so the install and the uninstall leave the same
+# files behind: `plugin list` reads the plugins dir (INSTALL.md waits on it
+# after the rescan), `plugin remove` unlinks, `hook install` copies.
+# Everything else is only logged.
+stub omarchy 'case $* in
+"plugin list")
 	for p in ~/.config/omarchy/plugins/*; do [[ -e $p ]] && printf "%s  disabled  third-party\n" "$(basename "$p")"; done
-	exit 0
-fi
+	exit 0 ;;
+"plugin remove "*)
+	rm -f ~/.config/omarchy/plugins/"$3"
+	echo "(rehearsal) omarchy $*: unlinked in the sandbox; the real shell is never reached" >&2
+	exit 0 ;;
+"hook install "*)
+	install -Dm755 "$4" ~/.config/omarchy/hooks/"$3".d/"$(basename "$4")"
+	echo "(rehearsal) omarchy $*: copied in the sandbox" >&2
+	exit 0 ;;
+esac
 '"$logged"
 # pacman: queries are read-only, so they run; anything else is logged.
 stub pacman "case \${1:-} in -Q*) exec /usr/bin/pacman \"\$@\" ;; esac; $logged"
@@ -409,6 +433,7 @@ summary() {
 		case "$name $args" in
 		"systemctl --user daemon-reload"*) echo "  would have reloaded the systemd user manager" ;;
 		"systemctl --user enable --now "*) echo "  would have enabled and started ${args##* }" ;;
+		"systemctl --user disable --now "*) echo "  would have stopped and disabled ${args##* }" ;;
 		"systemctl --user enable "*) echo "  would have enabled ${args##* }" ;;
 		"systemctl --user "*) echo "  would have run: systemctl $args" ;;
 		"systemd-run "*) echo "  would have started a transient unit: systemd-run $args (ran in the foreground instead)" ;;
@@ -417,6 +442,7 @@ summary() {
 		"pacman -Q"* | "omarchy plugin list"*) ;;
 		"yay "*) echo "  would have installed from the AUR: yay $args" ;;
 		"omarchy hook install "*) echo "  would have installed an Omarchy hook: omarchy $args" ;;
+		"omarchy plugin remove "*) echo "  would have removed the Omarchy plugin: omarchy $args" ;;
 		"omarchy-shell shell rescanPlugins"*) echo "  would have made omarchy-shell rescan its plugins" ;;
 		"omarchy plugin enable "*) echo "  would have enabled the Omarchy plugin ${args##* }" ;;
 		"omarchy-launch-or-focus-webapp "*) echo "  would have opened the pneu window (pneu open)" ;;

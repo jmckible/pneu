@@ -343,15 +343,59 @@ Open pneu from the app launcher, or by clicking the bar widget; both run
 
 ## Uninstall
 
+**Agents:** run this section as you ran the install, and report what you
+removed, what the human chose to keep, and what the check at the end found.
+
 ```sh
+omarchy plugin remove pneu --yes                     # turns the widget off, unlinks it, rescans
 systemctl --user disable --now pneu.service
-rm ~/.config/systemd/user/pneu.service ~/.local/share/applications/pneu.desktop
+rm ~/.config/systemd/user/pneu.service
+systemctl --user daemon-reload
+rm ~/.local/share/applications/pneu.desktop ~/.config/omarchy/hooks/theme-set.d/pneu-theme ~/.local/bin/pneu
 rm -r ~/.local/share/pneu ~/.local/share/icons/hicolor/scalable/apps/pneu.svg
-rm ~/.config/omarchy/hooks/theme-set.d/pneu-theme ~/.config/omarchy/plugins/pneu
-rm ~/.local/bin/pneu
-rm -r ~/.local/state/pneu ~/.config/pneu     # token, launch nonce, configs, OAuth client JSON
-rm -r ~/mail/<acct>                          # the maildir and notmuch database
+jq -r '.accounts[].name' ~/.config/pneu/config.json   # the accounts, listed before their config goes
 ```
 
-Revoke pneu's access to Google at myaccount.google.com → Security → Third-party
-access, and delete the Cloud project if you made one.
+**(human)** Each account's downloaded mail and its index are in
+`~/mail/<acct>`. Gmail still has all of it, but downloading it again takes
+hours on a large mailbox: ask before deleting it.
+
+```sh
+rm -r ~/mail/<acct>                                  # each account listed above
+rmdir --ignore-fail-on-non-empty ~/mail
+rm -r ~/.config/pneu ~/.local/state/pneu             # token, launch nonce, configs, OAuth client
+```
+
+**Packages** are the human's call, one by one: other software may use Go or
+notmuch.
+
+```sh
+pkexec pacman -Rns --noconfirm lieer python-tqdm
+pkexec pacman -Rns --noconfirm notmuch
+pkexec pacman -Rns --noconfirm go
+rm -rf ~/.cache/yay/lieer                            # yay's build directory
+```
+
+**(human)** Google keeps two things. Open each link with `xdg-open`, as in
+step 4:
+
+- **The access you granted:**
+  `https://myaccount.google.com/connections?authuser=<address>` → **pneu**
+  → **Delete all connections**.
+- **The Cloud project:**
+  `https://console.cloud.google.com/cloud-resource-manager?authuser=<address>`
+  → select the pneu project → **Delete**. Keep it to reinstall later: the
+  same project can issue a new Desktop client.
+
+The browser keeps `pneu.localhost`'s cookie and site data; clear them there
+if you like.
+
+**Check.** Each of these should come back empty or say the thing doesn't
+exist:
+
+- `systemctl --user cat pneu.service`
+- `omarchy plugin list | grep pneu` and `grep -n pneu ~/.config/omarchy/shell.json`
+- `ss -ltn | grep ':7317 '`
+- `find ~/.config ~/.local ~/.cache -iname '*pneu*'`, apart from this
+  checkout if it lives there
+- `pacman -Q go notmuch lieer python-tqdm` lists only what the human kept.

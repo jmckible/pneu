@@ -13,7 +13,7 @@ import (
 // file block names its path, and the steps come out in order.
 func TestInstallScript(t *testing.T) {
 	var b strings.Builder
-	if err := script("../../../../INSTALL.md", &b); err != nil {
+	if err := script("../../../../INSTALL.md", false, &b); err != nil {
 		t.Fatal(err)
 	}
 	out := b.String()
@@ -30,6 +30,26 @@ func TestInstallScript(t *testing.T) {
 	}
 	if strings.Contains(out, "Uninstall") || strings.Contains(out, "rm -r") {
 		t.Error("the Uninstall section leaked into the rehearsal")
+	}
+}
+
+// The Uninstall section is rehearsed on its own, after the install.
+func TestUninstallScript(t *testing.T) {
+	var b strings.Builder
+	if err := script("../../../../INSTALL.md", true, &b); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if strings.Contains(out, "\nnote ") {
+		t.Errorf("the Uninstall section has a block the rehearsal can't run:\n%s", out)
+	}
+	if strings.Contains(out, "go build") || !strings.Contains(out, "step 'Uninstall'") {
+		t.Errorf("script --uninstall isn't just the Uninstall section:\n%s", out)
+	}
+	for _, want := range []string{"cmd 'omarchy plugin remove pneu --yes", "cmd 'systemctl --user disable --now pneu.service'", "cmd 'rm -r ~/mail/$ACCT"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("script lacks %q:\n%s", want, out)
+		}
 	}
 }
 

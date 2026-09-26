@@ -1,6 +1,8 @@
 // Command rehearse is scripts/rehearse's Go half.
 //
 //	rehearse script INSTALL.md          INSTALL.md's steps as a bash script
+//	rehearse script --uninstall INSTALL.md
+//	                                    its Uninstall section, the same way
 //	rehearse bridge-in  SOCK ADDR       inside the sandbox's network namespace:
 //	                                    relay connections on unix socket SOCK to ADDR
 //	rehearse grant CONSENT_URL          what Google does when the person allows
@@ -35,15 +37,19 @@ func main() {
 	log.SetFlags(0)
 	log.SetPrefix("rehearse: ")
 	if len(os.Args) < 2 {
-		log.Fatal("usage: rehearse script INSTALL.md | bridge-in SOCK ADDR | bridge-out LISTEN SOCK HOST")
+		log.Fatal("usage: rehearse script [--uninstall] INSTALL.md | bridge-in SOCK ADDR | bridge-out LISTEN SOCK HOST")
 	}
 	var err error
 	switch a := os.Args[2:]; os.Args[1] {
 	case "script":
-		if len(a) != 1 {
-			log.Fatal("usage: rehearse script INSTALL.md")
+		uninstall := len(a) == 2 && a[0] == "--uninstall"
+		if uninstall {
+			a = a[1:]
 		}
-		err = script(a[0], os.Stdout)
+		if len(a) != 1 {
+			log.Fatal("usage: rehearse script [--uninstall] INSTALL.md")
+		}
+		err = script(a[0], uninstall, os.Stdout)
 	case "grant":
 		if len(a) != 1 {
 			log.Fatal("usage: rehearse grant CONSENT_URL")
@@ -94,15 +100,15 @@ func substitute(line string, lineNo int) (string, error) {
 }
 
 // script turns the numbered steps of INSTALL.md (from "## 1." up to
-// "## Uninstall") into bash that calls the functions scripts/rehearse
-// defines:
+// "## Uninstall"), or with uninstall the Uninstall section, into bash that
+// calls the functions scripts/rehearse defines:
 //
 //	step TITLE            a "## " heading
 //	human TITLE           a heading or paragraph marked (human)
 //	cmd LINE              one line of a ```sh block, echoed then run
 //	write_file PATH       a non-shell block after a line that starts with
 //	                      `PATH` and ends with a colon
-func script(path string, w io.Writer) error {
+func script(path string, uninstall bool, w io.Writer) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -120,10 +126,11 @@ func script(path string, w io.Writer) error {
 		line := sc.Text()
 		if !inBlock && strings.HasPrefix(line, "## ") {
 			title := strings.TrimPrefix(line, "## ")
-			switch {
-			case strings.HasPrefix(title, "1."):
+			if uninstall {
+				on = title == "Uninstall"
+			} else if strings.HasPrefix(title, "1.") {
 				on = true
-			case title == "Uninstall":
+			} else if title == "Uninstall" {
 				on = false
 			}
 			if on {
