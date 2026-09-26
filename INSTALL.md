@@ -103,13 +103,19 @@ repo root.
 ## 1. Packages
 
 ```sh
-sudo pacman -S --needed go notmuch
-yay -S --needed lieer python-tqdm      # review the PKGBUILD when yay offers it
+pkexec pacman -S --needed --noconfirm go notmuch
+yay -S --needed --noconfirm --sudo pkexec --answerdiff None --answerclean None lieer python-tqdm
 ```
 
-If a dependency 404s, your package database is older than the mirror: run
-`sudo pacman -Syu` first. Never run `-Sy` on its own. `gmi` has no
-`--version` flag; use `pacman -Q lieer`.
+Root goes through `pkexec`, not `sudo`: each call opens Omarchy's password
+dialog on the desktop, where the human authorises it. An agent runs these
+commands itself and never sees the password; `sudo` would wait on a terminal
+the agent doesn't have. yay's own PKGBUILD review is skipped because audit
+item 10 is that review.
+
+If a dependency 404s, your package database is older than the mirror: the
+human decides whether to run `pkexec pacman -Syu` first. Never run `-Sy` on
+its own. `gmi` has no `--version` flag; use `pacman -Q lieer`.
 
 ## 2. Build
 

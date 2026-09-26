@@ -406,7 +406,7 @@ summary() {
 		"systemctl --user "*) echo "  would have run: systemctl $args" ;;
 		"systemd-run "*) echo "  would have started a transient unit: systemd-run $args (ran in the foreground instead)" ;;
 		"journalctl "*) echo "  would have followed the journal: journalctl $args" ;;
-		"sudo "*) echo "  would have run as root: $args" ;;
+		"sudo "* | "pkexec "*) echo "  would have run as root: $args" ;;
 		"pacman -Q"*) ;;
 		"yay "*) echo "  would have installed from the AUR: yay $args" ;;
 		"omarchy hook install "*) echo "  would have installed an Omarchy hook: omarchy $args" ;;
