@@ -325,6 +325,23 @@ case " $* " in
 	case " $* " in *" stop "* | *" disable --now "*) rehearse-serve --stop ;; esac ;;
 esac
 exit 0'
+# The AUR: the sandbox has no network, so cloning lieer's AUR repo copies
+# testdata/aur/lieer (the real files, at the commit in COMMIT) instead, and
+# makepkg is logged. Every other git command is the real one.
+cat >"$SANDBOX/stubs/git" <<'EOF'
+#!/bin/bash
+if [[ ${1:-} == clone && ${2:-} == https://aur.archlinux.org/*.git && -n ${3:-} ]]; then
+	printf "git\t%s\n" "$*" >>"$REHEARSE_SANDBOX/stubs.log"
+	name=$(basename "$2" .git)
+	[[ -d $REPO/testdata/aur/$name ]] || { echo "(rehearsal) no testdata/aur/$name" >&2; exit 128; }
+	mkdir -p "$(dirname "$3")" && cp -r "$REPO/testdata/aur/$name" "$3"
+	echo "(rehearsal) git clone $2: copied testdata/aur/$name" >&2
+	exit 0
+fi
+exec /usr/bin/git "$@"
+EOF
+chmod +x "$SANDBOX/stubs/git"
+stub makepkg "$logged"
 # systemd-run: runs the command in the foreground instead of a transient
 # unit, its output kept for the journalctl stub.
 stub systemd-run '
@@ -441,6 +458,8 @@ summary() {
 		"sudo "* | "pkexec "*) echo "  would have run as root: $args" ;;
 		"pacman -Q"* | "omarchy plugin list"*) ;;
 		"yay "*) echo "  would have installed from the AUR: yay $args" ;;
+		"git clone "*) echo "  would have cloned from the AUR: ${args#clone }" ;;
+		"makepkg "*) echo "  would have run makepkg: $args" ;;
 		"omarchy hook install "*) echo "  would have installed an Omarchy hook: omarchy $args" ;;
 		"omarchy plugin remove "*) echo "  would have removed the Omarchy plugin: omarchy $args" ;;
 		"omarchy-shell shell rescanPlugins"*) echo "  would have made omarchy-shell rescan its plugins" ;;

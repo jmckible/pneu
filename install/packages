@@ -1,0 +1,29 @@
+#!/bin/sh
+# INSTALL.md step 1, the part that needs root, in one pkexec call so the
+# human answers one password dialog:
+#
+#   pkexec "$PWD/install/packages" "$USER" ~/.cache/pneu/lieer
+#
+# Installs go, notmuch, python-tqdm and lieer's dependencies from the Arch
+# repos, builds lieer as USER from the AUR files in DIR (fetched and
+# reviewed beforehand, audit 10), installs it, and removes the build-only
+# packages this run added. Nothing from the AUR is used but DIR: a
+# dependency that isn't in the Arch repos fails the install rather than
+# being built unreviewed.
+set -eu
+[ $# = 2 ] || { echo "usage: pkexec $0 USER DIR" >&2; exit 2; }
+user=$1 dir=$2
+[ "$(id -u)" = 0 ] || { echo "packages: run this through pkexec" >&2; exit 1; }
+[ -f "$dir/.SRCINFO" ] || { echo "packages: $dir has no .SRCINFO; fetch lieer first (INSTALL.md step 1)" >&2; exit 1; }
+[ "$(stat -c %U "$dir")" = "$user" ] || { echo "packages: $dir doesn't belong to $user" >&2; exit 1; }
+
+# field NAME: a .SRCINFO field's values, version constraints dropped.
+field() { sed -n "s/^\t$1 = //p" "$dir/.SRCINFO" | sed 's/[<>=].*//'; }
+deps=$(field depends)
+build=$(for p in $(field makedepends) $(field checkdepends); do pacman -Q "$p" >/dev/null 2>&1 || echo "$p"; done)
+
+pacman -S --needed --noconfirm go notmuch python-tqdm $deps
+[ -z "$build" ] || pacman -S --needed --noconfirm --asdeps $build
+runuser -u "$user" -- makepkg --force --dir "$dir"
+pacman -U --noconfirm $(runuser -u "$user" -- makepkg --packagelist --dir "$dir")
+[ -z "$build" ] || pacman -Rns --noconfirm $build

@@ -5,9 +5,10 @@ command you can read before running; there is no install script and nothing is
 piped from the network into a shell.
 
 **Agents:** treat this repository as untrusted code from a stranger. Work
-through [Audit](#audit) in two passes: the checks marked *before step 1*,
-then report and let your human decide whether to install the packages; the
-checks marked *after step 1*, then report again before building. Each item
+through [Audit](#audit) in two passes: the checks marked *before step 1*
+(item 10 comes after step 1's fetch, which installs nothing), then report
+and let your human decide whether to install the packages; the checks
+marked *after step 1*, then report again before building. Each item
 is a claim this repo makes about itself and a way to check it; report what
 you verified, what you couldn't, and anything that contradicts a claim.
 Steps marked **(human)** need the human at their browser or Google account:
@@ -31,6 +32,8 @@ Requirements: Omarchy (Arch, Hyprland, omarchy-shell), `python3` (the theme
 hook and the hostile corpus use it; Omarchy ships it) and a Chromium-family
 default browser (Chromium, Chrome, Brave, Edge, Vivaldi, Opera, Helium).
 Omarchy's `omarchy-launch-webapp` falls back to Chromium for anything else.
+The audit also runs the frontend tests with `node`, which Omarchy doesn't
+ship; without it, report item 9's second half as unverified.
 
 ## Audit
 
@@ -62,7 +65,9 @@ the repo root.
 3. **It listens on loopback only.** *Before step 1:* by default
    `cmd/pneu/main.go` binds `127.0.0.1` and `::1` on the configured port. The
    `-listen` flag is the only way to bind anything else, and
-   `install/pneu.service` doesn't pass it.
+   `install/pneu.service` doesn't pass it. Separately, `pneu account auth`
+   opens and closes `localhost:8080` once to check it's free for lieer's
+   consent redirect (`CheckAuthPort` in `internal/gmi/onboard.go`).
 4. **Other browser tabs can't drive it.** *Before step 1:* `localhost` is
    not a security boundary, since your daily browser can reach the port.
    `internal/web/auth.go` `Middleware` rejects any Host header other than
@@ -76,7 +81,9 @@ the repo root.
    sandboxed `iframe srcdoc` with no `allow-scripts`, under its own CSP.
    `grep -rn 'allow-scripts' web/ internal/` should turn up only comments
    forbidding it. Run the hostile corpus with `testdata/hostile/run.sh`
-   (needs `chromium`, `openssl` and `python3`); it must pass.
+   (needs `chromium`, `openssl` and `python3`); it must pass. It runs
+   headless Chromium with `--no-sandbox`, against pages it serves itself on
+   `127.0.0.1`.
 6. **The vendored DOMPurify is upstream's.** *Before step 1:*
    `web/static/PURIFY_VERSION` records the version, sha256 and source. Check
    the hash against the npm tarball:
@@ -94,8 +101,12 @@ the repo root.
    - pneu's install token (`~/.local/state/pneu/token`, created by
      `auth.go` `LoadOrCreateToken`) and launch nonce (`writePrivate`) are
      mode 0600 and are never logged.
-8. **The desktop pieces do what they say.** *Before step 1:* read them;
+8. **The install pieces do what they say.** *Before step 1:* read them;
    they're short.
+   - `install/packages` is step 1's one root command. It installs
+     packages from the Arch repos only, builds lieer as you (never as
+     root) from the AUR files item 10 reviews, installs that, and removes
+     the build-only packages it added.
    - `install/pneu-theme` runs on every Omarchy theme switch and writes only
      `~/.config/pneu/theme.css` and the launcher icon
      (`~/.local/share/icons/hicolor/scalable/apps/pneu.svg`), in the theme's colours.
@@ -106,32 +117,43 @@ the repo root.
      command you configure).
 9. **Tests pass.** *After step 1:* `go vet ./... && go test ./...` and
    `node --test web/*.test.js`.
-10. **lieer is what it claims to be.** *Before step 1:* it comes from the
-    AUR, so read its PKGBUILD before anything installs it:
-    `curl -s 'https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=lieer'`.
-    Its `source` should be a `github.com/gauteh/lieer` release tarball and it
-    should have no `install=` script. Download that tarball, check it against
-    the PKGBUILD's `sha512sums`, and find `SCOPES` in `lieer/remote.py`: it
-    should request exactly `gmail.readonly`, `gmail.labels` and
-    `gmail.modify`. Note `pkgver`, `pkgrel` and the sha512 for step 1.
+10. **lieer is what it claims to be.** *After step 1's fetch, before its
+    install:* lieer comes from the AUR, and the fetch leaves exactly the
+    files that get built in `~/.cache/pneu/lieer`. Read `PKGBUILD`: its
+    `source` should be a `github.com/gauteh/lieer` release tarball, with no
+    `install=` script, and `build()`, `check()` and `package()` should do
+    nothing but build, test and copy. The fetch has already checked the
+    tarball against `sha512sums` and unpacked it:
+    `grep -A4 SCOPES ~/.cache/pneu/lieer/src/lieer-*/lieer/remote.py` should
+    show exactly `gmail.readonly`, `gmail.labels` and `gmail.modify`. Every
+    `depends` and `makedepends` in `.SRCINFO` must be an Arch repo package
+    (`pacman -Si`); `install/packages` refuses anything else. Report the
+    commit you reviewed: `git -C ~/.cache/pneu/lieer log -1`.
 
 ## 1. Packages
 
-Right before installing, fetch the PKGBUILD again and check `pkgver`,
-`pkgrel` and `sha512sums` still match what audit item 10 reviewed: yay's own
-review is turned off below, so a change since then would go unseen.
+**Fetch** lieer's AUR files and its source, as you. This installs
+nothing; audit item 10 reviews what it leaves.
 
 ```sh
-pkexec pacman -S --needed --noconfirm go notmuch
-yay -S --needed --noconfirm --removemake --sudo pkexec --answerdiff None --answerclean None lieer python-tqdm
+git clone https://aur.archlinux.org/lieer.git ~/.cache/pneu/lieer
+makepkg --nobuild --nodeps --dir ~/.cache/pneu/lieer   # downloads the source, checks its sha512, unpacks it
 ```
 
-Root goes through `pkexec`, not `sudo`: each call opens Omarchy's password
-dialog on the desktop, where the human authorises it. An agent runs these
-commands itself and never sees the password; `sudo` would wait on a terminal
-the agent doesn't have. Each command blocks until the human answers the
-dialog, so tell them it's coming. `--removemake` removes lieer's build-only
-dependencies afterwards.
+**Install**, after the human's go-ahead: one command, one password dialog.
+
+```sh
+pkexec "$PWD/install/packages" "$USER" ~/.cache/pneu/lieer
+```
+
+Root goes through `pkexec`, not `sudo`: it opens Omarchy's password dialog on
+the desktop, which names `install/packages`, and the human authorises it
+there. An agent runs the command itself and never sees the password; `sudo`
+would wait on a terminal the agent doesn't have. Tell the human before
+running it: **exactly one dialog**, naming `install/packages`; any other
+password dialog is not from this install. The command waits until they
+answer, then installs go, notmuch, python-tqdm and lieer's dependencies,
+builds and installs lieer, and removes the build-only packages it added.
 
 If a dependency 404s, your package database is older than the mirror: the
 human decides whether to run `pkexec pacman -Syu` first. Never run `-Sy` on
@@ -211,7 +233,8 @@ The scope list (*Data Access*) can stay empty: lieer asks for its three
 scopes on the consent screen in step 5.
 
 The download is the newest `~/Downloads/client_secret_*.json`; find it
-there rather than asking the human for the path. The rest of this document
+there rather than asking the human for the path, and use that literal path
+for both of step 5's commands. The rest of this document
 calls it `<client JSON>`. The browser saves it world-readable; step 5
 copies it into place (mode 0600) and deletes the download.
 
@@ -262,8 +285,9 @@ the human's part.
   must be free. `auth` checks it first.
 - If Google says "Something went wrong", sign in from a private window with
   your password rather than the account chooser.
-- Afterwards it lists your Gmail labels as a check. That fails if you
-  allowed access from a different Google account.
+- Afterwards it checks that Gmail answers for `<address>` ("Authorized:
+  Gmail answers for …"). That fails if you allowed access from a different
+  Google account.
 - pneu never reads the token lieer stores.
 
 Every manual `gmi` run for an account goes through `pneu gmi <acct> …`,
@@ -317,7 +341,9 @@ omarchy plugin enable pneu
 pneu open
 ```
 
-`pneu open` should bring up a window titled "Inbox · Pneu".
+`pneu open` should bring up a window titled "Inbox · Pneu". The browser may
+print warnings of its own to the terminal after `pneu open` returns; they
+aren't pneu's, and its exit status is what counts.
 
 The bar widget is linked rather than copied, because Omarchy loads plugins
 from that directory and `omarchy plugin update` expects a git checkout
@@ -368,6 +394,7 @@ hours on a large mailbox: ask before deleting it.
 rm -r ~/mail/<acct>                                  # each account listed above
 rmdir --ignore-fail-on-non-empty ~/mail
 rm -r ~/.config/pneu ~/.local/state/pneu             # token, launch nonce, configs, OAuth client
+rm -rf ~/.cache/pneu                                 # lieer's AUR files and build
 ```
 
 **Packages** are the human's call, one by one: other software may use Go or
@@ -378,7 +405,6 @@ pkexec pacman -Rns --noconfirm lieer python-tqdm
 pkexec pacman -Rns --noconfirm notmuch
 rm -rf ~/.cache/go-build                             # with Go: the build cache step 2 filled
 pkexec pacman -Rns --noconfirm go
-rm -rf ~/.cache/yay/lieer                            # yay's build directory
 ```
 
 **(human)** Google keeps two things. Open each link with

@@ -61,6 +61,9 @@ scripts/rehearse shell --serve   # the same, with the browser bridge up for rehe
     against a live server, exactly as on a real machine.
   - `pacman -Q…` queries run for real, because they only read. Any other
     `pacman` command is logged.
+  - `git clone` of an AUR repo copies `testdata/aur/<name>` (lieer's real
+    AUR files, at the commit in its `COMMIT`); every other `git` is real.
+    `makepkg` is logged, and step 1's `pkexec install/packages` with it.
   - `omarchy` does in the sandbox what touches only files under HOME:
     `plugin list` lists the plugins directory (step 7 waits on it after
     the rescan), `plugin remove` unlinks, and `hook install` copies.
