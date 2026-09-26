@@ -277,9 +277,16 @@ stub() { # stub NAME BODY
 	chmod +x "$SANDBOX/stubs/$1"
 }
 logged='echo "(rehearsal) $(basename "$0") $*: logged, not run" >&2'
-for c in sudo pkexec yay omarchy omarchy-shell omarchy-launch-webapp notify-send hyprctl xdg-open loginctl; do
+for c in sudo pkexec yay omarchy-shell omarchy-launch-webapp notify-send hyprctl xdg-open loginctl; do
 	stub "$c" "$logged"
 done
+# omarchy: `plugin list` answers from the sandbox's plugins dir (INSTALL.md
+# waits on it after the rescan); everything else is logged.
+stub omarchy 'if [[ $* == "plugin list" ]]; then
+	for p in ~/.config/omarchy/plugins/*; do [[ -e $p ]] && printf "%s  disabled  third-party\n" "$(basename "$p")"; done
+	exit 0
+fi
+'"$logged"
 # pacman: queries are read-only, so they run; anything else is logged.
 stub pacman "case \${1:-} in -Q*) exec /usr/bin/pacman \"\$@\" ;; esac; $logged"
 # systemctl: the real user manager ignores the sandbox HOME and would act on
@@ -407,7 +414,7 @@ summary() {
 		"systemd-run "*) echo "  would have started a transient unit: systemd-run $args (ran in the foreground instead)" ;;
 		"journalctl "*) echo "  would have followed the journal: journalctl $args" ;;
 		"sudo "* | "pkexec "*) echo "  would have run as root: $args" ;;
-		"pacman -Q"*) ;;
+		"pacman -Q"* | "omarchy plugin list"*) ;;
 		"yay "*) echo "  would have installed from the AUR: yay $args" ;;
 		"omarchy hook install "*) echo "  would have installed an Omarchy hook: omarchy $args" ;;
 		"omarchy-shell shell rescanPlugins"*) echo "  would have made omarchy-shell rescan its plugins" ;;

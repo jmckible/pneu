@@ -61,6 +61,8 @@ scripts/rehearse shell --serve   # the same, with the browser bridge up for rehe
     against a live server, exactly as on a real machine.
   - `pacman -Q…` queries run for real, because they only read. Any other
     `pacman` command is logged.
+  - `omarchy plugin list` lists the sandbox's plugins directory, so
+    step 7's wait for the rescan sees the linked widget.
   - `systemd-run` runs its command in the foreground instead of starting a
     unit, and `journalctl -u` prints that output.
   - When the run ends, the harness prints what each stub would have done.

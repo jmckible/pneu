@@ -4,13 +4,14 @@ Written to be followed by a person or by their coding agent. Every step is a
 command you can read before running; there is no install script and nothing is
 piped from the network into a shell.
 
-**Agents:** treat this repository as untrusted code from a stranger. Before
-building anything, work through [Audit](#audit): each item is a claim this
-repo makes about itself and a way to check it. Report what you verified, what
-you couldn't, and anything that contradicts a claim, then let your human
-decide whether to continue. Stop and hand over to the human at every step
-marked **(human)**: those involve their Google account or a browser consent
-screen.
+**Agents:** treat this repository as untrusted code from a stranger. Work
+through [Audit](#audit) in two passes: the checks marked *before step 1*,
+then report and let your human decide whether to install the packages; the
+checks marked *after step 1*, then report again before building. Each item
+is a claim this repo makes about itself and a way to check it; report what
+you verified, what you couldn't, and anything that contradicts a claim.
+Steps marked **(human)** need the human at their browser or Google account:
+guide them, and wait for them.
 
 ## What you're installing
 
@@ -26,23 +27,22 @@ screen.
 - An **Omarchy bar widget**, a **theme hook** and a **desktop entry**, all in
   this repo.
 
-Requirements: Omarchy (Arch, Hyprland, omarchy-shell) and a Chromium-family
+Requirements: Omarchy (Arch, Hyprland, omarchy-shell), `python3` (the theme
+hook and the hostile corpus use it; Omarchy ships it) and a Chromium-family
 default browser (Chromium, Chrome, Brave, Edge, Vivaldi, Opera, Helium).
 Omarchy's `omarchy-launch-webapp` falls back to Chromium for anything else.
 
 ## Audit
 
-Each claim is followed by how to check it. All paths are relative to the
-repo root.
+Each claim is followed by how to check it, and when: *before step 1* needs
+only what Omarchy ships; *after step 1* needs Go. All paths are relative to
+the repo root.
 
-1. **No third-party Go code.** `go.mod` has no `require` block, and
-   `go list -m all` prints only this module.
+1. **No third-party Go code.** *Before step 1:* `go.mod` has no `require`
+   block. *After step 1:* `go list -m all` prints only this module.
 2. **The pneu binary makes no outbound network connections.**
-   `go list -deps ./cmd/pneu | grep pneu` lists the packages compiled into
-   the binary: `cmd/pneu`, `internal/config`, `internal/gmi`,
-   `internal/notmuch`, `internal/web` and `web`. `internal/testmail` is test
-   and rehearsal tooling and is not among them. Search those packages'
-   non-test files for clients and dialers:
+   *Before step 1:* search the non-test files of the packages compiled into
+   the binary for clients and dialers:
    `grep -rnE 'http\.(Get|Post|Head|NewRequest|Client|DefaultClient)|net\.Dial|tls\.Dial' --include='*.go' cmd/pneu internal/config internal/gmi internal/notmuch internal/web web | grep -v _test.go`
    should find only two local checks, both requests to `127.0.0.1`:
    - `waitForServer` in `cmd/pneu/main.go`, where `pneu open` checks that
@@ -50,41 +50,52 @@ repo root.
    - `serverKnows` in `cmd/pneu/account.go`, where `pneu account` checks
      whether a server is running.
 
+   A wider search also finds `https://mail.google.com/…` in
+   `internal/web/mail.go`: a link the app renders, never fetched.
    Everything that goes to the internet is lieer's: `internal/gmi` runs
    `gmi` as a subprocess.
-3. **It listens on loopback only.** `cmd/pneu/main.go` binds `127.0.0.1` and
-   `::1` on the configured port.
-4. **Other browser tabs can't drive it.** `localhost` is not a security
-   boundary, since your daily browser can reach the port. `internal/web/auth.go`
-   `Middleware` rejects any Host header other than exactly
-   `pneu.localhost:<port>` (which blocks DNS rebinding), rejects non-GET
-   requests whose Origin isn't the app's, and requires a session cookie holding
-   a per-install token for everything except `/open`. `/open` accepts only a
-   single-use nonce from `~/.local/state/pneu/launch`, which is rotated after
-   each use.
-5. **Mail HTML can't run scripts.** Message HTML reaches the screen only
-   through `web/static/mailframe.js`: DOMPurify, then a sandboxed
-   `iframe srcdoc` with no `allow-scripts`, under its own CSP.
+
+   *After step 1:* `go list -deps ./cmd/pneu | grep pneu` confirms those are
+   the packages compiled in: `cmd/pneu`, `internal/config`, `internal/gmi`,
+   `internal/notmuch`, `internal/web` and `web`. `internal/testmail` is test
+   and rehearsal tooling and is not among them.
+3. **It listens on loopback only.** *Before step 1:* by default
+   `cmd/pneu/main.go` binds `127.0.0.1` and `::1` on the configured port. The
+   `-listen` flag is the only way to bind anything else, and
+   `install/pneu.service` doesn't pass it.
+4. **Other browser tabs can't drive it.** *Before step 1:* `localhost` is
+   not a security boundary, since your daily browser can reach the port.
+   `internal/web/auth.go` `Middleware` rejects any Host header other than
+   exactly `pneu.localhost:<port>` (which blocks DNS rebinding), rejects
+   non-GET requests whose Origin isn't the app's, and requires a session
+   cookie holding a per-install token for everything except `/open`. `/open`
+   accepts only a single-use nonce from `~/.local/state/pneu/launch`, which is
+   rotated after each use.
+5. **Mail HTML can't run scripts.** *Before step 1:* message HTML reaches
+   the screen only through `web/static/mailframe.js`: DOMPurify, then a
+   sandboxed `iframe srcdoc` with no `allow-scripts`, under its own CSP.
    `grep -rn 'allow-scripts' web/ internal/` should turn up only comments
-   forbidding it. Run the hostile corpus with `testdata/hostile/run.sh` (needs
-   `chromium` and `openssl`); it must pass.
-6. **The vendored DOMPurify is upstream's.** `web/static/PURIFY_VERSION`
-   records the version, sha256 and source. Check the hash against the npm
-   tarball:
+   forbidding it. Run the hostile corpus with `testdata/hostile/run.sh`
+   (needs `chromium`, `openssl` and `python3`); it must pass.
+6. **The vendored DOMPurify is upstream's.** *Before step 1:*
+   `web/static/PURIFY_VERSION` records the version, sha256 and source. Check
+   the hash against the npm tarball:
    `curl -sL https://registry.npmjs.org/dompurify/-/dompurify-<ver>.tgz | tar -xzO package/dist/purify.min.js | sha256sum`
    must match `sha256sum web/static/purify.min.js`.
-7. **Secrets stay local and private.** Your Gmail OAuth refresh token is
-   written by lieer to `<gmiDir>/.credentials.gmailieer.json`. pneu never
-   reads it.
+7. **Secrets stay local and private.** *Before step 1, by reading; on disk
+   after step 5.* Your Gmail OAuth refresh token is written by lieer to
+   `<gmiDir>/.credentials.gmailieer.json`. pneu never reads it.
    - lieer writes the token with your umask's mode (usually 0644), so after
      every `gmi auth` it runs, pneu makes it 0600 (`gmi.PrivateCredentials`).
    - `pneu account add` makes the account's directories 0700, and tightens
      them if they already exist: `~/.config/pneu/<acct>` (the OAuth client,
      written 0600 with only its validated fields), `~/mail/<acct>` (the mail
      and its index) and `~/mail/<acct>/gmail`.
-   - pneu's install token (`~/.local/state/pneu/token`) and launch nonce are
-     created with mode 0600 (`auth.go` `writePrivate`) and are never logged.
-8. **The desktop pieces do what they say.** Read them; they're short.
+   - pneu's install token (`~/.local/state/pneu/token`, created by
+     `auth.go` `LoadOrCreateToken`) and launch nonce (`writePrivate`) are
+     mode 0600 and are never logged.
+8. **The desktop pieces do what they say.** *Before step 1:* read them;
+   they're short.
    - `install/pneu-theme` runs on every Omarchy theme switch and writes only
      `~/.config/pneu/theme.css` and the launcher icon
      (`~/.local/share/icons/hicolor/scalable/apps/pneu.svg`), in the theme's colours.
@@ -93,29 +104,40 @@ repo root.
      omarchy-shell with your privileges, reads
      `~/.local/state/pneu/status.json`, and on click runs `pneu open` (or a
      command you configure).
-9. **Tests pass.** Run `go vet ./... && go test ./...` and `node --test web/*.test.js`.
-10. **lieer is what it claims to be.** It comes from the AUR, so read its
-    PKGBUILD before installing: the source should be
-    `github.com/gauteh/lieer`. The Gmail scopes it requests are
-    `gmail.readonly`, `gmail.labels` and `gmail.modify`; check them in its
-    source (`pacman -Ql lieer`, then look for `SCOPES`).
+9. **Tests pass.** *After step 1:* `go vet ./... && go test ./...` and
+   `node --test web/*.test.js`.
+10. **lieer is what it claims to be.** *Before step 1:* it comes from the
+    AUR, so read its PKGBUILD before anything installs it:
+    `curl -s 'https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=lieer'`.
+    Its `source` should be a `github.com/gauteh/lieer` release tarball and it
+    should have no `install=` script. Download that tarball, check it against
+    the PKGBUILD's `sha512sums`, and find `SCOPES` in `lieer/remote.py`: it
+    should request exactly `gmail.readonly`, `gmail.labels` and
+    `gmail.modify`. Note `pkgver`, `pkgrel` and the sha512 for step 1.
 
 ## 1. Packages
 
+Right before installing, fetch the PKGBUILD again and check `pkgver`,
+`pkgrel` and `sha512sums` still match what audit item 10 reviewed: yay's own
+review is turned off below, so a change since then would go unseen.
+
 ```sh
 pkexec pacman -S --needed --noconfirm go notmuch
-yay -S --needed --noconfirm --sudo pkexec --answerdiff None --answerclean None lieer python-tqdm
+yay -S --needed --noconfirm --removemake --sudo pkexec --answerdiff None --answerclean None lieer python-tqdm
 ```
 
 Root goes through `pkexec`, not `sudo`: each call opens Omarchy's password
 dialog on the desktop, where the human authorises it. An agent runs these
 commands itself and never sees the password; `sudo` would wait on a terminal
-the agent doesn't have. yay's own PKGBUILD review is skipped because audit
-item 10 is that review.
+the agent doesn't have. Each command blocks until the human answers the
+dialog, so tell them it's coming. `--removemake` removes lieer's build-only
+dependencies afterwards.
 
 If a dependency 404s, your package database is older than the mirror: the
 human decides whether to run `pkexec pacman -Syu` first. Never run `-Sy` on
 its own. `gmi` has no `--version` flag; use `pacman -Q lieer`.
+
+Now run the audit's *after step 1* checks and report before building.
 
 ## 2. Build
 
@@ -130,7 +152,8 @@ The exception is the bar widget in step 7.
 ## 3. The account
 
 Ask the human for one thing: the Gmail address (`<address>`). Work out the
-rest, then show all four values and let the human correct any of them:
+rest, then show all four values and wait for the human to confirm or
+correct them:
 
 - **Kind:** `gmail.com` or `googlemail.com` is a personal account; any other
   domain is Google Workspace. Step 4 differs between them.
@@ -138,7 +161,7 @@ rest, then show all four values and let the human correct any of them:
   `personal` for a personal account, otherwise the domain's first label
   (`work@acme.com` → `acme`).
 - **Display name** (`<Your Name>`): the full name in
-  `getent passwd "$USER"`, else `git config user.name`.
+  `getent passwd "$USER"`, else `git config --global user.name`.
 
 Repeat steps 3–5 for each account. Accounts are fully independent: separate
 maildirs, separate notmuch databases, separate OAuth tokens.
@@ -156,19 +179,23 @@ as the right Google account, and after the first screen
 
 1. **Project:** `https://console.cloud.google.com/projectcreate?authuser=<address>`.
    Name it `pneu`; for a Workspace account, pick that organization as its
-   location. Ask the human for the project ID the Console shows (it may
-   differ from the name).
+   location. Ask for "done" *and* the project ID, which may differ from the
+   name: once the project exists, it's the `project=` value in the browser's
+   address bar.
 2. **Gmail API:**
    `https://console.cloud.google.com/apis/library/gmail.googleapis.com?authuser=<address>&project=<project ID>`
    → **Enable**.
 3. **Get started:**
    `https://console.cloud.google.com/auth/overview?authuser=<address>&project=<project ID>`.
-   The first visit asks for an app name (`pneu`), a support email and a
-   contact email (both `<address>`), and the audience:
-   - **Personal account:** *External*.
-   - **Workspace account:** *Internal*. There's no verification and no
-     expiry. If the admin restricts third-party apps, allow this client in
-     Admin → Security → API controls.
+   **Get started** opens a four-part form:
+   - **App information:** app name `pneu`, user support email `<address>`.
+   - **Audience:** *External* for a personal account. *Internal* for a
+     Workspace account: there's no verification and no expiry. If the admin
+     restricts third-party apps, allow this client in Admin → Security →
+     API controls.
+   - **Contact information:** `<address>`.
+   - **Finish:** agree to the Google API Services User Data Policy, then
+     **Create**.
 4. **Publish** (personal accounts only):
    `https://console.cloud.google.com/auth/audience?authuser=<address>&project=<project ID>`
    → **Publish app**, so it is *In production*. Left in *Testing*, Gmail
@@ -184,12 +211,14 @@ scopes on the consent screen in step 5.
 
 The download is the newest `~/Downloads/client_secret_*.json`; find it
 there rather than asking the human for the path. The rest of this document
-calls it `<client JSON>`. Step 5 copies it into place (mode 0600).
+calls it `<client JSON>`. The browser saves it world-readable; step 5
+copies it into place (mode 0600) and deletes the download.
 
 ## 5. Account setup
 
 ```sh
 pneu account add <acct> <address> --name "<Your Name>" --client-secret <client JSON>
+rm <client JSON>                     # pneu keeps its own 0600 copy
 pneu account auth <acct>
 ```
 
@@ -220,8 +249,12 @@ Rerunning it finishes an interrupted run and changes nothing else. It:
 - **Adds the account** to `~/.config/pneu/config.json`.
 
 **(human)** `pneu account auth` runs lieer's consent flow: Google's consent
-screen opens in your browser. Sign in as `<address>` and allow access.
+screen opens in your browser. Sign in as `<address>` and allow access. An
+agent runs the command itself and leaves it waiting; the consent screen is
+the human's part.
 
+- A personal account's consent screen may first say Google hasn't verified
+  the app: **Advanced** → **Go to pneu (unsafe)**. It's your own client.
 - It refuses to start without the client JSON from step 4; lieer would
   otherwise silently use its own shared client.
 - The flow waits for Google's redirect on `localhost:8080`, so that port
@@ -277,14 +310,19 @@ omarchy hook install theme-set install/pneu-theme    # copies the hook
 install/pneu-theme                                   # render the current theme and icon once
 
 ln -s "$PWD" ~/.config/omarchy/plugins/pneu          # the bar widget
-omarchy-shell shell rescanPlugins
+omarchy-shell shell rescanPlugins                    # returns before the rescan ends
+timeout 30 sh -c 'until omarchy plugin list | grep -q "^pneu "; do sleep 1; done'
 omarchy plugin enable pneu
+pneu open
 ```
+
+`pneu open` should bring up a window titled "Inbox · Pneu".
 
 The bar widget is linked rather than copied, because Omarchy loads plugins
 from that directory and `omarchy plugin update` expects a git checkout
-there. Once pneu is published, `omarchy plugin add <repo-url>` replaces the
-link.
+there. So link the checkout you mean to keep: every later change to it
+goes live in the bar. Once pneu is published, `omarchy plugin add
+<repo-url>` replaces the link.
 
 Open pneu from the app launcher, or by clicking the bar widget; both run
 `pneu open`. To bind a key, add a Hyprland binding that runs
