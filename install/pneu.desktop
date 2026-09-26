@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Pneu
+Comment=Gmail, read locally
+Exec=pneu open
+Icon=internet-mail
+Terminal=false
+Categories=Network;Email;
+StartupNotify=true

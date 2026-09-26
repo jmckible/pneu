@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>colors only by stripped url</title>
+<style>
+body { background: url(https://mltrk.io/41-sheet-body.png); }
+.hero { background-image: url(http://127.0.0.1:1/41-sheet-hero.png); }
+p { font-weight: bold; }
+</style>
+</head>
+<body>
+<p class="canary">41 stripped backgrounds: every background here names a receipt tracker or loopback, the filter drops each one, and what's left declares no colors, so this renders themed.</p>
+<div class="hero" style="background:url(https://mltrk.io/41-inline.png);height:8px"></div>
+<table><tr><td bgcolor="url(https://mltrk.io/41-td.png)">cell</td></tr></table>
+<div class="last">last line</div>
+</body>
+</html>

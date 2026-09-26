@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>cid image</title>
+</head>
+<body>
+<p class="canary">15 cid: the green square below MUST load from the message's own part.</p>
+<img src="cid:logo@hostile.test" width="64" height="64" alt="inline logo (must load)">
+<img src="CID:logo@hostile.test" width="32" height="32" alt="uppercase scheme (should load, same part)">
+<img src="cid:missing@hostile.test" width="32" height="32" alt="missing cid: broken image, no other request">
+<img src="http://tracker.invalid/15-pixel.gif" width="1" height="1" alt="">
+</body>
+</html>

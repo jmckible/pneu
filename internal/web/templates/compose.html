@@ -1,0 +1,30 @@
+{{define "content"}}<main class="compose">
+{{- if .Err}}
+<p class="error" role="alert">{{.Err}}</p>
+{{- end}}
+<form method="post" action="/send" data-draft-key="{{.DraftKey}}">
+<div class="field from"><label for="compose-account">From</label>
+<select id="compose-account" name="account"{{if .Locked}} disabled{{end}}>
+{{- range .Accounts}}
+<option value="{{.Name}}"{{if .Selected}} selected{{end}}{{if .ReadOnly}} disabled{{end}}>{{.Label}}{{if .ReadOnly}} (still downloading){{end}}</option>
+{{- end}}
+</select>
+{{- if .Locked}}
+<input type="hidden" name="account" value="{{.Account}}">
+{{- end}}
+</div>
+<div class="field to"><label for="compose-to">To</label><input id="compose-to" name="to" type="text" value="{{.To}}" autocomplete="off" data-addresses="/addresses"></div>
+<button type="button" class="ccbcc-toggle" hidden>Cc/Bcc</button>
+<div class="field cc"><label for="compose-cc">Cc</label><input id="compose-cc" name="cc" type="text" value="{{.Cc}}" autocomplete="off" data-addresses="/addresses"></div>
+<div class="field bcc"><label for="compose-bcc">Bcc</label><input id="compose-bcc" name="bcc" type="text" value="{{.Bcc}}" autocomplete="off" data-addresses="/addresses"></div>
+<div class="field subject"><label for="compose-subject">Subject</label><input id="compose-subject" name="subject" type="text" value="{{.Subject}}"></div>
+{{/* The parser drops one newline right after <textarea>; this one, so the body's own leading blank lines survive. */ -}}
+<textarea name="body" rows="20" spellcheck="true"{{if .QuoteFrom}} data-quote-from="{{.QuoteFrom}}"{{end}}>
+{{.Body}}</textarea>
+<input type="hidden" name="in_reply_to" value="{{.InReplyTo}}">
+<input type="hidden" name="references" value="{{.References}}">
+<input type="hidden" name="message_id" value="{{.MessageID}}">
+<button type="submit" class="send">Send</button>
+</form>
+</main>
+{{end}}

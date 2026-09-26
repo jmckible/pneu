@@ -1,0 +1,17 @@
+Delivered-To: robin@northwind.example
+From: Tessa Lund <notifications@codehost.example>
+Reply-To: northwind/app <reply+AB12CD34@reply.codehost.example>
+To: northwind/app <app@noreply.codehost.example>
+Cc: Review requested <review_requested@noreply.codehost.example>
+Subject: [northwind/app] SSO: SAML metadata upload (PR #4821)
+Date: Tue, 22 Sep 2026 17:03:41 -0700
+Message-ID: <northwind/app/pull/4821@codehost.example>
+List-ID: northwind/app <app.northwind.codehost.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+@tessa requested your review on: northwind/app#4821 SSO: SAML metadata upload.
+
+-- 
+View it on CodeHost: https://codehost.example/northwind/app/pull/4821

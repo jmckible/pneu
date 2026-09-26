@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>images by ip</title>
+</head>
+<body>
+<p class="canary">37 images by IP literal: this paragraph must render; no IP-literal or localhost image is requested, even after click-to-load.</p>
+<img src="http://10.0.0.1/37-lan" width="8" height="8" alt="ip http lan">
+<img src="https://10.0.0.1/37-lan-https" width="8" height="8" alt="ip https lan">
+<img src="https://169.254.169.254/37-metadata" width="8" height="8" alt="ip link-local">
+<img src="https://[fe80::1]/37-v6" width="8" height="8" alt="ip v6">
+<img src="https://localhost:1/37-localhost" width="8" height="8" alt="ip localhost">
+<img src="https://LOCALHOST./37-localhost-dot" width="8" height="8" alt="ip localhost trailing dot">
+<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR42mPQWBCFFTEMLQkAR+xIgR845kcAAAAASUVORK5CYII=" srcset="https://127.0.0.1:1/37-srcset 2x" width="8" height="8" alt="srcset">
+<video poster="https://192.168.1.1/37-poster" width="8" height="8"></video>
+</body>
+</html>

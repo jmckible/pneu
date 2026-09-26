@@ -1,0 +1,10 @@
+Delivered-To: robin@northwind.example
+From: FormStack Trials <trials@formstack-trials.example>
+To: robin@northwind.example
+Subject: Your free trial ends in 3 days
+Date: Sun, 30 Aug 2026 15:00:00 +0000
+Message-ID: <trial-ending-5521@formstack-trials.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Upgrade now to keep your forms.

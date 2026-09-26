@@ -1,0 +1,92 @@
+Delivered-To: robin@hale.example
+From: Priya Natarajan <priya.n@fastmail.example>
+To: Robin Hale <robin@hale.example>
+Subject: Photos from the trip + the itinerary
+Date: Wed, 02 Sep 2026 20:31:15 -0700
+Message-ID: <5f2e9a10-trip-photos@fastmail.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="=_mixed_trip"
+
+This is a multi-part message in MIME format.
+
+--=_mixed_trip
+Content-Type: multipart/related; boundary="=_related_trip"; type="multipart/alternative"
+
+--=_related_trip
+Content-Type: multipart/alternative; boundary="=_alt_trip"
+
+--=_alt_trip
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Two favorites from the weekend, and the itinerary for October is attached.
+
+[red.png]
+[blue.png]
+
+Packing list is in the txt so you can paste it into your notes.
+
+P.
+
+--=_alt_trip
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<div dir=3D"ltr"><p>Two favorites from the weekend, and the itinerary for O=
+ctober is attached.</p>
+<p><img src=3D"cid:ii_red_01@fastmail.example" width=3D"200" alt=3D"red.png=
+"><br><img src=3D"cid:ii_blue_02@fastmail.example" width=3D"200" alt=3D"blu=
+e.png"></p>
+<p>Packing list is in the txt so you can paste it into your notes.</p><p>P.=
+</p></div>
+
+--=_alt_trip--
+
+--=_related_trip
+Content-Type: image/png; name="red.png"
+Content-Disposition: inline; filename="red.png"
+Content-Transfer-Encoding: base64
+Content-ID: <ii_red_01@fastmail.example>
+
+iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR42mM4oaEBRAwQCgAhLgRh
+9uHCTQAAAABJRU5ErkJggg==
+
+--=_related_trip
+Content-Type: image/png; name="blue.png"
+Content-Disposition: inline; filename="blue.png"
+Content-Transfer-Encoding: base64
+Content-ID: <ii_blue_02@fastmail.example>
+
+iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR42mPQCDgBRAwQCgAgjgUB
+cBPFLQAAAABJRU5ErkJggg==
+
+--=_related_trip--
+
+--=_mixed_trip
+Content-Type: application/pdf; name="itinerary.pdf"
+Content-Disposition: attachment; filename="itinerary.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2Jq
+CjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2Jq
+CjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAzMDAg
+MTAwXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgPj4g
+Pj4gPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA1NyA+PgpzdHJlYW0KQlQgL0YxIDEyIFRm
+IDIwIDUwIFRkIChMaXNib24gaXRpbmVyYXJ5IC0gT2N0IDIwMjYpIFRqIEVUCmVuZHN0cmVhbQpl
+bmRvYmoKNSAwIG9iago8PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jhc2VGb250IC9I
+ZWx2ZXRpY2EgPj4KZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAw
+OSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAw
+MDI0MSAwMDAwMCBuIAowMDAwMDAwMzQ4IDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgNiAvUm9v
+dCAxIDAgUiA+PgpzdGFydHhyZWYKNDE4CiUlRU9GCg==
+
+--=_mixed_trip
+Content-Type: text/plain; charset=utf-8; name="packing-list.txt"
+Content-Disposition: attachment; filename="packing-list.txt"
+Content-Transfer-Encoding: 7bit
+
+- passport
+- EU plug adapter
+- rain shell
+- walking shoes
+
+--=_mixed_trip--

@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>iframe object embed</title>
+</head>
+<body>
+<p class="canary">05 embedded browsing contexts: this paragraph must render.</p>
+<iframe src="http://tracker.invalid/05-iframe.html"></iframe>
+<iframe srcdoc="&lt;script&gt;top.__pwned='05-srcdoc'&lt;/script&gt;"></iframe>
+<iframe src="javascript:top.__pwned='05-iframe-js'"></iframe>
+<object data="http://tracker.invalid/05-object.swf" type="application/x-shockwave-flash"></object>
+<object data="data:text/html;base64,PHNjcmlwdD50b3AuX19wd25lZD0nREFUQSc8L3NjcmlwdD4="></object>
+<embed src="http://tracker.invalid/05-embed.swf">
+<portal src="http://tracker.invalid/05-portal.html"></portal>
+<frameset><frame src="http://tracker.invalid/05-frame.html"></frameset>
+</body>
+</html>

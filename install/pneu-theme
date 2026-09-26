@@ -1,0 +1,92 @@
+#!/bin/bash
+
+# theme-set.d hook: repaint pneu from the active Omarchy theme.
+#
+# pneu serves ~/.config/pneu/theme.css after its own stylesheet, so a bare
+# :root block here overrides both its light and dark defaults. No @media: the
+# desktop's palette is the answer whatever the browser's prefers-color-scheme says.
+# Mail bodies take these colors too unless the mail declares its own (see pneu AGENTS.md).
+#
+# Contract: the hook supplies the mode and the four ends (bg, fg, accent,
+# selection); pneu's app.css derives every intermediate tone (muted, border,
+# unread) from bg/fg with color-mix, so no theme's palette can dim the UI.
+# Installed as ~/.config/omarchy/hooks/theme-set.d/pneu-theme (by `omarchy
+# hook install theme-set`, which keeps the basename) and run once by hand at
+# install (INSTALL.md). The server watches this file and pushes a theme event,
+# so open windows repaint without a reload.
+
+set -euo pipefail
+
+OUT="$HOME/.config/pneu/theme.css"
+COLORS="$HOME/.local/state/omarchy/current/theme/colors.toml"
+
+[[ -f "$COLORS" ]] || exit 0
+mkdir -p "$(dirname "$OUT")"
+
+# Themes predating Omarchy's semantic rename lack selection, and some ship it
+# equal to bg or fg, so a missing or collapsed selection is blended from
+# background toward foreground.
+CSS="$(python3 - "$COLORS" <<'PY'
+import re, sys
+
+palette, mode = {}, None
+for line in open(sys.argv[1], encoding="utf-8"):
+    m = re.match(r'\s*([A-Za-z_]\w*)\s*=\s*"(#[0-9A-Fa-f]{6})"\s*$', line)
+    if m:
+        palette[m.group(1).lower()] = m.group(2).lower()
+    m = re.match(r'\s*mode\s*=\s*"(dark|light)"\s*$', line)
+    if m:
+        mode = m.group(1)
+
+def token(*names):
+    for n in names:
+        if n in palette:
+            return palette[n]
+    return None
+
+background = token("background", "bg") or "#000000"
+foreground = token("foreground", "fg") or "#ffffff"
+
+def channels(h):
+    return tuple(int(h[i:i + 2], 16) for i in (1, 3, 5))
+
+def blend(a, b, pct):
+    ca, cb = channels(a), channels(b)
+    return "#%02x%02x%02x" % tuple(
+        round(ca[i] + (cb[i] - ca[i]) * pct) for i in range(3)
+    )
+
+def luminance(h):
+    def lin(c):
+        c /= 255
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (lin(c) for c in channels(h))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+taken = {background, foreground}
+
+def rung(candidate, pct):
+    if candidate is None or candidate in taken:
+        candidate = blend(background, foreground, pct)
+    taken.add(candidate)
+    return candidate
+
+selection = rung(token("selection"), 0.20)
+accent = token("accent", "blue") or foreground
+
+if mode is None:
+    mode = "dark" if luminance(background) < 0.5 else "light"
+
+print(
+    f":root{{color-scheme:{mode};--bg:{background};--fg:{foreground};"
+    f"--accent:{accent};--selection:{selection}}}"
+)
+PY
+)"
+
+TMP="$(mktemp "$OUT.XXXXXX")"
+trap 'rm -f "$TMP"' EXIT
+printf '%s\n' "$CSS" > "$TMP"
+chmod 644 "$TMP"
+mv "$TMP" "$OUT"
+trap - EXIT

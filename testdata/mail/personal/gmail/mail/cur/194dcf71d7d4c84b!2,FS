@@ -1,0 +1,20 @@
+Delivered-To: robin@hale.example
+From: Harbor Air Reservations <reservations@harborair.example>
+To: ROBIN HALE <robin@hale.example>
+Subject: Your trip to Lisbon: confirmation QK7P2M
+Date: Thu, 20 Aug 2026 21:05:44 +0000
+Message-ID: <QK7P2M.20260820210544@res.harborair.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+CONFIRMATION QK7P2M
+
+Passenger: HALE/ROBIN
+
+  SEA -> LIS   Sat 24 Oct 2026  17:35 - 13:20+1   HA 212
+  LIS -> SEA   Sun 01 Nov 2026  11:05 - 15:50     HA 213
+
+Seats 23A / 24A. One checked bag included.
+
+Manage your booking: https://harborair.example/manage/QK7P2M

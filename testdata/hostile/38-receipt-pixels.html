@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>receipt pixels</title>
+<style>.css-block { background: url('https://t.strk07.email/38-css-block.gif'); height: 8px; } .canary { color: rgb(120, 40, 140); }</style>
+</head>
+<body>
+<p class="canary">38 receipt pixels: rendered with remote images on; no pixel is requested, the ordinary remote images load.</p>
+<!-- Invisible by shape, on a host no list names: the heuristic alone must drop them. -->
+<img src="https://tracker.invalid/38-attr.gif" width="1" height="1" alt="">
+<img src="https://tracker.invalid/38-attr-px.gif" width="1px" height="2" alt="">
+<img src="https://tracker.invalid/38-attr-one.gif" width="1" alt="">
+<img src="https://tracker.invalid/38-attr-zero.gif" width="0" height="0" alt="">
+<img src="https://tracker.invalid/38-style.gif" style="width:1px;height:1px" alt="">
+<img src="https://tracker.invalid/38-style-over.gif" style="width: 2px; height: 2px" width="600" height="20" alt="">
+<img src="https://tracker.invalid/38-display-none.gif" style="display:none" width="20" height="20" alt="">
+<div style="display:none"><div><img src="https://tracker.invalid/38-wrapped.gif" width="20" height="20" alt=""></div></div>
+<img src="https://tracker.invalid/38-opacity.gif" style="opacity:0" width="20" height="20" alt="">
+<img src="https://tracker.invalid/38-visibility.gif" style="visibility:hidden" width="20" height="20" alt="">
+<div style="max-height:0;overflow:hidden"><img src="https://tracker.invalid/38-max-height.gif" width="20" height="20" alt=""></div>
+<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" srcset="https://tracker.invalid/38-srcset-tiny.gif 2x" width="1" height="1" alt="">
+<!-- Visible sizes on receipt-tracker hosts: the host list alone must drop them. -->
+<img src="https://mltrk.io/pixel/38-mailtrack" width="20" height="20" alt="">
+<img src="https://R.SUPERHUMAN.COM./38-superhuman.png" width="20" height="20" alt="">
+<img src="https://x.bl-1.com/38-bananatag.gif" width="20" height="20" alt="">
+<img src="//t.yesware.com/t/38-yesware.gif" width="20" height="20" alt="">
+<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR42mPQWBCFFTEMLQkAR+xIgR845kcAAAAASUVORK5CYII=" srcset="https://track.mixmax.com/38-srcset.png 2x" width="32" height="32" alt="srcset">
+<video poster="https://gmtrack.net/38-poster.png" width="10" height="10"></video>
+<div style="background-image:url(https://t.sidekickopen03.com/38-css-attr.gif);height:8px"></div>
+<div class="css-block"></div>
+<!-- Must stay: data: at 1x1, and ordinary remote images (https server, remote.test). -->
+<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" width="1" height="1" alt="data-pixel">
+<img src="https://remote.test/testdata/hostile/harness-pixel.svg" width="8" height="8" alt="remote">
+<img src="https://remote.test/testdata/hostile/harness-pixel.svg" width="600" height="1" alt="remote-divider">
+<img src="https://remote.test/testdata/hostile/harness-pixel.svg" style="width: 600px; height: 2px" alt="remote-divider-css">
+<div style="display:block;opacity:1"><img src="https://remote.test/testdata/hostile/harness-pixel.svg" width="4" height="4" alt="remote-4px"></div>
+</body>
+</html>

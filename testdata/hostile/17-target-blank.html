@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>link targets</title>
+</head>
+<body>
+<p class="canary">17 links: this paragraph must render.</p>
+<ul>
+<li><a href="https://example.com/article">plain https link: MUST open in a new browser tab</a></li>
+<li><a href="https://example.com/top" target="_top">target=_top: must not navigate the app window</a></li>
+<li><a href="https://example.com/parent" target="_parent">target=_parent: must not navigate the app window</a></li>
+<li><a href="https://example.com/self" target="_self">target=_self: must not navigate the frame</a></li>
+<li><a href="https://example.com/named" target="pneu">named target: opens a new tab, never an existing window</a></li>
+<li><a href="#section2">in-page anchor</a></li>
+</ul>
+<h2 id="section2">Section 2</h2>
+</body>
+</html>

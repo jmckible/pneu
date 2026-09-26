@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html style="background-image:url(https://mltrk.io/39-root-style), url(https://127.0.0.1:1/39-root-loopback); --root: url('https://tracker.invalid/39-root-custom')" background="https://t.yesware.com/39-root-background">
+<head>
+<meta charset="utf-8">
+<title>root styles and custom properties</title>
+<style>
+:root { --ink: rgb(40, 90, 160); }
+.canary { color: var(--ink); }
+.a { --beacon: image-set('https://tracker.invalid/39-style-image-set' 1x); background-image: var(--beacon); height: 8px; }
+.b { --beacon: url('https://tracker.invalid/39-style-single'); background-image: var(--beacon); height: 8px; }
+.c { --beacon: \75 rl(https://tracker.invalid/39-style-escaped); background-image: var(--beacon); height: 8px; }
+@property --registered { syntax: "\3c image>"; inherits: false; initial-value: url("https://mltrk.io/39-property"); }
+@media screen { @property --nested { syntax: "\3c image>"; inherits: false; initial-value: url("https://mltrk.io/39-property-nested"); } }
+.e { background-image: var(--registered); height: 8px; }
+.f { background-image: var(--nested); height: 8px; }
+.g { background-image: var(--missing, u\72l("https://mltrk.io/39-style-fallback")); height: 8px; }
+.h { background-image: var(--missing, \69mage-set("https://mltrk.io/39-style-fallback-image-set" 1x)); height: 8px; }
+.i { background: var(--missing, url("https://mltrk.io/39-style-shorthand")); height: 8px; }
+@keyframes k39 { from { background: var(--missing, url("https://127.0.0.1:1/39-keyframes-shorthand")); } to { color: red; } }
+.j { animation: k39 1s infinite; height: 8px; }
+.mk { marker: var(--m, url("https://mltrk.io/39-style-marker.svg#m")); marker-mid: none; }
+.ov { background: var(--m, url("https://mltrk.io/39-style-override")); background-color: rgb(1, 2, 3); height: 8px; }
+.d { background-image: image-set('https://127.0.0.1:1/39-style-loopback-single' 1x); height: 8px; }
+</style>
+</head>
+<body>
+<p class="canary">39 root styles and custom properties: this paragraph must be blue (a plain custom property survives); nothing on tracker.invalid or loopback is requested.</p>
+<div style="--beacon: image-set('https://tracker.invalid/39-attr-image-set' 1x); background-image: var(--beacon); height: 8px">a</div>
+<div style="--beacon: u\72l(https://tracker.invalid/39-attr-escaped); background-image: var(--beacon); height: 8px">b</div>
+<div style="background-image: image-set('https://127.0.0.1:1/39-attr-loopback-single' 1x); height: 8px">c</div>
+<div style="background-image: var(--missing, u\72l('https://mltrk.io/39-attr-fallback')); height: 8px">d</div>
+<div style="color: rgb(0, 0, 0); background: var(--m, url(https://mltrk.io/39-attr-shorthand)); height: 8px">i</div>
+<div style="list-style: var(--m, url(https://127.0.0.1:1/39-attr-list-style))"><li>j</li></div>
+<svg width="100" height="30"><path class="mk" d="M0 10 L50 10 L90 10" stroke="black"/><path style="marker: var(--m, url(https://127.0.0.1:1/39-attr-marker.svg#m)); marker-mid: none" d="M0 20 L50 20 L90 20" stroke="black"/></svg>
+<div class="ov">ov</div>
+<div class="i">i</div><div class="j">j</div>
+<div class="e">e</div><div class="f">f</div><div class="g">g</div><div class="h">h</div>
+<div class="a">a</div><div class="b">b</div><div class="c">c</div><div class="d">d</div>
+</body>
+</html>

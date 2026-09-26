@@ -1,0 +1,58 @@
+Delivered-To: robin@hale.example
+From: Dana Whitfield <dana@whitfield-property.example>
+To: Robin Hale <robin@hale.example>
+Subject: Fwd: Signed lease addendum
+Date: Fri, 14 Aug 2026 09:48:20 -0700
+Message-ID: <DW-20260814094820-fwd@whitfield-property.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outer-fwd-boundary"
+
+--outer-fwd-boundary
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Robin, forwarding the countersigned addendum from the owner for your records.
+Nothing else needed from you.
+
+Dana
+
+--outer-fwd-boundary
+Content-Type: message/rfc822
+Content-Disposition: inline
+
+From: Graham Ellis <graham.ellis@example.org>
+To: Dana Whitfield <dana@whitfield-property.example>
+Subject: Signed lease addendum
+Date: Thu, 13 Aug 2026 17:02:11 -0400
+Message-ID: <GE-addendum-signed@example.org>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="inner-fwd-boundary"
+
+--inner-fwd-boundary
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Signed and attached. Thanks for turning this around quickly.
+
+Graham
+
+--inner-fwd-boundary
+Content-Type: application/pdf; name="addendum-signed.pdf"
+Content-Disposition: attachment; filename="addendum-signed.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2Jq
+CjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2Jq
+CjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAzMDAg
+MTAwXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgPj4g
+Pj4gPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA1MyA+PgpzdHJlYW0KQlQgL0YxIDEyIFRm
+IDIwIDUwIFRkIChMZWFzZSBhZGRlbmR1bSAtIHNpZ25lZCkgVGogRVQKZW5kc3RyZWFtCmVuZG9i
+ago1IDAgb2JqCjw8IC9UeXBlIC9Gb250IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQgL0hlbHZl
+dGljYSA+PgplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAw
+MDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQx
+IDAwMDAwIG4gCjAwMDAwMDAzNDQgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEg
+MCBSID4+CnN0YXJ0eHJlZgo0MTQKJSVFT0YK
+
+--inner-fwd-boundary--
+
+--outer-fwd-boundary--

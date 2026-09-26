@@ -1,0 +1,16 @@
+Delivered-To: robin@northwind.example
+From: Tessa Lund <tessa@northwind.example>
+To: Nadia Holt <nholt@harborview.example>
+Cc: help@northwind.example, Robin Hale <robin@northwind.example>
+Subject: Re: Escalation: exports stuck at 99% since this morning
+Date: Wed, 26 Aug 2026 06:02:18 -0700
+Message-ID: <HVC-esc-4471-2@northwind.example>
+In-Reply-To: <HVC-esc-4471-1@harborview.example>
+References: <HVC-esc-4471-1@harborview.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="us-ascii"
+
+Nadia, all three finished overnight after we cleared a stuck worker. Links
+are live. Robin, flagging for the postmortem.
+
+Tessa

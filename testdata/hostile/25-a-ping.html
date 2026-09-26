@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>a ping</title>
+</head>
+<body>
+<p class="canary">25 ping: the link must still open in a new tab; clicking must not POST to tracker.invalid.</p>
+<a href="https://example.com/offer" ping="http://tracker.invalid/25-ping">link with ping</a>
+<map name="pm"><area shape="rect" coords="0,0,40,40" href="https://example.com/area" ping="http://tracker.invalid/25-area-ping"></map>
+<a href="https://example.com/" attributionsrc="http://tracker.invalid/25-attributionsrc">attributionsrc</a>
+</body>
+</html>

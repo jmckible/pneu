@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>css url in style attribute</title>
+</head>
+<body>
+<p class="canary" style="color:#0a5c36;font-weight:bold;padding:8px;border:2px solid #0a5c36">10 style attribute: this box must be green, bold, bordered (inline styles survive).</p>
+<div style="background:url(http://tracker.invalid/10-background.png);height:20px">background shorthand</div>
+<div style="background-image:url('http://tracker.invalid/10-background-image.png');height:20px">background-image</div>
+<ul style="list-style-image:url(&quot;http://tracker.invalid/10-list.png&quot;)"><li>list-style-image</li></ul>
+<div style="cursor:url(http://tracker.invalid/10-cursor.cur),auto">cursor</div>
+<div style="border:10px solid;border-image:url(http://tracker.invalid/10-border.png) 30">border-image</div>
+<div style="background:\75 rl(http://tracker.invalid/10-escaped.png);height:20px">css-escaped url</div>
+<div style="background-image:image-set('http://tracker.invalid/10-image-set.png' 1x);height:20px">image-set</div>
+</body>
+</html>

@@ -1,0 +1,20 @@
+Delivered-To: robin@northwind.example
+From: Tessa Lund <tessa@northwind.example>
+To: staff@northwind.example
+Subject: Notes from the offsite
+Date: Fri, 29 May 2026 18:20:00 -0700
+Message-ID: <tl-offsite-notes-2026@northwind.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8; format=flowed; delsp=yes
+Content-Transfer-Encoding: 7bit
+
+Quick notes from the offsite while they're fresh. The big decision was to  
+treat enterprise SSO as a Q3 commitment rather than a stretch goal, which  
+means pulling one engineer off templates for six weeks.
+
+Other items:
+- hiring plan stays at two backend roles
+- customer advisory board meets again in October
+- we're retiring the legacy embed player by year end
+
+> Owen: "if it isn't on the roadmap by July it isn't happening in Q3"

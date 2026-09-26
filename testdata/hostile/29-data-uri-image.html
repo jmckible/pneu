@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>data uri image</title>
+</head>
+<body>
+<p class="canary">29 data: images: the green and blue squares MUST render (data: is in img-src).</p>
+<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR42mPQWBCFFTEMLQkAR+xIgR845kcAAAAASUVORK5CYII=" width="32" height="32" alt="data: png (must render)">
+<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiI+PHNjcmlwdD50b3AuX19wd25lZD0iMjktc3ZnLWltZyI8L3NjcmlwdD48cmVjdCB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIGZpbGw9IiMyYTRiZDciLz48L3N2Zz4=" width="32" height="32" alt="data: svg with script (renders, script inert)">
+<a href="data:text/html;base64,PHNjcmlwdD50b3AuX19wd25lZD0nREFUQSc8L3NjcmlwdD4=">data:text/html link: must not navigate</a>
+</body>
+</html>

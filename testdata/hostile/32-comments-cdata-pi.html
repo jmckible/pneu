@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>comments cdata pi</title>
+</head>
+<body>
+<p class="canary">32 comments / CDATA / processing instructions: this paragraph must render.</p>
+<!--><img src=x onerror=top.__pwned='32-short-comment'>-->
+<!--<img src="--><img src=x onerror=top.__pwned='32-comment-in-attr'>">
+<svg><![CDATA[><img src=x onerror=top.__pwned='32-cdata'>]]></svg>
+<?xml-stylesheet href="http://tracker.invalid/32-pi.css"?><?x ><img src=x onerror=top.__pwned='32-pi'>?>
+<svg><title><![CDATA[</title><img src=x onerror=top.__pwned='32-svg-title-cdata'>]]></title></svg>
+</body>
+</html>

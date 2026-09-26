@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>template</title>
+</head>
+<body>
+<p class="canary">22 template: this paragraph must render.</p>
+<template><script>top.__pwned='22-template-script'</script><img src=x onerror=top.__pwned='22-template-img'></template>
+<template><style>@import url(http://tracker.invalid/22-template-import.css);</style></template>
+<div><template shadowrootmode="open"><img src=x onerror=top.__pwned='22-declarative-shadow'><style>@import url(http://tracker.invalid/22-shadow.css);</style><slot></slot></template>light DOM text</div>
+<select><template><img src=x onerror=top.__pwned='22-select-template'></template></select>
+</body>
+</html>

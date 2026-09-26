@@ -1,0 +1,36 @@
+Delivered-To: robin@hale.example
+From: Acme Outfitters <orders@acme-outfitters.example>
+To: robin@hale.example
+Subject: Your Acme Outfitters order #A-20418 has shipped
+Date: Mon, 03 Aug 2026 11:22:09 +0000
+Message-ID: <20260803112209.9f1c2a@mta.acme-outfitters.example>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="b1_acme_20418"
+
+--b1_acme_20418
+Content-Type: text/plain; charset=us-ascii
+Content-Transfer-Encoding: 7bit
+
+Your order #A-20418 has shipped.
+
+Merino crew, charcoal, M    $89.00
+Trail socks (3-pack)        $24.00
+Total                       $113.00
+
+Track: https://acme-outfitters.example/track/A-20418
+
+--b1_acme_20418
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+PGh0bWw+PGhlYWQ+PHN0eWxlPi50b3RhbHtmb250LXdlaWdodDpib2xkfTwvc3R5bGU+PC9oZWFk
+Pjxib2R5IHN0eWxlPSJmb250LWZhbWlseTpIZWx2ZXRpY2EsQXJpYWwsc2Fucy1zZXJpZiI+Cjxo
+Mj5Zb3VyIG9yZGVyIGhhcyBzaGlwcGVkPC9oMj4KPHA+T3JkZXIgPGI+I0EtMjA0MTg8L2I+IGxl
+ZnQgb3VyIHdhcmVob3VzZSBvbiBBdWd1c3QgMy48L3A+Cjx0YWJsZT48dHI+PHRkPk1lcmlubyBj
+cmV3LCBjaGFyY29hbCwgTTwvdGQ+PHRkPiQ4OS4wMDwvdGQ+PC90cj48dHI+PHRkPlRyYWlsIHNv
+Y2tzICgzLXBhY2spPC90ZD48dGQ+JDI0LjAwPC90ZD48L3RyPjx0ciBjbGFzcz0idG90YWwiPjx0
+ZD5Ub3RhbDwvdGQ+PHRkPiQxMTMuMDA8L3RkPjwvdHI+PC90YWJsZT4KPHA+PGEgaHJlZj0iaHR0
+cHM6Ly9hY21lLW91dGZpdHRlcnMuZXhhbXBsZS90cmFjay9BLTIwNDE4Ij5UcmFjayB5b3VyIHBh
+Y2thZ2U8L2E+PC9wPgo8L2JvZHk+PC9odG1sPgo=
+
+--b1_acme_20418--

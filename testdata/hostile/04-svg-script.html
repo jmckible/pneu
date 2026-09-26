@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>svg script</title>
+</head>
+<body>
+<p class="canary">04 svg: this paragraph and the green rectangle must render.</p>
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40"><script>top.__pwned='04-svg-script'</script><rect width="120" height="40" fill="#2a9d5a"/></svg>
+<svg onload="top.__pwned='04-svg-onload'" width="10" height="10"></svg>
+<svg width="200" height="30"><a xlink:href="javascript:top.__pwned='04-xlink-href'"><text x="4" y="20">xlink:href link</text></a></svg>
+<svg width="200" height="30"><a><animate attributeName="href" values="javascript:top.__pwned='04-animate-href'"/><text x="4" y="20">animated href</text></a></svg>
+<svg width="200" height="30"><set attributeName="onmouseover" to="top.__pwned='04-set-handler'"/><text x="4" y="20">set handler</text></svg>
+<svg width="10" height="10"><use href="http://tracker.invalid/04-use.svg#x"/></svg>
+<svg width="10" height="10"><image href="http://tracker.invalid/04-image.png" width="10" height="10"/></svg>
+<svg width="200" height="40"><foreignObject width="200" height="40"><img src="x" onerror="top.__pwned='04-foreignobject'"></foreignObject></svg>
+</body>
+</html>

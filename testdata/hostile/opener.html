@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>opener probe</title>
+</head>
+<body>
+<!-- Harness-only: the page a message link opens. It is a top-level window
+     the harness can't see under --dump-dom, so it reports through
+     localStorage (same origin, same profile) under the case id in its
+     fragment. With an opener it also tries reverse tabnabbing: navigating the
+     window that opened it, which is the message frame. -->
+<script>
+(function () {
+  var r = { opener: window.opener === null ? 'null' : 'present', referrer: document.referrer };
+  if (window.opener) {
+    try {
+      window.opener.location.replace('/part/harness-pixel.svg?tabnabbed');
+      r.navigated = true;
+    } catch (e) {
+      r.navigated = String(e);
+    }
+  }
+  try { localStorage.setItem('pneu-opener:' + location.hash.slice(1), JSON.stringify(r)); } catch (e) { /* reported as missing */ }
+})();
+</script>
+</body>
+</html>

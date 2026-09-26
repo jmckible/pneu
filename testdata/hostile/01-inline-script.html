@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>inline script</title>
+<script>top.__pwned='01-head'</script>
+</head>
+<body>
+<p class="canary">01 inline script: this paragraph must render.</p>
+<script>top.__pwned='01-body'</script>
+<script src="http://tracker.invalid/01-external.js"></script>
+<div><script type="module">top.__pwned='01-module'</script></div>
+<SCRIPT>top.__pwned='01-uppercase'</SCRIPT>
+<scr<script>ipt>top.__pwned='01-split'</scr</script>ipt>
+<p>Text after the scripts must also render.</p>
+</body>
+</html>

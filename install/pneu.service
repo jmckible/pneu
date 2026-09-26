@@ -1,0 +1,19 @@
+[Unit]
+Description=pneu — local Gmail client server (http://pneu.localhost:7317)
+
+[Service]
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+ExecStart=%h/.local/bin/pneu
+Restart=on-failure
+RestartSec=5
+# The server owns every unattended gmi run, and on stop it lets an in-flight sync
+# finish rather than killing lieer mid-write. That sync is bounded at 10 minutes;
+# the default 90s would SIGKILL it.
+TimeoutStopSec=660
+# SIGTERM to pneu alone. The default (control-group) signals every process in
+# the unit at once, which kills lieer mid-sync before pneu can wait for it;
+# mixed leaves gmi to pneu and SIGKILLs whatever remains at the timeout.
+KillMode=mixed
+
+[Install]
+WantedBy=default.target

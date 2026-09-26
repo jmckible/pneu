@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>mxss mglyph comment</title>
+</head>
+<body>
+<p class="canary">20 mXSS (table/mglyph/style comment): this paragraph must render.</p>
+<math><mtext><table><mglyph><style><!--</style><img title="--&gt;&lt;/mglyph&gt;&lt;img&Tab;src=1&Tab;onerror=top.__pwned='20-heyes-2.2.2'&gt;">
+</body>
+</html>

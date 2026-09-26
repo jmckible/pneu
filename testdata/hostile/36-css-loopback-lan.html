@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>css url to loopback and lan</title>
+<style>
+.canary { color: #1f6f5c; }
+.a { background: url(http://127.0.0.1:1/36-style-v4); height: 8px; }
+.b { background: url("http://192.168.0.1/36-style-lan"); height: 8px; }
+.c { background: url(https://[::1]:1/36-style-v6); height: 8px; }
+@font-face { font-family: x; src: url(https://127.0.0.1:1/36-font.woff); }
+</style>
+</head>
+<body>
+<p class="canary">36 CSS to loopback and LAN: this paragraph must be teal; no loopback, LAN or localhost host is requested, even after click-to-load.</p>
+<div style="background:url(http://127.0.0.1:1/36-attr-v4);height:8px">http loopback</div>
+<div style="background:url(http://192.168.0.1/36-attr-lan);height:8px">http lan</div>
+<div style="background:url(https://127.0.0.1:1/36-attr-https);height:8px">https loopback</div>
+<div style="background:url(https://[::1]:1/36-attr-v6);height:8px">ipv6 loopback</div>
+<div style="background:url(https://localhost:1/36-attr-localhost);height:8px">localhost</div>
+<div style="background:url(https://pneu.localhost:1/36-attr-other-port);height:8px">pneu on another port</div>
+<div style="background:url(https://0x7f.1:1/36-attr-hex);height:8px">hex ipv4</div>
+<div style="background:url(https://2130706433:1/36-attr-int);height:8px">integer ipv4</div>
+<div style="background:\75 rl(https://10.0.0.1/36-attr-escaped);height:8px">css-escaped url</div>
+<div class="a">a</div><div class="b">b</div><div class="c">c</div>
+</body>
+</html>

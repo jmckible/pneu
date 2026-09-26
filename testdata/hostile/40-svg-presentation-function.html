@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>svg presentation attributes and css functions</title>
+<style>
+.canary { color: rgb(160, 90, 20); }
+@function --beacon(--x: url("https://mltrk.io/40-function-default")) { result: var(--x); }
+.fn { background-image: --beacon(); height: 8px; }
+@counter-style --tick { system: cyclic; symbols: url("https://mltrk.io/40-counter-style"); }
+.cs { list-style: --tick; }
+</style>
+</head>
+<body>
+<p class="canary">40 SVG presentation attributes and CSS functions: this paragraph must be amber; no presentation attribute or at-rule value is requested, and the url(#fade) fill still paints.</p>
+<svg width="120" height="40">
+<defs><linearGradient id="fade"><stop offset="0" stop-color="green"/><stop offset="1" stop-color="lime"/></linearGradient></defs>
+<rect class="frag" width="40" height="20" fill="url(#fade)"/>
+<rect width="20" height="20" x="40" mask="url(https://mltrk.io/40-mask.png)"/>
+<rect width="20" height="20" x="60" fill="url(https://mltrk.io/40-fill.svg#p) red"/>
+<rect width="20" height="20" x="80" filter="url('https://mltrk.io/40-filter.svg#f')"/>
+<rect width="20" height="20" x="100" clip-path="url(https://127.0.0.1:1/40-clip.svg#c)"/>
+<path d="M0 30 L100 30" stroke="black" marker-start="url(https://mltrk.io/40-marker.svg#m)"/>
+<rect width="10" height="10" y="30" cursor="url(https://mltrk.io/40-cursor.png), auto" mask="u\72l(https://mltrk.io/40-mask-escaped.png)"/>
+</svg>
+<svg width="10" height="10"><style>.y40{}<g>/*</g>.p40{background-image:url("https://mltrk.io/40-svg-style-split")}<g>*/</g></style><style>.q40{}<desc>/*</desc>.r40{background-image:url("https://127.0.0.1:1/40-svg-style-desc")}<title>*/</title></style></svg>
+<div class="p40" style="height:8px"></div><div class="r40" style="height:8px"></div>
+<div class="fn">fn</div>
+<ul class="cs"><li>counter</li></ul>
+</body>
+</html>

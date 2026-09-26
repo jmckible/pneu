@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>meta refresh</title>
+<meta http-equiv="refresh" content="0;url=http://tracker.invalid/06-refresh.html">
+<meta http-equiv="Content-Security-Policy" content="default-src *; img-src *; script-src * 'unsafe-inline'">
+<meta http-equiv="set-cookie" content="pneu=hijacked; path=/">
+<meta name="referrer" content="unsafe-url">
+</head>
+<body>
+<p class="canary">06 meta: this paragraph must render and the frame must stay on this message.</p>
+<meta http-equiv="refresh" content="1;url=javascript:top.__pwned='06-body-refresh-js'">
+</body>
+</html>

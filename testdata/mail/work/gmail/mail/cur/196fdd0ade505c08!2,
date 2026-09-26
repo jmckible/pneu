@@ -1,0 +1,38 @@
+Delivered-To: robin@northwind.example
+From: Brand Team <brand@partner-agency.example>
+To: robin@northwind.example
+Subject: New logo lockup for review
+Date: Tue, 22 Sep 2026 09:15:00 -0700
+Message-ID: <hostile-15-cid@partner-agency.example>
+MIME-Version: 1.0
+Content-Type: multipart/related; boundary="rel-hostile-15"; type="text/html"
+
+--rel-hostile-15
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>cid image</title>
+</head>
+<body>
+<p class="canary">15 cid: the green square below MUST load from the message's own part.</p>
+<img src="cid:logo@hostile.test" width="64" height="64" alt="inline logo (must load)">
+<img src="CID:logo@hostile.test" width="32" height="32" alt="uppercase scheme (should load, same part)">
+<img src="cid:missing@hostile.test" width="32" height="32" alt="missing cid: broken image, no other request">
+<img src="http://tracker.invalid/15-pixel.gif" width="1" height="1" alt="">
+</body>
+</html>
+
+--rel-hostile-15
+Content-Type: image/png; name="logo.png"
+Content-Disposition: inline; filename="logo.png"
+Content-Transfer-Encoding: base64
+Content-ID: <logo@hostile.test>
+
+iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR42mPQWBCFFTEMLQkAR+xI
+gR845kcAAAAASUVORK5CYII=
+
+--rel-hostile-15--

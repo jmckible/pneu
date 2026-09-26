@@ -1,0 +1,29 @@
+Delivered-To: robin@hale.example
+From: Marco Delgado <marco@delgadobuild.example>
+To: Robin Hale <robin@hale.example>
+Subject: Re: Kitchen quote - revised
+Date: Wed, 08 Jul 2026 07:12:30 -0700
+Message-ID: <0100019a9d11-kitchen-2@delgadobuild.example>
+In-Reply-To: <0100019a7c3e-kitchen-1@delgadobuild.example>
+References: <0100019a7c3e-kitchen-1@delgadobuild.example>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="000000000000kitchen2"
+
+--000000000000kitchen2
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+Following up: the quartz supplier is raising prices on the 1st. If you want
+to lock the counter number I need a yes by Friday.
+
+Marco
+
+--000000000000kitchen2
+Content-Type: text/html; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+<div dir=3D"ltr">Following up: the quartz supplier is raising prices on the=
+ 1st. If you want to lock the counter number I need a <b>yes by Friday</b>.=
+<br><br>Marco</div>
+
+--000000000000kitchen2--

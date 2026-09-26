@@ -1,0 +1,13 @@
+Delivered-To: robin@hale.example
+From: Maya Chen <maya.chen@example.net>
+To: robin@hale.example, sam@ortega.example, priya.n@fastmail.example
+Subject: =?UTF-8?B?8J+OiSBZb3UncmUgaW52aXRlZDogTWF5YSB0dXJucyA0MA==?=
+Date: Tue, 30 Jun 2026 12:00:00 -0700
+Message-ID: <maya40-invite-8d2f@example.net>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+U2F0dXJkYXksIE9jdG9iZXIgMywgN3BtIGF0IG91ciBwbGFjZS4g8J+OgvCfpYIKCkJyaW5nIG5v
+dGhpbmcgYnV0IHlvdXJzZWx2ZXMuIFJTVlAgYnkgdGhlIDIwdGggc28gd2Uga25vdyBob3cgbXVj
+aCBmb29kIHRvIG1ha2UuCgpNYXlhCg==

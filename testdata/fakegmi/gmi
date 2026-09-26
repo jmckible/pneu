@@ -1,0 +1,20 @@
+#!/bin/sh
+# Fake lieer for internal/gmi tests. Appends one tab-separated line at the start
+# and one at the end of each invocation to $FAKEGMI_LOG:
+#   start|end  <unix ns>  <args>  <cwd>  <NOTMUCH_CONFIG>
+# then prints $FAKEGMI_OUTPUT (or a default line), sleeps $FAKEGMI_SLEEP seconds
+# and exits $FAKEGMI_EXIT. A killed run leaves no "end" line. A `send` writes its
+# stdin to $FAKEGMI_LOG.stdin (overwriting) before the start line.
+log=${FAKEGMI_LOG:-/dev/null}
+ARGS="$*"
+rec() { printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$(date +%s%N)" "$ARGS" "$PWD" "$NOTMUCH_CONFIG" >>"$log"; }
+if [ "$1" = send ]; then
+	if [ -n "$FAKEGMI_LOG" ]; then cat >"$FAKEGMI_LOG.stdin"; else cat >/dev/null; fi
+fi
+rec start
+if [ -n "$FAKEGMI_OUTPUT" ]; then printf '%s\n' "$FAKEGMI_OUTPUT"; else echo "fakegmi: $ARGS"; fi
+sleep "${FAKEGMI_SLEEP:-0}"
+code=${FAKEGMI_EXIT:-0}
+[ "$code" = 0 ] || echo "fakegmi: failing with $code" >&2
+rec end
+exit "$code"

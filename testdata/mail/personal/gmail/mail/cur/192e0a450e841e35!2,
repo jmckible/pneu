@@ -1,0 +1,23 @@
+Delivered-To: robin@hale.example
+From: Account Security <security@acc0unts-verify.example>
+To: robin@hale.example
+Subject: Action required: verify your mailbox
+Date: Tue, 22 Sep 2026 05:41:09 +0000
+Message-ID: <hostile-19-mxss@acc0unts-verify.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset=3D"utf-8">
+<title>mxss form math</title>
+</head>
+<body>
+<p class=3D"canary">19 mXSS (nested form / math / mglyph): this paragraph m=
+ust render.</p>
+<form><math><mtext></form><form><mglyph><style></math><img src onerror=3Dto=
+p.__pwned=3D'19-bentkowski-2.0.17'>
+</body>
+</html>

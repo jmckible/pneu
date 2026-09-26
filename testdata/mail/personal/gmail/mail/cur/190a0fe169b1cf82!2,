@@ -1,0 +1,67 @@
+Delivered-To: robin@hale.example
+From: Bright Smile Dental <appointments@brightsmile.example>
+To: robin@hale.example
+Subject: Invitation: Dental cleaning @ Thu Oct 15, 2026 9am - 10am (PDT)
+Date: Thu, 10 Sep 2026 18:00:00 +0000
+Message-ID: <appt-88421-invite@brightsmile.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="cal_mixed_88421"
+
+--cal_mixed_88421
+Content-Type: multipart/alternative; boundary="cal_alt_88421"
+
+--cal_alt_88421
+Content-Type: text/plain; charset="UTF-8"
+
+Dental cleaning
+Thursday Oct 15, 2026 9am - 10am (PDT)
+Bright Smile Dental, 410 Pine St Suite 200
+
+--cal_alt_88421
+Content-Type: text/html; charset="UTF-8"
+
+<p><b>Dental cleaning</b><br>Thursday Oct 15, 2026 9am &ndash; 10am (PDT)<br>Bright Smile Dental, 410 Pine St Suite 200</p>
+
+--cal_alt_88421
+Content-Type: text/calendar; charset="UTF-8"; method=REQUEST
+Content-Transfer-Encoding: 7bit
+
+BEGIN:VCALENDAR
+PRODID:-//Bright Smile Dental//Scheduler 4.2//EN
+VERSION:2.0
+CALSCALE:GREGORIAN
+METHOD:REQUEST
+BEGIN:VEVENT
+DTSTART:20261015T160000Z
+DTEND:20261015T170000Z
+DTSTAMP:20260910T180000Z
+ORGANIZER;CN=Bright Smile Dental:mailto:appointments@brightsmile.example
+UID:appt-88421@brightsmile.example
+ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=robin@hale.example:mailto:robin@hale.example
+SUMMARY:Dental cleaning
+LOCATION:Bright Smile Dental\, 410 Pine St Suite 200
+SEQUENCE:0
+STATUS:CONFIRMED
+END:VEVENT
+END:VCALENDAR
+
+--cal_alt_88421--
+
+--cal_mixed_88421
+Content-Type: application/ics; name="invite.ics"
+Content-Disposition: attachment; filename="invite.ics"
+Content-Transfer-Encoding: base64
+
+QkVHSU46VkNBTEVOREFSDQpQUk9ESUQ6LS8vQnJpZ2h0IFNtaWxlIERlbnRhbC8vU2NoZWR1bGVy
+IDQuMi8vRU4NClZFUlNJT046Mi4wDQpDQUxTQ0FMRTpHUkVHT1JJQU4NCk1FVEhPRDpSRVFVRVNU
+DQpCRUdJTjpWRVZFTlQNCkRUU1RBUlQ6MjAyNjEwMTVUMTYwMDAwWg0KRFRFTkQ6MjAyNjEwMTVU
+MTcwMDAwWg0KRFRTVEFNUDoyMDI2MDkxMFQxODAwMDBaDQpPUkdBTklaRVI7Q049QnJpZ2h0IFNt
+aWxlIERlbnRhbDptYWlsdG86YXBwb2ludG1lbnRzQGJyaWdodHNtaWxlLmV4YW1wbGUNClVJRDph
+cHB0LTg4NDIxQGJyaWdodHNtaWxlLmV4YW1wbGUNCkFUVEVOREVFO0NVVFlQRT1JTkRJVklEVUFM
+O1JPTEU9UkVRLVBBUlRJQ0lQQU5UO1BBUlRTVEFUPU5FRURTLUFDVElPTjtSU1ZQPVRSVUU7Q049
+cm9iaW5AaGFsZS5leGFtcGxlOm1haWx0bzpyb2JpbkBoYWxlLmV4YW1wbGUNClNVTU1BUlk6RGVu
+dGFsIGNsZWFuaW5nDQpMT0NBVElPTjpCcmlnaHQgU21pbGUgRGVudGFsXCwgNDEwIFBpbmUgU3Qg
+U3VpdGUgMjAwDQpTRVFVRU5DRTowDQpTVEFUVVM6Q09ORklSTUVEDQpFTkQ6VkVWRU5UDQpFTkQ6
+VkNBTEVOREFSDQo=
+
+--cal_mixed_88421--

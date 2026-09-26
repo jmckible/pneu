@@ -1,0 +1,10 @@
+Delivered-To: robin@hale.example
+From: Rewards Center <winner@rewards-center.example>
+To: robin@hale.example
+Subject: Congratulations! You've been selected for a $500 gift card
+Date: Sun, 20 Sep 2026 03:12:44 +0000
+Message-ID: <x9q7w.rewards.20260920@rewards-center.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<p>Claim your <b>$500 gift card</b> now! <a href="http://rewards-center.example/claim">Click here</a></p>

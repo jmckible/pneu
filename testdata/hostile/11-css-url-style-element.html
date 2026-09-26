@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>css url in style element</title>
+<style>
+.styled { color: #8b1a1a; }
+.hero { background: url(http://tracker.invalid/11-hero.png) no-repeat; height: 20px; }
+@font-face { font-family: tracker; src: url(http://tracker.invalid/11-font.woff2) format("woff2"); }
+.font { font-family: tracker, sans-serif; }
+.after::after { content: url(http://tracker.invalid/11-content.png); }
+.mask { mask-image: url(http://tracker.invalid/11-mask.svg); }
+</style>
+</head>
+<body>
+<p class="canary styled">11 style element: this line must be dark red (the style block survives).</p>
+<div class="hero">hero with remote background</div>
+<p class="font">remote font</p>
+<p class="after">generated content</p>
+</body>
+</html>

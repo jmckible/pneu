@@ -1,0 +1,15 @@
+Delivered-To: robin@northwind.example
+From: Release Bot <releases@northwind.example>
+To: engineering@northwind.example
+Subject: Deploy summary for 2026-09-18
+Date: Fri, 18 Sep 2026 23:59:00 +0000
+Message-ID: <deploy-summary-20260918@ci.northwind.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+RGVwbG95cyB0b2RheTogNAogIDA5OjEyICBhcHAgICAgICAgYTQxYzllMiAgRml4IGV4cG9ydCBx
+dWV1ZSByZXRyeSBiYWNrb2ZmCiAgMTE6NDAgIGFwcCAgICAgICA3N2QwYjEzICBSZXBvcnQgdGVt
+cGxhdGUgcGlja2VyCiAgMTU6MDUgIHdvcmtlciAgICBlMGYyYzg4ICBCdW1wIGxpYnZpcHMgdG8g
+OC4xNgogIDE4OjMxICBhcHAgICAgICAgYzNiOWEwNyAgU1NPOiBTQU1MIG1ldGFkYXRhIHVwbG9h
+ZAoKUm9sbGJhY2tzOiAwCg==

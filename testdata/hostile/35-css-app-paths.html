@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>css url to app paths</title>
+<style>
+.canary { color: #5a2d82; }
+.a { background: url(/status?style); height: 8px; }
+.b { background-image: image-set("/events?image-set" 1x); height: 8px; }
+@media all { .c { background: url('/status?media'); height: 8px; } }
+.d { --u: url(/status?custom-property); background-image: var(--u); height: 8px; }
+</style>
+</head>
+<body>
+<p class="canary">35 CSS into the app: this paragraph must be purple; no app endpoint is requested, even after click-to-load.</p>
+<div style="background:url(/status?attr);height:8px">style attribute</div>
+<div style="background-image:url('/events?attr');height:8px">event stream</div>
+<div style="background:\75 rl(/status?escaped);height:8px">css-escaped url</div>
+<div style="background:url(/part/../status?dotdot);height:8px">dot segments out of the part path</div>
+<div style="background:url(/part/elsewhere/1);height:8px">a part that is not this message's</div>
+<div class="a">a</div><div class="b">b</div><div class="c">c</div><div class="d">d</div>
+</body>
+</html>

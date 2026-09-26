@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>srcset</title>
+<link rel="preload" as="image" imagesrcset="http://tracker.invalid/24-imagesrcset.png 1x">
+</head>
+<body>
+<p class="canary">24 srcset: the green square must render (data: src); no srcset candidate is fetched.</p>
+<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR42mPQWBCFFTEMLQkAR+xIgR845kcAAAAASUVORK5CYII=" srcset="http://tracker.invalid/24-2x.png 2x, http://tracker.invalid/24-3x.png 3x" width="32" height="32" alt="srcset">
+<picture><source srcset="http://tracker.invalid/24-source.webp" type="image/webp"><source media="(min-width:1px)" srcset="http://tracker.invalid/24-media.png"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR42mPQWBCFFTEMLQkAR+xIgR845kcAAAAASUVORK5CYII=" width="32" height="32" alt="picture"></picture>
+<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR42mPQWBCFFTEMLQkAR+xIgR845kcAAAAASUVORK5CYII=" sizes="100vw" srcset="http://tracker.invalid/24-w.png 1w" width="32" height="32" alt="w descriptor">
+</body>
+</html>

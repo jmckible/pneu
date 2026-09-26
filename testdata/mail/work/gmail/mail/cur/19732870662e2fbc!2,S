@@ -1,0 +1,27 @@
+From: Robin Hale <robin@northwind.example>
+To: Robin Hale <robin@northwind.example>, Tessa Lund <tessa@northwind.example>, Owen Pryce <owen@northwind.example>
+Subject: Re: Q3 roadmap review
+Date: Tue, 07 Jul 2026 08:10:00 -0700
+Message-ID: <CAJm4kR9-rm-q3-03@mail.gmail.com>
+In-Reply-To: <rm-q3-02-tessa@northwind.example>
+References: <rm-q3-01-owen@northwind.example> <rm-q3-02-tessa@northwind.example>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt-CAJm4kR9-rm-"
+
+--alt-CAJm4kR9-rm-
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Agree with Tessa. SSO first, render speed second. Templates can slip to earl=
+y Q4 if needed.
+
+Robin
+--alt-CAJm4kR9-rm-
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+<html><body><div style=3D"font-family:Calibri,sans-serif;font-size:11pt"><p=
+>Agree with Tessa. SSO first, render speed second. Templates can slip to ear=
+ly Q4 if needed.</p><p>Robin</p></div></body></html>
+
+--alt-CAJm4kR9-rm---

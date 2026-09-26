@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>srcdoc attribute breakout</title>
+</head>
+<body>
+<p class="canary">34 srcdoc breakout: this paragraph must render; the quote characters below are text.</p>
+<p>" onload="top.__pwned='34-attr-breakout'" x="</p>
+<p>&quot;&gt;&lt;/iframe&gt;&lt;img src=x onerror=top.__pwned='34-iframe-close'&gt;</p>
+<p title='"></iframe><img src=x onerror=top.__pwned="34-title-close">'>title attribute carrying a closing iframe tag</p>
+</body>
+</html>

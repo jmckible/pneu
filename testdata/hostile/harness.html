@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>pneu hostile harness</title>
+<style>
+body { margin: 0; font: 13px monospace; }
+#frames { width: 640px; }
+#frames section { border-top: 1px solid #999; }
+#frames iframe.mail { display: block; width: 100%; border: 0; height: 0; box-sizing: border-box; }
+/* app.css's sheet, so sizing is checked with its margin and border. */
+#frames iframe.mail.sheet { margin: 8px 1ch; width: calc(100% - 2ch); border: 1px solid #999; }
+</style>
+<!-- The same files the app serves, by relative path: this page tests the
+     shipping assembly, not a copy of it. Served from the repo root by run.sh. -->
+<script src="../../web/static/purify.min.js"></script>
+<script src="../../web/static/mailframe.js"></script>
+</head>
+<body>
+<pre id="results">pending</pre>
+<div id="frames"></div>
+<script>
+(async function () {
+  'use strict';
+  const out = document.getElementById('results');
+  const origin = location.origin;
+  const LINK_OK = /^(?:https?:\/\/|mailto:)/i;
+  const FORBIDDEN = 'script, iframe, frame, frameset, object, embed, portal, form, input, button, ' +
+    'textarea, select, link, noscript, template, isindex, marquee[onstart]';
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Click-to-load needs an https host that is not an IP literal or localhost:
+  // run.sh serves one and maps remote.test to it (--host-resolver-rules).
+  const httpsPort = new URLSearchParams(location.search).get('https') || '443';
+  const remoteOrigin = 'https://remote.test:' + httpsPort;
+  const remoteURL = remoteOrigin + '/testdata/hostile/harness-pixel.svg';
+  const openerURL = origin + '/testdata/hostile/opener.html#';
+  const SYNTHETIC = {
+    remote: () => '<!DOCTYPE html><html><head></head><body><p class="canary">remote image</p>' +
+      '<img src="' + remoteURL + '" width="8" height="8" alt="remote"></body></html>',
+    cidcss: () => '<!DOCTYPE html><html><head></head><body><p class="canary">cid in srcset and css</p>' +
+      '<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" srcset="cid:logo@hostile.test 2x" alt="srcset">' +
+      '<div style="background:url(cid:logo@hostile.test);height:8px"></div></body></html>',
+    partbase: () => '<!DOCTYPE html><html><head></head><body><p class="canary">part base</p>' +
+      '<img src="cid:mine@hostile.test" width="8" height="8" alt="mine">' +
+      '<img src="cid:other@hostile.test" width="8" height="8" alt="other">' +
+      '<div style="background:url(/part/harness-pixel.svg);height:8px">other part via css</div></body></html>',
+    keys: () => '<!DOCTYPE html><html><head></head><body><p class="canary">key forwarding</p></body></html>',
+    link: (c) => '<!DOCTYPE html><html><head></head><body><p class="canary">link click</p>' +
+      '<a href="' + openerURL + c.id + '">open</a></body></html>',
+  };
+
+  // CSP violations, recorded from the parent realm: the frame runs no script.
+  // First render: the srcdoc document reuses the Window of the frame's
+  // initial about:blank (same origin), so a listener put on contentWindow
+  // right after insertion hears every violation. A re-render replaces the
+  // Window, and nothing can be attached before the new document exists, so
+  // it is polled for and may miss violations queued before the first poll.
+  // Informational either way; a case's `blocked` assertion is only as good
+  // as this.
+  function watchViolations(frame, set) {
+    const record = (e) => set.add(e.effectiveDirective + ' ' + e.blockedURI);
+    const seen = new WeakSet();
+    const win = frame.contentWindow;
+    if (win) { win.addEventListener('securitypolicyviolation', record, true); seen.add(win); }
+    const t0 = performance.now();
+    const hook = () => {
+      const w = frame.contentWindow;
+      if (w && !seen.has(w)) { seen.add(w); w.addEventListener('securitypolicyviolation', record, true); return; }
+      if (performance.now() - t0 < 3000) setTimeout(hook, 0);
+    };
+    setTimeout(hook, 0);
+  }
+
+  // Positive control for the link check: the shipping assembly, then
+  // rel=opener put back before srcdoc. The harness must see the popup get an
+  // opener and navigate the frame, or the negative case proves nothing.
+  function renderWithOpener(html) {
+    const built = Pneu.assembleMailDocument(html, {}, origin, {});
+    const doc = new DOMParser().parseFromString(built.srcdoc, 'text/html');
+    for (const a of doc.querySelectorAll('a')) a.setAttribute('rel', 'opener');
+    const frame = document.createElement('iframe');
+    frame.className = 'mail';
+    frame.style.height = '60px';
+    frame.setAttribute('sandbox', Pneu.MAILFRAME_SANDBOX);
+    frame.srcdoc = '<!DOCTYPE html>' + doc.documentElement.outerHTML;
+    return { frame, remote: built.remote };
+  }
+
+  try {
+    try { localStorage.clear(); } catch (e) { /* the link cases report missing */ }
+    const cases = await (await fetch('cases.json')).json();
+    const runs = [];
+    for (const c of cases) {
+      // Case files name the https server as https://remote.test/ (38); its
+      // port is only known at run time.
+      const html = c.synthetic ? SYNTHETIC[c.synthetic](c) :
+        (await (await fetch(c.file)).text()).replaceAll('https://remote.test/', remoteOrigin + '/');
+      const keys = [], blocked = new Set();
+      const opts = {
+        remoteImages: !!c.remoteImages && !c.rerender,
+        partBase: c.partBase,
+        theme: c.theme,
+        onKeydown: (e) => keys.push(e.key),
+      };
+      let built = c.control ? renderWithOpener(html) : Pneu.renderMailFrame(html, c.cids || {}, origin, opts);
+      const section = document.createElement('section');
+      section.dataset.case = c.id;
+      section.appendChild(built.frame);
+      const nextLoad = (frame) => new Promise((resolve) => {
+        frame.addEventListener('load', () => resolve(true), { once: true });
+        setTimeout(() => resolve(false), 3000);
+      });
+      let loaded = nextLoad(built.frame);
+      document.getElementById('frames').appendChild(section);
+      watchViolations(built.frame, blocked);
+      if (c.rerender) {
+        // Click-to-load path: re-render into the same frame, as app.js does.
+        await loaded;
+        built = Pneu.renderMailFrame(html, c.cids || {}, origin,
+          { remoteImages: true, partBase: c.partBase, theme: c.theme, frame: built.frame, onKeydown: opts.onKeydown });
+        loaded = nextLoad(built.frame);
+        watchViolations(built.frame, blocked);
+      }
+      runs.push({ c, frame: built.frame, remote: built.remote, colors: built.colors, sheet: built.sheet, keys, blocked, loaded });
+    }
+    for (const r of runs) r.loaded = await r.loaded;
+    await sleep(400); // images, ResizeObserver sizing
+
+    for (const r of runs) {
+      if (r.c.synthetic === 'keys' && r.frame.contentDocument) {
+        const win = r.frame.contentWindow;
+        r.frame.contentDocument.body.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'j', bubbles: true }));
+      }
+    }
+    await sleep(50);
+
+    // Link clicks, after every other check has its snapshot of a settled
+    // frame. run.sh passes --disable-popup-blocking so a scripted click opens.
+    const appHref = location.href;
+    const clicks = runs.filter((r) => r.c.click);
+    for (const r of clicks) {
+      r.before = snapshot(r);
+      const a = r.frame.contentDocument && r.frame.contentDocument.querySelector('a');
+      if (a) HTMLElement.prototype.click.call(a);
+    }
+    for (const r of clicks) {
+      const key = 'pneu-opener:' + r.c.id;
+      for (let i = 0; i < 60 && localStorage.getItem(key) === null; i++) await sleep(50);
+      await sleep(100); // a tabnabbing navigation lands after the report
+      const got = localStorage.getItem(key);
+      r.popup = got === null ? null : JSON.parse(got);
+      r.appHrefAfter = location.href;
+    }
+
+    const results = runs.map((r) => {
+      try { return check(r, appHref); } catch (e) { return { id: r.c.id, pass: false, fails: ['harness error: ' + e] }; }
+    });
+    const pwned = window.__pwned;
+    const appWide = document.documentElement.scrollWidth > window.innerWidth;
+    const summary = {
+      pass: results.every((r) => r.pass) && pwned === undefined && !appWide,
+      pwned: pwned === undefined ? null : String(pwned),
+      appScrollsHorizontally: appWide,
+      cases: results,
+    };
+    out.textContent = JSON.stringify(summary, null, 1);
+  } catch (e) {
+    out.textContent = JSON.stringify({ pass: false, error: String(e && e.stack || e) });
+  }
+  document.body.dataset.done = '1';
+
+  function snapshot(r) {
+    return r.frame.contentWindow ? r.frame.contentWindow.location.href : null;
+  }
+
+  // The link cases: did the page the message opened get a handle on the
+  // frame, and did anything navigate the frame or the app?
+  function checkClick(r, appHref, res, fails) {
+    res.popup = r.popup;
+    const frameHref = snapshot(r);
+    if (!r.popup) { fails.push('popup did not report'); return; }
+    if (r.c.control) {
+      if (r.popup.opener !== 'present') fails.push('control: popup had no opener');
+      if (frameHref === 'about:srcdoc') fails.push('control: frame navigation not detected');
+      if (r.appHrefAfter !== appHref) fails.push('control: app navigated');
+      return;
+    }
+    if (r.popup.opener !== 'null') fails.push('popup has window.opener');
+    if (r.popup.referrer !== '') fails.push('popup got referrer ' + r.popup.referrer);
+    if (frameHref !== 'about:srcdoc') fails.push('frame navigated after click: ' + frameHref);
+    if (r.appHrefAfter !== appHref) fails.push('app navigated: ' + r.appHrefAfter);
+  }
+
+  function check(r, appHref) {
+    const c = r.c, fails = [];
+    const res = { id: c.id };
+    res.blocked = [...r.blocked];
+    for (const want of c.blocked || []) {
+      if (!res.blocked.some((b) => b.includes(want))) fails.push('no CSP violation for ' + want);
+    }
+    if (c.click) checkClick(r, appHref, res, fails);
+    if (c.control) return done();
+
+    const prefix = c.id.slice(0, 3);
+    if (window.__pwned !== undefined && String(window.__pwned).startsWith(prefix)) fails.push('pwned:' + window.__pwned);
+    const frame = r.frame, doc = frame.contentDocument, win = frame.contentWindow;
+    res.height = Math.round(frame.getBoundingClientRect().height);
+    if (!r.loaded) fails.push('no load event');
+    if (!(res.height > 0)) fails.push('height 0');
+    if (!doc) { fails.push('no contentDocument'); return done(); }
+    // Prototype methods: a clobbered document (33) must not break the check.
+    const root = Object.getOwnPropertyDescriptor(Document.prototype, 'documentElement').get.call(doc);
+    const qa = (sel) => Element.prototype.querySelectorAll.call(root, sel);
+    const q = (sel) => Element.prototype.matches.call(root, sel) ? root : Element.prototype.querySelector.call(root, sel);
+    if (win.location.href !== 'about:srcdoc') fails.push('navigated:' + win.location.href);
+
+    const canary = q('.canary');
+    res.canary = !!(canary && canary.getClientRects().length && canary.getBoundingClientRect().height > 0);
+    if (!res.canary) fails.push('canary not rendered');
+
+    const head = q('head'), first = head && head.firstElementChild;
+    const csp = "default-src 'none'; img-src " + origin + (c.partBase || '/part/') + ' data:' +
+      (c.remoteImages ? ' https:' : '') + "; style-src 'unsafe-inline'; font-src data:";
+    if (!first || first.localName !== 'meta' || first.getAttribute('http-equiv') !== 'Content-Security-Policy' ||
+        first.getAttribute('content') !== csp) fails.push('CSP meta not first in head');
+    if (qa('meta').length !== 3) fails.push('foreign meta survived');
+    const bases = qa('base');
+    if (bases.length !== 1 || bases[0].getAttribute('href') !== null) fails.push('foreign base survived');
+
+    const bad = qa(FORBIDDEN);
+    if (bad.length) fails.push('forbidden: ' + [...bad].map((e) => e.localName).join(','));
+    for (const el of qa('*')) {
+      for (const a of el.attributes) {
+        if (/^on/i.test(a.name)) fails.push('handler ' + el.localName + '[' + a.name + ']');
+        if (/^(ping|attributionsrc|srcdoc|formaction)$/i.test(a.name)) fails.push('attr ' + a.name);
+        if (/^\s*(javascript|vbscript|data:text)/i.test(a.value) && a.name !== 'title' && a.name !== 'alt') fails.push('script url in ' + a.name);
+      }
+    }
+    const links = [...qa('a, area')];
+    for (const a of links) {
+      const href = a.getAttribute('href');
+      if (a.getAttribute('target') !== '_blank') fails.push('link target ' + a.getAttribute('target'));
+      if (!/\bnoopener\b/.test(a.rel) || !/\bnoreferrer\b/.test(a.rel)) fails.push('link rel ' + a.rel);
+      if (href !== null && !LINK_OK.test(href)) fails.push('link href ' + href);
+    }
+    const hrefs = links.map((a) => a.getAttribute('href'));
+    for (const want of c.links || []) if (!hrefs.includes(want)) fails.push('link lost ' + want);
+
+    for (const [sel, prop, value] of c.styles || []) {
+      const el = q(sel);
+      const got = el && win.getComputedStyle(el).getPropertyValue(prop);
+      if (got !== value) fails.push(sel + ' ' + prop + '=' + got + ' want ' + value);
+    }
+    for (const sel of c.imagesLoaded || []) {
+      const els = qa(sel);
+      if (!els.length) fails.push('missing ' + sel);
+      for (const img of els) if (!(img.complete && img.naturalWidth > 0)) fails.push('not loaded ' + sel);
+    }
+    for (const sel of c.imagesBlocked || []) {
+      for (const img of qa(sel)) if (img.naturalWidth > 0) fails.push('loaded ' + sel);
+    }
+    for (const sel of c.noSrc || []) {
+      const els = qa(sel);
+      if (!els.length) fails.push('missing ' + sel);
+      for (const img of els) if (img.hasAttribute('src')) fails.push('kept src ' + img.getAttribute('src'));
+    }
+    // Substrings that must be gone from the assembled document: URLs the
+    // filter drops from attributes, style attributes and <style> text.
+    const serialized = root.outerHTML;
+    for (const s of c.absent || []) if (serialized.includes(s)) fails.push('kept ' + s);
+    for (const [sel, want] of c.cidSrc || []) {
+      const el = q(sel);
+      if (!el || el.getAttribute('src') !== want) fails.push('cid src ' + sel + '=' + (el && el.getAttribute('src')));
+    }
+    for (const [sel, want] of c.cidSrcset || []) {
+      const el = q(sel);
+      if (!el || !(el.getAttribute('srcset') || '').includes(want)) fails.push('cid srcset ' + sel);
+    }
+    for (const [sel, want] of c.cidStyle || []) {
+      const el = q(sel);
+      if (!el || !(el.getAttribute('style') || '').includes(want)) fails.push('cid style ' + sel);
+    }
+    for (const [sel, want] of c.text || []) {
+      const el = q(sel);
+      if (!el || !el.textContent.includes(want)) fails.push('text ' + sel);
+    }
+    for (const sel of c.present || []) {
+      const el = q(sel);
+      if (!el || !el.getClientRects().length) fails.push('not rendered ' + sel);
+    }
+    if (c.hscroll) {
+      const html = root;
+      if (!(html.scrollWidth > html.clientWidth)) fails.push('no horizontal scroll inside frame');
+      if (frame.getBoundingClientRect().width > 640) fails.push('frame wider than its column');
+    }
+    if (c.remoteFlag && !r.remote) fails.push('remote content not flagged');
+    // Body colors: whether the sanitized mail declares its own, and which
+    // frame mode that chose (the frame's class must agree).
+    if ('colors' in c && r.colors !== c.colors) fails.push('colors=' + r.colors + ' want ' + c.colors);
+    if ('sheet' in c && (r.sheet !== c.sheet || frame.classList.contains('sheet') !== c.sheet)) {
+      fails.push('sheet=' + r.sheet + ' class=' + frame.className + ' want ' + c.sheet);
+    }
+    // Sized to the content, border and margin included: nothing clipped
+    // under overflow-y:hidden, and the frame no taller than it needs.
+    if (c.fits) {
+      if (root.scrollHeight > root.clientHeight) fails.push('clipped: ' + root.scrollHeight + ' > ' + root.clientHeight);
+      const last = q('.last');
+      if (!last || last.getBoundingClientRect().bottom > root.clientHeight) fails.push('last line clipped');
+      // body's 8px bottom margin is the only slack expected under the last line.
+      if (last && root.clientHeight - last.getBoundingClientRect().bottom > 12) fails.push('frame taller than content');
+    }
+    if (c.synthetic === 'keys' && r.keys.join() !== 'j') fails.push('keydown not forwarded: ' + r.keys.join());
+    return done();
+
+    function done() {
+      res.fails = fails;
+      res.pass = fails.length === 0;
+      return res;
+    }
+  }
+})();
+</script>
+</body>
+</html>

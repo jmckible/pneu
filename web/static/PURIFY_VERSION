@@ -1,0 +1,5 @@
+version: 3.4.16
+sha256:  2c90a9b46d6463f26038a29b686e82bc91de01fdac9d5229e7cfe3b360134ea2  purify.min.js
+source:  https://github.com/cure53/DOMPurify/releases/download/3.4.16/purify.min.js
+check:   byte-identical to package/dist/purify.min.js in https://registry.npmjs.org/dompurify/-/dompurify-3.4.16.tgz
+fetched: 2026-09-23

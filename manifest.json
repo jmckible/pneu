@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "pneu",
+  "name": "Pneu",
+  "version": "1.0.0",
+  "author": "Jordan McKible",
+  "license": "MIT",
+  "description": "Unread inbox mail and sync health from the pneu server, with click to open",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "shell/BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Pneu",
+    "description": "Unread inbox threads across your accounts; warns when sync fails or the server is down",
+    "category": "Info",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "command": ""
+    },
+    "schema": [
+      {
+        "key": "command",
+        "type": "string",
+        "label": "Click command",
+        "defaultValue": "",
+        "description": "Run on click instead of `pneu open`, e.g. to summon a scratchpad that holds the window."
+      }
+    ]
+  }
+}

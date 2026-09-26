@@ -1,0 +1,36 @@
+Delivered-To: robin@hale.example
+From: The Weekend Reader <issue@weekendreader.example>
+To: robin@hale.example
+Subject: The Weekend Reader - Issue 112: the case for boring software
+Date: Sat, 19 Sep 2026 13:00:00 +0000
+Message-ID: <issue-112.a8c1f0@send.weekendreader.example>
+List-Unsubscribe: <https://weekendreader.example/u/8812>
+MIME-Version: 1.0
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html>
+<html><head><meta charset=3D"utf-8">
+<style>
+body { margin:0; background:#f4f1ea; font-family: Georgia, 'Times New Roman=
+', serif; }
+.wrap { max-width: 600px; margin: 0 auto; background: #fff; padding: 24px; }
+h1 { font-size: 28px; color: #222; margin: 0 0 8px; }
+.kicker { text-transform: uppercase; letter-spacing: .08em; color: #a0522d;=
+ font: 12px Helvetica, sans-serif; }
+.cta { display:inline-block; padding:10px 16px; background:#a0522d; color:#=
+fff; text-decoration:none; border-radius:3px; }
+</style></head>
+<body><div class=3D"wrap">
+<img src=3D"http://images.weekendreader.example/masthead.png" width=3D"552"=
+ height=3D"80" alt=3D"The Weekend Reader">
+<p class=3D"kicker">Issue 112 &middot; September 19, 2026</p>
+<h1>The case for boring software</h1>
+<p>Most of what we run every day is plumbing. This week: why the tools that=
+ last are the ones nobody talks about, and three essays on maintenance as a=
+ craft.</p>
+<p><a class=3D"cta" href=3D"https://weekendreader.example/112">Read the iss=
+ue</a></p>
+<img src=3D"http://t.weekendreader.example/open/8812.gif" width=3D"1" heigh=
+t=3D"1" alt=3D"">
+</div></body></html>

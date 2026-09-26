@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>tracking pixels</title>
+</head>
+<body>
+<p class="canary">14 tracking pixels: this paragraph must render; no request leaves the machine until click-to-load.</p>
+<img src="http://tracker.invalid/14-open.gif?u=robin%40hale.example&amp;c=8812" width="1" height="1" alt="">
+<img src="https://tracker.invalid/14-https.gif" width="1" height="1" alt="">
+<img src="//tracker.invalid/14-protocol-relative.gif" width="1" height="1" alt="">
+<img src="http://tracker.invalid/14-visible-logo.png" width="120" height="40" alt="remote logo: blocked until click-to-load">
+<video poster="http://tracker.invalid/14-poster.png" width="10" height="10"></video>
+<audio src="http://tracker.invalid/14-audio.mp3"></audio>
+<div style="display:none"><img src="http://tracker.invalid/14-hidden.gif"></div>
+</body>
+</html>

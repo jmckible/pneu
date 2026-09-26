@@ -1,0 +1,32 @@
+Delivered-To: robin@northwind.example
+From: Owen Pryce <owen@northwind.example>
+To: Robin Hale <robin@northwind.example>
+Subject: Board deck draft
+Date: Tue, 03 Mar 2026 16:45:00 -0600
+Message-ID: <op-board-deck-draft@northwind.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="board-deck-mixed"
+
+--board-deck-mixed
+Content-Type: text/plain; charset=utf-8
+
+First pass at the Q1 board deck. Financials slide still needs March actuals.
+
+--board-deck-mixed
+Content-Type: application/pdf; name="board-deck-draft.pdf"
+Content-Disposition: attachment; filename="board-deck-draft.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2Jq
+CjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2Jq
+CjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAzMDAg
+MTAwXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgPj4g
+Pj4gPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA1MSA+PgpzdHJlYW0KQlQgL0YxIDEyIFRm
+IDIwIDUwIFRkIChCb2FyZCBkZWNrIGRyYWZ0IC0gUTMpIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoK
+NSAwIG9iago8PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jhc2VGb250IC9IZWx2ZXRp
+Y2EgPj4KZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAw
+MCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDI0MSAw
+MDAwMCBuIAowMDAwMDAwMzQyIDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgNiAvUm9vdCAxIDAg
+UiA+PgpzdGFydHhyZWYKNDEyCiUlRU9GCg==
+
+--board-deck-mixed--

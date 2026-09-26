@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>dom clobbering</title>
+</head>
+<body>
+<p class="canary">33 DOM clobbering: this paragraph must render, links must still be rewritten to new tabs, and the frame must still auto-size.</p>
+<img name="querySelectorAll" src="data:,">
+<img name="getElementsByTagName" src="data:,">
+<form name="body"><input name="scrollHeight" value="99999"></form>
+<img name="documentElement" src="data:,">
+<a id="links" href="https://example.com/clobber">links</a>
+<form id="defaultView"></form>
+<img name="cookie" src="data:,">
+<a href="https://example.com/after-clobber">a link after the clobbering elements: must open in a new tab</a>
+</body>
+</html>

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>font substitution</title>
+<style>
+.stack { font-family: "Brand Sans", Helvetica, Arial, sans-serif; }
+.serif { font-family: Georgia, serif; }
+@font-face { font-family: Arial; src: url(data:font/woff2;base64,AA==); }
+</style>
+</head>
+<body>
+<p class="canary">45 font substitution: sans stacks gain the mail sans ahead of their first stand-in; serif and mono are left alone.</p>
+<p class="gmail"><span style="font-family:sans-serif">Gmail's pasted span</span></p>
+<p class="stack">A newsletter stack after a web font that never loads.</p>
+<p class="serif">A serif stack.</p>
+<p class="mono" style="font-family:'Courier New',monospace">A mono stack.</p>
+<p class="imp" style="font-family:Arial !important">An important Arial.</p>
+<p><font class="face" face="arial, sans-serif">A legacy font face.</font></p>
+<div class="last">last line</div>
+</body>
+</html>

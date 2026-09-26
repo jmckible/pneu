@@ -1,0 +1,9 @@
+Delivered-To: robin@hale.example
+From: Office Scanner <scanner@hale.example>
+To: robin@hale.example
+Subject: Scan from office printer
+Date: Wed, 18 Mar 2026 10:05:00 -0700
+Message-ID: <scan-20260318100500@printer.local>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+

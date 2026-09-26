@@ -1,0 +1,15 @@
+Delivered-To: robin@northwind.example
+From: Cloudline Hosting <billing@cloudline.example>
+To: robin@northwind.example
+Subject: Invoice INV-2026-0931 from Cloudline Hosting
+Date: Tue, 01 Sep 2026 07:00:00 +0000
+Message-ID: <inv-2026-0931@billing.cloudline.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<html><head><style>td{padding:4px 8px}.amt{text-align:right}</style></head><body>
+<h3>Invoice INV-2026-0931</h3>
+<table><tr><td>Compute (Aug)</td><td class="amt">$1,204.00</td></tr><tr><td>Object storage (Aug)</td><td class="amt">$388.12</td></tr><tr><td><b>Total</b></td><td class="amt"><b>$1,592.12</b></td></tr></table>
+<p>Charged to card ending 4242.</p>
+</body></html>

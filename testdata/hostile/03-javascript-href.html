@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>javascript: hrefs</title>
+</head>
+<body>
+<p class="canary">03 javascript: hrefs: this paragraph must render; the safe link must still work.</p>
+<ul>
+<li><a href="javascript:top.__pwned='03-plain'">plain</a></li>
+<li><a href="JaVaScRiPt:top.__pwned='03-mixed-case'">mixed case</a></li>
+<li><a href="&#106;&#97;&#118;&#97;&#115;&#99;&#114;&#105;&#112;&#116;&#58;top.__pwned='03-entities'">entity encoded</a></li>
+<li><a href="java&#x09;script:top.__pwned='03-tab'">tab inside scheme</a></li>
+<li><a href="&#x20;&#x01;javascript:top.__pwned='03-leading-ctrl'">leading space and control char</a></li>
+<li><a href="vbscript:msgbox(1)">vbscript</a></li>
+<li><a href="data:text/html;base64,PHNjcmlwdD50b3AuX19wd25lZD0nREFUQSc8L3NjcmlwdD4=">data:text/html</a></li>
+<li><map name="m"><area shape="rect" coords="0,0,50,50" href="javascript:top.__pwned='03-area'"></map><img usemap="#m" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR42mPQWBCFFTEMLQkAR+xIgR845kcAAAAASUVORK5CYII=" width="50" height="50" alt="image map"></li>
+<li><a href="https://example.com/safe">safe https link: must survive and open in a new tab</a></li>
+<li><a href="mailto:someone@example.com">mailto link: must survive</a></li>
+</ul>
+</body>
+</html>

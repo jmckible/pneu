@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>base href</title>
+<base href="http://tracker.invalid/07/">
+<base target="_top">
+</head>
+<body>
+<p class="canary">07 base: this paragraph must render.</p>
+<img src="pixel.gif" alt="relative image: must not resolve against tracker.invalid">
+<a href="login">relative link: must not resolve against tracker.invalid</a>
+</body>
+</html>

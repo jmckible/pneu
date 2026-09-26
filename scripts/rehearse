@@ -1,0 +1,442 @@
+#!/bin/bash
+# Rehearse INSTALL.md in a sandbox: a fresh HOME, its own network namespace,
+# lieer replaced by stubgmi, and every command that reaches the real desktop
+# session replaced by a stub that logs what it would have done.
+#
+#   scripts/rehearse [run|shell] [--serve] [--fail] [--keep]
+#
+#   run      (default) execute INSTALL.md's numbered steps as written, for
+#            one account. `systemctl --user enable --now pneu.service`
+#            starts the server the way the unit would, inside the sandbox;
+#            the run then waits for its first pull, opens it through
+#            `pneu open`, and checks the inbox renders.
+#   shell    a shell in the sandbox for a person or an agent to follow
+#            INSTALL.md by hand. `rehearse-human-oauth <acct>` stands in for
+#            step 4; `rehearse-serve` shows the server's log (and the
+#            browser URL with --serve).
+#   --fail   run mode: the first pull is killed halfway (a message left in
+#            mail/tmp) and later the token is revoked; the run checks the
+#            account is read-only meanwhile, retries the pull from the app,
+#            and reconnects through the app's re-auth.
+#   --serve  also bridge the sandbox's server to your browser at
+#            http://rehearse.localhost:7417 (REHEARSE_PORT) and, in run
+#            mode, keep serving until Ctrl-C.
+#   --keep   keep the previous sandbox instead of starting from scratch
+#            (shell mode with REHEARSE_DIR only; run always starts clean).
+#
+# See docs/rehearsal.md for what this covers and the two heavier levels.
+#
+# Environment: REHEARSE_DIR (default: a fresh mktemp dir, removed after a
+# run that passes; if set, it must be inside /tmp, $TMPDIR or
+# $XDG_RUNTIME_DIR, and is only ever deleted if this harness made it),
+# REHEARSE_ACCT, REHEARSE_ADDRESS, REHEARSE_PORT, and stubgmi's STUBGMI_*
+# knobs (STUBGMI_COUNT defaults to 2000 here).
+set -euo pipefail
+
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+SELF="$REPO/scripts/rehearse"
+
+# ---------------------------------------------------------------- inside
+# Re-entered as `rehearse __inner MODE SERVE` inside the namespace, with an
+# empty environment; everything comes from $SANDBOX/env.sh.
+if [[ ${1:-} == __inner ]]; then
+	mode=$2 serve=$3 fail=$4
+	# shellcheck source=/dev/null
+	source "$REHEARSE_SANDBOX/env.sh"
+	cd "$REPO"
+
+	b='' c='' d='' y='' z=''
+	[[ -t 1 ]] && b=$'\e[1m' c=$'\e[1;36m' d=$'\e[2m' y=$'\e[33m' z=$'\e[0m'
+	say() { printf '%s%s%s\n' "$b" "$*" "$z"; }
+	step() { printf '\n%s== %s%s\n' "$c" "$1" "$z"; }
+	note() { printf '%s(rehearsal) %s%s\n' "$d" "$1" "$z"; }
+	cmd() { printf '%s$ %s%s\n' "$y" "$1" "$z"; eval "$1"; }
+	write_file() {
+		printf '%s# writes %s%s\n' "$y" "$1" "$z"
+		mkdir -p "$(dirname "$1")"
+		cat >"$1"
+	}
+	human() {
+		case $1 in
+		*"OAuth client"*) note "human: Google Cloud console, done by rehearse-human-oauth"
+			rehearse-human-oauth "$ACCT" ;;
+		*"consent"*)
+			if [[ ${STUBGMI_AUTH:-} == browser ]]; then
+				note "human: the consent screen, allowed by rehearse-browser (BROWSER)"
+			else
+				note "human: the consent screen; stubgmi grants at once (STUBGMI_AUTH=instant)"
+			fi ;;
+		*) note "human step with no rehearsal action: $1" ;;
+		esac
+	}
+
+	case $mode in
+	run)
+		script=$(rehearse script INSTALL.md)
+		printf '%s\n' "$script" >"$REHEARSE_SANDBOX/install-steps.sh"
+		# shellcheck source=/dev/null
+		source "$REHEARSE_SANDBOX/install-steps.sh"
+
+		step "Rehearsal checks"
+		trap 'rehearse-serve --stop' EXIT
+		rehearse-serve --background # a no-op if step 6's systemctl already started it
+		status=~/.local/state/pneu/status.json
+		jar=$REHEARSE_SANDBOX/run/jar
+		app=http://pneu.localhost:7317
+		fatal() { echo "rehearsal: $*" >&2; [[ -f $status ]] && cat "$status" >&2; exit 1; }
+		state() { pneu account status "$ACCT" 2>/dev/null | awk 'NR == 1 { print $2 }'; }
+		# wait_state STATE SECONDS: poll the status file, printing each new
+		# progress line the bar widget would show.
+		wait_state() {
+			local last='' line shown=-5
+			for _ in $(seq $(($2 * 10))); do
+				[[ $(state) == "$1" ]] && return 0
+				line=$(pneu account status "$ACCT" 2>/dev/null | head -1)
+				# Every new state, and progress at most every 5 seconds.
+				if [[ $line != "$last" && (${line%% ·*} != "${last%% ·*}" || $SECONDS -ge $((shown + 5))) ]]; then
+					note "$line"
+					last=$line shown=$SECONDS
+				fi
+				sleep 0.1
+			done
+			fatal "$ACCT never reached $1 (now $(state))"
+		}
+		# The first pull's budget: STUBGMI_DURATION's pacing plus a minute.
+		pull_wait=60
+		case ${STUBGMI_DURATION:-} in
+		*m) pull_wait=$((60 + ${STUBGMI_DURATION%m} * 60)) ;;
+		*s) pull_wait=$((60 + ${STUBGMI_DURATION%s})) ;;
+		esac
+		post() { curl -s -o "$REHEARSE_SANDBOX/run/post.out" -w '%{http_code}' -b "$jar" -H "Origin: $app" -X POST "$app$1" ${2:+--data "$2"}; }
+
+		REHEARSE_PUBLIC= pneu open # this nonce is for curl, not your browser
+		code=$(curl -s -o /dev/null -w '%{http_code}' -c "$jar" "$(<"$REHEARSE_SANDBOX/run/open-url")")
+		[[ $code == 302 ]] || fatal "/open answered $code, want 302"
+		say "ok  pneu open → /open → session cookie"
+
+		if [[ $fail == 1 ]]; then
+			wait_state needs-pull 30
+			grep -q '"failures":1' "$status" || fatal "the killed pull isn't counted as a failure"
+			orphans=(~/mail/"$ACCT"/gmail/mail/tmp/*)
+			[[ -e ${orphans[0]} ]] || fatal "the killed pull left nothing in mail/tmp"
+			say "ok  first pull killed halfway: needs-pull, 1 failure, $(basename "${orphans[0]}") left in mail/tmp"
+			code=$(post /tag "action=archive&account=$ACCT&ids=x")
+			[[ $code == 409 ]] || fatal "archive on an unpulled account answered $code, want 409"
+			say "ok  read-only until pulled: archive refused ($(<"$REHEARSE_SANDBOX/run/post.out"))"
+			code=$(post "/accounts/$ACCT/pull")
+			[[ $code == 200 ]] || fatal "Retry answered $code"
+			say "ok  Retry now (POST /accounts/$ACCT/pull)"
+		fi
+
+		if [[ $fail == 1 ]]; then
+			wait_state reauth "$pull_wait"
+			[[ ! -e ${orphans[0]} ]] || fatal "the retry didn't clear mail/tmp"
+			grep -q 'pull: attempting to resume previous pull' "$REHEARSE_SANDBOX/units/pneu.service.log" 2>/dev/null ||
+				grep -q 'first pull: gmi pull --resume' "$REHEARSE_SANDBOX/units/pneu.service.log" ||
+				fatal "the retry didn't resume"
+			say "ok  retried pull cleared mail/tmp, resumed, and completed"
+			say "ok  token revoked: the next sync failed with invalid_grant, account is reauth"
+			code=$(post "/accounts/$ACCT/reauth")
+			[[ $code == 200 ]] || fatal "Reconnect answered $code: $(<"$REHEARSE_SANDBOX/run/post.out")"
+			consent=$(sed -n 's/.*"url":"\([^"]*\)".*/\1/p' "$REHEARSE_SANDBOX/run/post.out" | sed 's/\\u0026/\&/g')
+			say "ok  Reconnect (POST /accounts/$ACCT/reauth) → $consent"
+			[[ $consent == https://accounts.google.com/* ]] || fatal "consent URL isn't Google's: $consent"
+			rehearse grant "$consent" || fatal "the consent redirect failed"
+			wait_state ready 30
+			for _ in $(seq 100); do grep -q '"lastSync":"[^"]*","failures":0,"error":null' "$status" && break; sleep 0.1; done
+			say "ok  consent given: reconnected, synced again"
+		else
+			wait_state ready "$pull_wait"
+		fi
+		say "ok  first pull done in the server; the account is ready"
+
+		body=$(curl -s -b "$jar" "$app/")
+		grep -q 'New logo lockup for review' <<<"$body" || fatal "the inbox doesn't show the fixture's newest inbox message"
+		say "ok  the inbox renders"
+		n=$(NOTMUCH_CONFIG=~/.config/pneu/$ACCT/notmuch-config notmuch count --exclude=false '*')
+		say "ok  $n messages indexed for $ACCT; last_historyId $(sed 's/.*"last_historyId": \([0-9]*\).*/\1/' ~/mail/"$ACCT"/gmail/.state.gmailieer.json)"
+		for _ in $(seq 100); do grep -q '"lastSync":"[^"]*","failures":0' "$status" && break; sleep 0.1; done
+		grep -q '"lastSync":"[^"]*","failures":0' "$status" || fatal "the server's sync through stubgmi didn't succeed"
+		say "ok  the server synced through stubgmi; status.json written for the bar widget"
+		[[ -s ~/.config/pneu/theme.css ]] && say "ok  theme.css rendered"
+		if [[ $serve == 1 ]]; then
+			pneu open
+			say "serving; Ctrl-C ends the rehearsal"
+			tail -n 0 -f "$REHEARSE_SANDBOX/units/pneu.service.log" --pid="$(<"$REHEARSE_SANDBOX/run/pneu.pid")"
+		fi
+		;;
+	shell)
+		cat <<-EOF
+
+		Rehearsal shell. HOME=$HOME, its own network, lieer is stubgmi.
+		Follow INSTALL.md from the repo root (you are there). Suggested names:
+		  <acct>=$ACCT  <address>=$ADDRESS
+		Step 4 (human):  rehearse-human-oauth <acct>   (then <client JSON> is \$CLIENT_JSON)
+		The server:      step 6's systemctl starts it here; rehearse-serve shows its log
+		Exit the shell to see what the stubs logged.
+
+		EOF
+		bash --noprofile --rcfile "$REHEARSE_SANDBOX/bashrc" -i || true
+		rehearse-serve --stop
+		;;
+	esac
+	exit 0
+fi
+
+# ---------------------------------------------------------------- outside
+mode=run serve=0 keep=0 fail=0
+for a in "$@"; do
+	case $a in
+	run | shell) mode=$a ;;
+	--serve) serve=1 ;;
+	--fail) fail=1 ;;
+	--keep) keep=1 ;;
+	-h | --help) sed -n '2,/^set -euo/p' "$SELF" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
+	*) echo "rehearse: unknown argument $a" >&2; exit 2 ;;
+	esac
+done
+[[ $mode == run ]] && keep=0
+
+# The sandbox is deleted and rebuilt, so it is either a fresh mktemp dir or
+# a REHEARSE_DIR that is strictly inside a temp root and, if it has anything
+# in it, holds the marker this harness writes. Nothing else is ever deleted.
+MARK=.pneu-rehearsal
+refuse() { echo "rehearse: $*" >&2; exit 2; }
+own=0
+if [[ -n ${REHEARSE_DIR:-} ]]; then
+	SANDBOX=$(realpath -m -- "$REHEARSE_DIR")
+	inside=0
+	for root in /tmp "${TMPDIR:-}" "${XDG_RUNTIME_DIR:-}"; do
+		[[ -n $root ]] || continue
+		root=$(realpath -m -- "$root")
+		[[ $root != / && $SANDBOX == "$root"/?* ]] && inside=1
+	done
+	[[ $inside == 1 ]] || refuse "REHEARSE_DIR must be inside /tmp, \$TMPDIR or \$XDG_RUNTIME_DIR, not $SANDBOX"
+	if [[ -e $SANDBOX && ! -f $SANDBOX/$MARK ]]; then
+		[[ -d $SANDBOX && -z $(ls -A -- "$SANDBOX") ]] ||
+			refuse "$SANDBOX exists and wasn't made by rehearse (no $MARK); refusing to delete it"
+	fi
+else
+	[[ $keep == 1 ]] && refuse "--keep needs REHEARSE_DIR: without it every run gets a fresh mktemp dir"
+	SANDBOX=$(mktemp -d "${TMPDIR:-/tmp}/pneu-rehearsal.XXXXXX")
+	own=1 # removed after a successful run
+fi
+PORT=${REHEARSE_PORT:-7417}
+ACCT=${REHEARSE_ACCT:-rehearsal}
+ADDRESS=${REHEARSE_ADDRESS:-rehearsal@example.com}
+
+unshare -rn true 2>/dev/null || {
+	echo "rehearse: unprivileged user and network namespaces are unavailable (unshare -rn failed)" >&2
+	exit 1
+}
+
+if [[ ($keep == 0 || ! -d $SANDBOX/home) && -f $SANDBOX/$MARK ]]; then
+	rm -rf -- "$SANDBOX"
+fi
+mkdir -p "$SANDBOX"/{home,bin,stubs,run,units,tmp}
+: >"$SANDBOX/$MARK"
+: >"$SANDBOX/stubs.log"
+
+# Tools, built outside: the namespace has no network, and GOCACHE is the
+# real one either way.
+(cd "$REPO" && go build -o "$SANDBOX/bin/gmi" ./internal/testmail/cmd/stubgmi &&
+	go build -o "$SANDBOX/bin/rehearse" ./internal/testmail/cmd/rehearse)
+
+H=$SANDBOX/home
+# The parts of a fresh Omarchy install INSTALL.md touches, copied read-only
+# from this machine where they exist.
+mkdir -p "$H/.local/bin" "$H/Downloads" "$H/.config/omarchy/"{branding,plugins,hooks/theme-set.d} "$H/.local/state/omarchy/current/theme"
+cp ~/.config/omarchy/branding/about.txt "$H/.config/omarchy/branding/about.txt" 2>/dev/null ||
+	printf 'omarchy\n' >"$H/.config/omarchy/branding/about.txt"
+cp ~/.local/state/omarchy/current/theme/colors.toml "$H/.local/state/omarchy/current/theme/colors.toml" 2>/dev/null ||
+	printf 'background = "#1a1b26"\nforeground = "#c0caf5"\naccent = "#7aa2f7"\n' >"$H/.local/state/omarchy/current/theme/colors.toml"
+
+cat >"$SANDBOX/env.sh" <<EOF
+export HOME='$H' USER='$USER' LOGNAME='$USER' SHELL=/bin/bash LANG='${LANG:-C.UTF-8}' TERM='${TERM:-xterm}'
+export PATH='$SANDBOX/stubs:$SANDBOX/bin:$H/.local/bin:/usr/local/bin:/usr/bin:/bin'
+export GOCACHE='$(go env GOCACHE)' GOMODCACHE='$(go env GOMODCACHE)' GOTOOLCHAIN=local
+export XDG_RUNTIME_DIR='$SANDBOX/run' TMPDIR='$SANDBOX/tmp'
+export REHEARSE_SANDBOX='$SANDBOX' REPO='$REPO' REHEARSE_PORT='$PORT'
+export ACCT='$ACCT' ADDRESS='$ADDRESS' FULLNAME='Rehearsal User' OTHER_ADDRESS=''
+export CLIENT_JSON='$H/Downloads/client_secret_$ACCT.json'
+export STUBGMI_COUNT='${STUBGMI_COUNT:-2000}'
+$(env | grep -E '^STUBGMI_' | grep -v '^STUBGMI_COUNT=' | sed "s/^\([^=]*\)=\(.*\)$/export \1='\2'/" || true)
+EOF
+[[ $serve == 1 ]] && echo "export REHEARSE_PUBLIC='http://rehearse.localhost:$PORT'" >>"$SANDBOX/env.sh"
+# --fail: kill the first pull halfway, then revoke the token once it's
+# pulled; consent runs as lieer's run_local_server does (localhost:8080).
+# BROWSER is the human at the terminal's consent: it opens the redirect URL.
+[[ $fail == 1 ]] && echo "export STUBGMI_FAIL=kill,token STUBGMI_AUTH=browser BROWSER=rehearse-browser" >>"$SANDBOX/env.sh"
+
+cat >"$SANDBOX/bashrc" <<EOF
+source '$SANDBOX/env.sh'
+PS1='(pneu-rehearsal) \w\$ '
+EOF
+
+# ---- stubs: each logs "name<TAB>args" to stubs.log
+stub() { # stub NAME BODY
+	printf '#!/bin/bash\nprintf "%%s\\t%%s\\n" %q "$*" >>"$REHEARSE_SANDBOX/stubs.log"\n%s\n' "$1" "$2" >"$SANDBOX/stubs/$1"
+	chmod +x "$SANDBOX/stubs/$1"
+}
+logged='echo "(rehearsal) $(basename "$0") $*: logged, not run" >&2'
+for c in sudo pkexec yay omarchy omarchy-shell omarchy-launch-webapp notify-send hyprctl xdg-open loginctl; do
+	stub "$c" "$logged"
+done
+# pacman: queries are read-only, so they run; anything else is logged.
+stub pacman "case \${1:-} in -Q*) exec /usr/bin/pacman \"\$@\" ;; esac; $logged"
+# systemctl: the real user manager ignores the sandbox HOME and would act on
+# the live pneu.service. Nothing reaches it.
+stub systemctl '
+echo "(rehearsal) systemctl $*: logged; the real user manager is never reached" >&2
+case " $* " in
+*" pneu.service "*)
+	case " $* " in
+	*" --now "* | *" start "* | *" restart "*) [[ " $* " == *" disable "* || " $* " == *" stop "* ]] || rehearse-serve --background ;;
+	esac
+	case " $* " in *" stop "* | *" disable --now "*) rehearse-serve --stop ;; esac ;;
+esac
+exit 0'
+# systemd-run: runs the command in the foreground instead of a transient
+# unit, its output kept for the journalctl stub.
+stub systemd-run '
+unit=run; args=()
+while [[ $# -gt 0 && $1 == -* ]]; do [[ $1 == --unit=* ]] && unit=${1#--unit=}; shift; done
+echo "(rehearsal) systemd-run: running unit $unit in the foreground" >&2
+"$@" 2>&1 | tee "$REHEARSE_SANDBOX/units/$unit.log"
+exit "${PIPESTATUS[0]}"'
+stub journalctl '
+for a in "$@"; do case $a in -*u*) want=1 ;; *) [[ ${want:-} == 1 ]] && unit=$a; want= ;; esac; done
+for a in "$@"; do [[ $a == --unit=* ]] && unit=${a#--unit=}; done
+if [[ -n ${unit:-} && -f $REHEARSE_SANDBOX/units/$unit.log ]]; then
+	echo "(rehearsal) journalctl: the output of unit $unit, not followed" >&2
+	cat "$REHEARSE_SANDBOX/units/$unit.log"
+else
+	echo "(rehearsal) journalctl $*: no such rehearsal unit" >&2
+fi'
+# The window launcher: keep the URL (a single-use nonce, never the token).
+stub omarchy-launch-or-focus-webapp '
+printf "%s\n" "$2" >"$REHEARSE_SANDBOX/run/open-url"
+if [[ -n ${REHEARSE_PUBLIC:-} ]]; then
+	echo "(rehearsal) open in your browser: $REHEARSE_PUBLIC/${2#http://*/}" >&2
+else
+	echo "(rehearsal) would have opened the pneu window" >&2
+fi'
+
+# rehearse-human-oauth ACCT: what the human leaves behind after step 4.
+cat >"$SANDBOX/stubs/rehearse-human-oauth" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+acct=${1:?usage: rehearse-human-oauth <acct>}
+f=~/Downloads/client_secret_$acct.json
+mkdir -p "$(dirname "$f")"
+cat >"$f" <<JSON
+{"installed":{"client_id":"000000000000-rehearsal.apps.googleusercontent.com","project_id":"pneu-rehearsal","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_secret":"rehearsal-secret","redirect_uris":["http://localhost"]}}
+JSON
+chmod 600 "$f"
+echo "(rehearsal) downloaded a Desktop-app client JSON to $f"
+EOF
+chmod +x "$SANDBOX/stubs/rehearse-human-oauth"
+
+# rehearse-browser URL: a person allowing access on Google's consent screen,
+# which ends with Google sending the browser to lieer's localhost:8080.
+cat >"$SANDBOX/stubs/rehearse-browser" <<'EOF'
+#!/bin/bash
+echo "(rehearsal) the browser opens the consent screen; the human allows access" >&2
+(sleep 0.2; rehearse grant "$1") &
+EOF
+chmod +x "$SANDBOX/stubs/rehearse-browser"
+
+# rehearse-serve: start the server as the unit would (its ExecStart and
+# Environment, %h expanded), with the lieer stub kept first on PATH.
+cat >"$SANDBOX/stubs/rehearse-serve" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+pidf=$REHEARSE_SANDBOX/run/pneu.pid
+case ${1:-} in
+--stop)
+	[[ -f $pidf ]] && kill "$(cat "$pidf")" 2>/dev/null && while kill -0 "$(cat "$pidf")" 2>/dev/null; do sleep 0.1; done
+	[[ -f $REHEARSE_SANDBOX/run/bridge.pid ]] && kill "$(cat "$REHEARSE_SANDBOX/run/bridge.pid")" 2>/dev/null
+	rm -f "$pidf" "$REHEARSE_SANDBOX/run/bridge.pid"; exit 0 ;;
+esac
+if [[ -f $pidf ]] && kill -0 "$(cat "$pidf")" 2>/dev/null; then
+	[[ ${1:-} == --background ]] && exit 0
+else
+unit=~/.config/systemd/user/pneu.service
+[[ -f $unit ]] || { echo "rehearse-serve: $unit not installed yet (INSTALL.md step 6)" >&2; exit 1; }
+exec_start=$(sed -n 's/^ExecStart=//p' "$unit" | sed "s|%h|$HOME|g")
+unit_path=$(sed -n 's/^Environment=PATH=//p' "$unit" | sed "s|%h|$HOME|g")
+echo "(rehearsal) starting ExecStart=$exec_start, PATH from the unit with the stubs first" >&2
+if [[ -n ${REHEARSE_PUBLIC:-} ]]; then
+	rehearse bridge-in "$REHEARSE_SANDBOX/run/pneu.sock" 127.0.0.1:7317 &
+	echo $! >"$REHEARSE_SANDBOX/run/bridge.pid"
+fi
+PATH="$REHEARSE_SANDBOX/stubs:$REHEARSE_SANDBOX/bin:${unit_path:-$PATH}" $exec_start >"$REHEARSE_SANDBOX/units/pneu.service.log" 2>&1 &
+echo $! >"$pidf"
+for _ in $(seq 100); do
+	grep -q 'pneu listening' "$REHEARSE_SANDBOX/units/pneu.service.log" && break
+	kill -0 "$(cat "$pidf")" 2>/dev/null || { cat "$REHEARSE_SANDBOX/units/pneu.service.log" >&2; exit 1; }
+	sleep 0.1
+done
+echo "(rehearsal) pneu serving; log in $REHEARSE_SANDBOX/units/pneu.service.log" >&2
+fi
+if [[ ${1:-} != --background ]]; then
+	# Foreground: the log until Ctrl-C; the server keeps running.
+	[[ -n ${REHEARSE_PUBLIC:-} ]] && pneu open
+	tail -n +1 -f "$REHEARSE_SANDBOX/units/pneu.service.log" --pid="$(<"$pidf")" || true
+fi
+EOF
+chmod +x "$SANDBOX/stubs/rehearse-serve"
+
+# ---- the browser bridge, outside the namespace
+bridge_pid=
+if [[ $serve == 1 ]]; then
+	"$SANDBOX/bin/rehearse" bridge-out "127.0.0.1:$PORT" "$SANDBOX/run/pneu.sock" pneu.localhost:7317 &
+	bridge_pid=$!
+fi
+
+summary() {
+	local rc=$?
+	[[ -n $bridge_pid ]] && kill "$bridge_pid" 2>/dev/null
+	echo
+	echo "== What the stubs logged (nothing below touched your session)"
+	[[ -s $SANDBOX/stubs.log ]] || echo "  nothing"
+	while IFS=$'\t' read -r name args; do
+		case "$name $args" in
+		"systemctl --user daemon-reload"*) echo "  would have reloaded the systemd user manager" ;;
+		"systemctl --user enable --now "*) echo "  would have enabled and started ${args##* }" ;;
+		"systemctl --user enable "*) echo "  would have enabled ${args##* }" ;;
+		"systemctl --user "*) echo "  would have run: systemctl $args" ;;
+		"systemd-run "*) echo "  would have started a transient unit: systemd-run $args (ran in the foreground instead)" ;;
+		"journalctl "*) echo "  would have followed the journal: journalctl $args" ;;
+		"sudo "*) echo "  would have run as root: $args" ;;
+		"pacman -Q"*) ;;
+		"yay "*) echo "  would have installed from the AUR: yay $args" ;;
+		"omarchy hook install "*) echo "  would have installed an Omarchy hook: omarchy $args" ;;
+		"omarchy-shell shell rescanPlugins"*) echo "  would have made omarchy-shell rescan its plugins" ;;
+		"omarchy plugin enable "*) echo "  would have enabled the Omarchy plugin ${args##* }" ;;
+		"omarchy-launch-or-focus-webapp "*) echo "  would have opened the pneu window (pneu open)" ;;
+		*) echo "  would have run: $name $args" ;;
+		esac
+	done < <([[ -s $SANDBOX/stubs.log ]] && awk '!seen[$0]++' "$SANDBOX/stubs.log")
+	if [[ $mode == run && $own == 1 && $rc == 0 ]]; then
+		[[ -f $SANDBOX/$MARK ]] && rm -rf -- "$SANDBOX"
+		echo "Sandbox removed (REHEARSE_DIR=/tmp/<dir> keeps one to inspect)."
+	elif [[ $mode == run ]]; then
+		echo "Sandbox kept at $SANDBOX; install-steps.sh is what ran, units/ holds the logs."
+	else
+		echo "Sandbox kept at $SANDBOX; \`REHEARSE_DIR=$SANDBOX scripts/rehearse shell --keep\` returns to it."
+	fi
+}
+trap summary EXIT
+trap 'true' INT
+
+# Own network namespace with only a loopback: the sandbox's pneu takes 7317
+# without meeting the real one, and nothing inside can reach the real
+# server, the network, or localhost:8080. A nested user namespace maps us
+# back to our own uid so files stay ours and tools don't run as root.
+uid=$(id -u) gid=$(id -g)
+unshare -rn -- /bin/sh -c '
+	ip link set lo up &&
+	exec unshare --user --map-user="$1" --map-group="$2" -- \
+		env -i REHEARSE_SANDBOX="$3" PATH=/usr/bin:/bin /bin/bash "$4" __inner "$5" "$6" "$7"
+' sh "$uid" "$gid" "$SANDBOX" "$SELF" "$mode" "$serve" "$fail"

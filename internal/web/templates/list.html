@@ -1,0 +1,18 @@
+{{define "content"}}<main class="list" data-view="{{.View}}">
+<div class="pane-title">{{.Title}} · <span class="n">{{len .Rows}}</span></div>
+{{- if .Err}}
+<p class="error">{{.Err}}</p>
+{{- end}}
+<ol>
+{{- range .Rows}}
+<li class="{{.Class}}" data-account="{{.Account}}" data-thread="{{.Thread}}" data-url="{{.URL}}" data-msgids="{{.MsgIDs}}" data-thread-ids="{{.ThreadIDs}}" data-gmail="{{.Gmail}}"><span class="authors">{{.Authors}}</span> <span class="subject">{{.Subject}}</span>{{if gt .Total 1}} <span class="count">{{.Total}}</span>{{end}} <span class="date"><time datetime="{{.ISO}}" title="{{.Title}}">{{.Date}}</time></span></li>
+{{- end}}
+</ol>
+{{- if .Art}}
+<pre class="empty-art" aria-hidden="true">{{.Art}}</pre>
+{{- end}}
+{{- if or .Prev .Next}}
+<nav class="pages">{{if .Prev}}<a rel="prev" href="{{.Prev}}">Newer</a>{{end}} {{if .Next}}<a rel="next" href="{{.Next}}">Older</a>{{end}}</nav>
+{{- end}}
+</main>
+{{end}}

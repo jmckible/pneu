@@ -1,0 +1,32 @@
+Delivered-To: robin@northwind.example
+From: Owen Pryce <owen@northwind.example>
+To: Robin Hale <robin@northwind.example>, Tessa Lund <tessa@northwind.example>, Owen Pryce <owen@northwind.example>
+Subject: Q3 roadmap review
+Date: Mon, 06 Jul 2026 09:02:00 -0500
+Message-ID: <rm-q3-01-owen@northwind.example>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt-rm-q3-01-owe"
+
+--alt-rm-q3-01-owe
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Team,
+
+Draft Q3 roadmap is in the shared folder. Three themes: render speed, the n=
+ew report templates, and SSO for enterprise.
+
+Please leave comments by Wednesday so we can lock it Thursday.
+
+Owen
+--alt-rm-q3-01-owe
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+<html><body><div style=3D"font-family:Calibri,sans-serif;font-size:11pt"><p=
+>Team,</p><p>Draft Q3 roadmap is in the shared folder. Three themes: render=
+ speed, the new report templates, and SSO for enterprise.</p><p>Please l=
+eave comments by Wednesday so we can lock it Thursday.</p><p>Owen</p></di=
+v></body></html>
+
+--alt-rm-q3-01-owe--

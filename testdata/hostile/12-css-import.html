@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>css @import</title>
+<style>
+@import url(http://tracker.invalid/12-import.css);
+@import "http://tracker.invalid/12-import-string.css";
+@import url(//tracker.invalid/12-import-protocol-relative.css) screen;
+p { color: #1a2f8b; }
+</style>
+</head>
+<body>
+<p class="canary">12 @import: this line must be dark blue (rules after the imports survive).</p>
+</body>
+</html>

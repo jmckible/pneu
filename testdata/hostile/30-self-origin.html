@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>self origin</title>
+</head>
+<body>
+<p class="canary">30 same-origin relative URLs: this paragraph must render; no request may change state.</p>
+<img src="/api/tag?add=trash&amp;query=*" width="1" height="1" alt="">
+<img src="/logout" width="1" height="1" alt="">
+<img src="../../../etc/passwd" width="1" height="1" alt="">
+<a href="/api/tag?add=trash&amp;query=*">relative link into the app</a>
+<form action="/api/tag" method="post"><input name="add" value="trash"><button>post into the app</button></form>
+</body>
+</html>

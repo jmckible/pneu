@@ -1,0 +1,125 @@
+{
+  "personal": {
+    "CAH7x2Lq-cabin-1@mail.ortega.example": [],
+    "CAJm4kR9-cabin-2@mail.gmail.com": [
+      "sent"
+    ],
+    "b7e1c0d2-44aa-4c1e-9d3e-cabin3@fastmail.example": [
+      "inbox",
+      "unread"
+    ],
+    "0100019a7c3e-kitchen-1@delgadobuild.example": [
+      "inbox"
+    ],
+    "0100019a9d11-kitchen-2@delgadobuild.example": [
+      "inbox",
+      "unread",
+      "flagged"
+    ],
+    "20260803112209.9f1c2a@mta.acme-outfitters.example": [
+      "receipts"
+    ],
+    "QK7P2M.20260820210544@res.harborair.example": [
+      "inbox",
+      "flagged",
+      "receipts"
+    ],
+    "issue-112.a8c1f0@send.weekendreader.example": [
+      "inbox",
+      "unread"
+    ],
+    "5f2e9a10-trip-photos@fastmail.example": [
+      "inbox",
+      "flagged"
+    ],
+    "DW-20260814094820-fwd@whitfield-property.example": [
+      "inbox"
+    ],
+    "renee-cafe-20260714@francois.example": [
+      "inbox"
+    ],
+    "3f9a.juergen.20260505@mueller.example": [],
+    "maya40-invite-8d2f@example.net": [
+      "inbox",
+      "unread"
+    ],
+    "appt-88421-invite@brightsmile.example": [
+      "inbox",
+      "unread"
+    ],
+    "hoa-annual-reschedule-2026@cedarparkhoa.example": [
+      "inbox"
+    ],
+    "CAH7x2Lq-nosubject@mail.ortega.example": [
+      "inbox",
+      "unread"
+    ],
+    "scan-20260318100500@printer.local": [],
+    "x9q7w.rewards.20260920@rewards-center.example": [
+      "spam",
+      "unread"
+    ],
+    "digest-2026-37-8812@neighbors.example": [
+      "trash"
+    ],
+    "hostile-19-mxss@acc0unts-verify.example": [
+      "inbox",
+      "unread"
+    ],
+    "CAKv0c-w9-crossacct@mail.gmail.com": [
+      "inbox",
+      "unread"
+    ]
+  },
+  "work": {
+    "CAKv0c-w9-crossacct@mail.gmail.com": [
+      "sent"
+    ],
+    "rm-q3-01-owen@northwind.example": [],
+    "rm-q3-02-tessa@northwind.example": [],
+    "CAJm4kR9-rm-q3-03@mail.gmail.com": [
+      "sent"
+    ],
+    "rm-q3-04-owen@northwind.example": [
+      "inbox",
+      "unread"
+    ],
+    "HVC-esc-4471-1@harborview.example": [
+      "inbox"
+    ],
+    "HVC-esc-4471-2@northwind.example": [
+      "inbox",
+      "unread",
+      "flagged"
+    ],
+    "deploy-summary-20260918@ci.northwind.example": [
+      "inbox"
+    ],
+    "northwind/app/pull/4821@codehost.example": [
+      "inbox",
+      "unread"
+    ],
+    "inv-2026-0931@billing.cloudline.example": [
+      "receipts"
+    ],
+    "lw-translations-pl-20260714@tlumacze.example": [
+      "inbox"
+    ],
+    "tl-offsite-notes-2026@northwind.example": [
+      "flagged"
+    ],
+    "op-board-deck-draft@northwind.example": [
+      "flagged"
+    ],
+    "seo-outreach-99812@seo-growth.example": [
+      "spam"
+    ],
+    "trial-ending-5521@formstack-trials.example": [
+      "trash"
+    ],
+    "hostile-15-cid@partner-agency.example": [
+      "inbox",
+      "unread"
+    ]
+  }
+}

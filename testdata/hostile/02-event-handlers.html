@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>event handlers</title>
+</head>
+<body onload="top.__pwned='02-body-onload'">
+<p class="canary">02 event handlers: this paragraph must render.</p>
+<img src="x" onerror="top.__pwned='02-img-onerror'" alt="broken image, no handler">
+<IMG SRC=x ONERROR=top.__pwned='02-uppercase'>
+<div onmouseover="top.__pwned='02-hover'" style="padding:12px;background:#eef">hover me: nothing happens</div>
+<input autofocus onfocus="top.__pwned='02-autofocus'">
+<details open ontoggle="top.__pwned='02-ontoggle'"><summary>details</summary>body</details>
+<video><source onerror="top.__pwned='02-source-onerror'"></video>
+<a href="https://example.com/" onclick="top.__pwned='02-onclick'">a link whose onclick must be gone</a>
+<marquee onstart="top.__pwned='02-marquee'">marquee</marquee>
+<body onpageshow="top.__pwned='02-second-body'">
+</body>
+</html>
