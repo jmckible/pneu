@@ -127,35 +127,64 @@ Everything below copies files out of the repo rather than linking to them, so
 a later `git pull` changes nothing that runs until you reinstall on purpose.
 The exception is the bar widget in step 7.
 
-## 3. Choose account names
+## 3. The account
 
-Each Gmail account gets a short name (`personal`, `work`), used in paths and
-commands. The rest of this document uses `<acct>` and `<address>`. Repeat
-steps 4–5 for each account. Accounts are fully independent: separate
+Ask the human for one thing: the Gmail address (`<address>`). Work out the
+rest, then show all four values and let the human correct any of them:
+
+- **Kind:** `gmail.com` or `googlemail.com` is a personal account; any other
+  domain is Google Workspace. Step 4 differs between them.
+- **Account name** (`<acct>`), a short name used in paths and commands:
+  `personal` for a personal account, otherwise the domain's first label
+  (`work@acme.com` → `acme`).
+- **Display name** (`<Your Name>`): the full name in
+  `getent passwd "$USER"`, else `git config user.name`.
+
+Repeat steps 3–5 for each account. Accounts are fully independent: separate
 maildirs, separate notmuch databases, separate OAuth tokens.
 
 ## 4. OAuth client (human)
 
-lieer needs a Google OAuth client. Create your own; it keeps quota and consent
-under your control.
+lieer needs a Google OAuth client, and each person makes their own, so quota
+and consent stay under their control. This is the one long human step.
 
-1. In Google Cloud Console, create a project. For a Google Workspace account,
-   create it inside that organization.
-2. APIs & Services → enable **Gmail API**.
-3. Google Auth Platform → **Audience**:
-   - **gmail.com account:** choose *External*, then **Publish app** so it is
-     *In production*. Left in *Testing*, Gmail refresh tokens expire after
-     seven days and sync stops silently every week. Production without
-     verification is fine for your own account; you'll click through an
-     "unverified app" warning once.
-   - **Workspace account:** choose *Internal*. There's no verification and no
-     expiry. If your admin restricts third-party apps, allow this client in
+**Agents:** walk the human through it one screen at a time. Open each link
+with `xdg-open`, say what to do on that screen, and wait for "done" before
+the next one. Every link carries `authuser=<address>` so the Console opens
+as the right Google account, and after the first screen
+`project=<project ID>`.
+
+1. **Project:** `https://console.cloud.google.com/projectcreate?authuser=<address>`.
+   Name it `pneu`; for a Workspace account, pick that organization as its
+   location. Ask the human for the project ID the Console shows (it may
+   differ from the name).
+2. **Gmail API:**
+   `https://console.cloud.google.com/apis/library/gmail.googleapis.com?authuser=<address>&project=<project ID>`
+   → **Enable**.
+3. **Get started:**
+   `https://console.cloud.google.com/auth/overview?authuser=<address>&project=<project ID>`.
+   The first visit asks for an app name (`pneu`), a support email and a
+   contact email (both `<address>`), and the audience:
+   - **Personal account:** *External*.
+   - **Workspace account:** *Internal*. There's no verification and no
+     expiry. If the admin restricts third-party apps, allow this client in
      Admin → Security → API controls.
-4. **Data Access:** add `gmail.readonly`, `gmail.labels` and `gmail.modify`.
-5. **Clients** → Create client → **Desktop app**. Download its JSON. Step 5
-   copies it into place (mode 0600); keep it out of shared folders
-   meanwhile. The rest of this document calls the downloaded file
-   `<client JSON>`.
+4. **Publish** (personal accounts only):
+   `https://console.cloud.google.com/auth/audience?authuser=<address>&project=<project ID>`
+   → **Publish app**, so it is *In production*. Left in *Testing*, Gmail
+   refresh tokens expire after seven days and sync stops silently every
+   week. Production without verification is fine for your own account; the
+   consent screen shows an "unverified app" warning once.
+5. **Client:**
+   `https://console.cloud.google.com/auth/clients/create?authuser=<address>&project=<project ID>`
+   → application type **Desktop app** → **Create** → **Download JSON**.
+
+The scope list (*Data Access*) can stay empty: lieer asks for its three
+scopes on the consent screen in step 5.
+
+The download is the newest `~/Downloads/client_secret_*.json`; find it
+there rather than asking the human for the path. The rest of this document
+calls it `<client JSON>`. Step 5 copies it into place (mode 0600).
 
 ## 5. Account setup
 
@@ -216,7 +245,7 @@ systemctl --user enable --now pneu.service
 ```
 
 **Adding an account later.** The server reads its accounts only when it
-starts. After steps 4–5 for a new account, restart it:
+starts. After steps 3–5 for a new account, restart it:
 `systemctl --user restart pneu.service`. `pneu account add` reminds you
 when a server is running.
 
