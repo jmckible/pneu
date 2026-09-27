@@ -2,7 +2,7 @@
 
 ![The postmark, stamped in red on a petit bleu](stamp-paper.webp)
 
-Pneu is named for the Paris *pneumatique*: a letter went by tube under the city and
+pneu is named for the Paris *pneumatique*: a letter went by tube under the city and
 arrived within the hour, on a blue card Parisians called a *petit bleu*. The brand is
 that letter's postmark. The mark is the postmark's centre, a **p drawn as a tube**:
 two walls with the bore between them, open at the foot of the stem where the letter
@@ -19,14 +19,18 @@ other's range.
 
 | file | cut | use |
 |---|---|---|
-| `mark.svg` | drawn | 48 px and up, and anywhere it's printed |
-| `mark-pixel.svg` | pixel | below 48 px: the bar, the window header, favicons. Whole multiples of 15 **device** pixels only (a whole number of device pixels per unit), with `shape-rendering: crispEdges`. At fractional scale that means sizing from `devicePixelRatio`, not a fixed CSS size |
+| `mark.svg` | drawn | from about 22 device px up: the window header (18 CSS px on a HiDPI screen), icons 48 and up, the page, print |
+| `mark-pixel.svg` | pixel | where the mark must be smaller than that: the bar, 16 and 32 px icons, favicons. Whole multiples of 15 **device** pixels only (a whole number of device pixels per unit), with `shape-rendering: crispEdges`. At fractional scale that means sizing from `devicePixelRatio`, not a fixed CSS size |
 
-**Why two cuts.** Below about 30 px the gap between the two walls is under a pixel.
-On a curve, antialiasing smears it to grey and the p goes to mush. Round rects stay
+**Why two cuts.** The drawn cut needs about one and a half device pixels per unit
+(22 device px for the whole mark) before the gap between its walls holds. Below that,
+antialiasing smears the gap on the curves to grey and the p goes to mush. Round rects stay
 sharp because straight runs land on whole pixel rows; that's why they shrink well.
 The pixel cut keeps the round bowl and lays every wall on a pixel row by hand, the way
-Omarchy's icon is drawn.
+Omarchy's icon is drawn. It is exact but stepped, so use it only where the drawn cut
+can't hold: at a size where the pixel steps show, the drawn cut reads better. In the
+window header, the pixel cut at 15 device px looked rough beside the type, and the
+drawn cut at 22.5 did not.
 
 **Geometry** (for redrawing, not for tweaking): 15 × 15 units. The bowl is a
 superellipse, |x|^2.6 + |y|^2.6 = r^2.6, about (7.5, 6.5), with the outer wall's
@@ -47,7 +51,7 @@ Both cuts use `currentColor`. Inline them to take the colour of their surroundin
 | paper | `#e2d3ab` | manila, the ground behind the stamp |
 
 **Inside the app, the mark takes the theme**: `currentColor`, set from the theme's
-`--accent` (or `--fg`), never the fixed brand colours. Pneu follows the Omarchy theme
+`--accent` (or `--fg`), never the fixed brand colours. pneu follows the Omarchy theme
 and the mark follows with it. The fixed colours are for things that exist outside a
 theme: the app icon, the favicon, the README, printed matter.
 
@@ -62,8 +66,8 @@ theme: the app icon, the favicon, the README, printed matter.
   of the word.
 - The app's UI keeps its own mono face and the theme font. The pen is for the name
   only.
-- Prose capitalisation (the window title "Pneu", "Pneu is…" in docs) hasn't been
-  decided. Ask before changing it.
+- **Lower case everywhere**, prose included: at the start of a sentence, in the
+  window title, the desktop entry, the manifest and tooltips.
 
 ## The postmark
 
@@ -75,7 +79,7 @@ Ring texts are French, then English, lower case, joined by middle dots.
 
 - **dans l'heure · within the hour ·** is the stamp. It's the pneumatique's promise.
 - **sous la ville · under the city ·** (`stamp-sous-la-ville.svg`) is held for other
-  uses. It describes the route and quietly describes Pneu too: lieer and notmuch
+  uses. It describes the route and quietly describes pneu too: lieer and notmuch
   work underneath, out of sight.
 
 The stamp keeps its three waves. Two waves read as stink lines, and the waves never
@@ -89,7 +93,8 @@ go on the small mark.
 | 48 to 512 | app icon, drawn cut: `icon.svg`, `icon-{48,64,120,128,256,512}.png` |
 | 16, 32 | app icon, pixel cut: `icon-small.svg`, `icon-16.png`, `icon-32.png` |
 | favicon | `favicon.svg` (the pixel cut on the tile) |
-| bar, header | `mark-pixel.svg` at one device pixel per unit, rounded from the display's scale (15 device px at 1×, 30 at 2×), in the theme's colour |
+| window header | `mark.svg` inlined at 18 CSS px (22.5 device px at 1.25×), in the theme's colour. Softer on a 1× screen |
+| bar | `mark-pixel.svg` at one device pixel per unit, rounded from the display's scale (15 device px at 1×, 30 at 2×), in the theme's colour |
 
 `icon-120.png` is the size Google's OAuth consent screen asks for.
 
