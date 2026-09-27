@@ -245,9 +245,7 @@ mkdir -p "$SANDBOX"/{home,bin,stubs,run,units,tmp}
 H=$SANDBOX/home
 # The parts of a fresh Omarchy install INSTALL.md touches, copied read-only
 # from this machine where they exist.
-mkdir -p "$H/.local/bin" "$H/Downloads" "$H/.config/omarchy/"{branding,plugins,hooks/theme-set.d} "$H/.local/state/omarchy/current/theme"
-cp ~/.config/omarchy/branding/about.txt "$H/.config/omarchy/branding/about.txt" 2>/dev/null ||
-	printf 'omarchy\n' >"$H/.config/omarchy/branding/about.txt"
+mkdir -p "$H/.local/bin" "$H/Downloads" "$H/.config/omarchy/"{plugins,hooks/theme-set.d} "$H/.local/state/omarchy/current/theme"
 cp ~/.local/state/omarchy/current/theme/colors.toml "$H/.local/state/omarchy/current/theme/colors.toml" 2>/dev/null ||
 	printf 'background = "#1a1b26"\nforeground = "#c0caf5"\naccent = "#7aa2f7"\n' >"$H/.local/state/omarchy/current/theme/colors.toml"
 

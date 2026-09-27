@@ -534,20 +534,20 @@ ul.suggest li.active { background: var(--selection); }
    last row away reveals it without a reload. line-height 1.2 makes a
    terminal cell (0.6em x 1.2em), so art drawn for terminals keeps its
    proportions; block glyphs overrun the line box, so rows still join. */
-.empty-art {
+/* The empty list's watermark: pneu's mark, faint in the theme's colours. */
+.empty-mark {
   display: none;
+  flex: none;
   margin: auto;
-  max-width: 100%;
-  overflow: hidden;
-  font: inherit;
-  font-size: 10px;
-  line-height: 1.2;
+  width: 160px;
+  height: 160px;
+  max-width: 50%;
   color: color-mix(in srgb, var(--fg) 9%, var(--bg));
   user-select: none;
 }
 /* Centered in the list pane. Split, the pane's grid row gives it a height
-   and the art takes the auto margins below the title; narrow, the list is
+   and the mark takes the auto margins below the title; narrow, the list is
    the only pane, so the window's center is the pane's. */
 main.list:not(:has(.row:not(.removing))) { display: flex; flex-direction: column; }
-main.list:not(:has(.row:not(.removing))) .empty-art { display: block; }
-body:not(.split) .empty-art { position: fixed; inset: 0; width: fit-content; height: fit-content; }
+main.list:not(:has(.row:not(.removing))) .empty-mark { display: block; }
+body:not(.split) .empty-mark { position: fixed; inset: 0; }

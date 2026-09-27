@@ -240,7 +240,6 @@ for n in 16 32 48 64 128 256 512; do install -Dm644 brand/icon-$n.png ~/.local/s
 install -Dm644 brand/icon.svg ~/.local/share/icons/hicolor/scalable/apps/pneu.svg
 omarchy hook install theme-set install/pneu-theme    # copies the hook
 install/pneu-theme                                   # render the current theme once
-ln -s ~/.config/omarchy/branding/about.txt ~/.config/pneu/empty.txt   # empty-list watermark (optional)
 
 ln -s "$PWD" ~/.config/omarchy/plugins/pneu          # the bar widget
 omarchy-shell shell rescanPlugins

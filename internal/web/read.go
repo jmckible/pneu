@@ -48,11 +48,11 @@ type row struct {
 
 type listPage struct {
 	Page
-	Rows []row
-	Prev string
-	Next string
-	Err  string
-	Art  string // watermark shown once the list is empty; see emptyArt
+	Rows  []row
+	Prev  string
+	Next  string
+	Err   string
+	Empty bool // show the mark as a watermark once the list is empty
 	// The title row's position (positionText): Start is the page's offset,
 	// Total the query's thread count or -1 while unknown (app.js asks for
 	// it with ?total=1).
@@ -156,10 +156,8 @@ func (s *Server) list(view, title, fixed string) http.HandlerFunc {
 		}
 		data.Position = positionText(data.Start, len(data.Rows), data.Total, data.Prev != "" || data.Next != "")
 		// Rendered with rows too: triage can empty the list in place, and
-		// app.css shows the art only once no row is left.
-		if data.Err == "" && strings.TrimSpace(query) != "" {
-			data.Art = s.emptyArt()
-		}
+		// app.css shows the mark only once no row is left.
+		data.Empty = data.Err == "" && strings.TrimSpace(query) != ""
 		s.render(w, status, "list", data)
 	}
 }

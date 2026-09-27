@@ -38,7 +38,6 @@ func serverFor(t *testing.T, fixture []testmail.Account) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.EmptyArtPath = filepath.Join(t.TempDir(), "absent.txt") // never the real ~/.config file
 	return s
 }
 
@@ -428,5 +427,17 @@ func TestOpenWithSessionGoesHome(t *testing.T) {
 	// The real launch still works afterwards.
 	if w := do(s, "GET", open, nil); w.Code != http.StatusFound {
 		t.Fatalf("launch after session open: %d", w.Code)
+	}
+}
+
+func TestEmptyListShowsMark(t *testing.T) {
+	s := newServer(t)
+	w := do(s, "GET", "/search?q=subject:no-such-message-anywhere", withCookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("search: %d %q", w.Code, w.Body)
+	}
+	body := w.Body.String()
+	if strings.Contains(body, `class="row`) || !strings.Contains(body, `<svg class="empty-mark" aria-hidden="true" viewBox="0 0 15 15"><g fill="none" stroke="currentColor"`) {
+		t.Fatalf("empty list without the mark: %q", body)
 	}
 }

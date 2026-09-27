@@ -37,8 +37,6 @@ type Server struct {
 	Syncer    Syncer // nil in tests that don't care
 	PerPage   int    // threads per list page; each account is asked for enough to fill it
 	ThemePath string // override for tests; default ThemePath()
-	// EmptyArtPath overrides EmptyArtPath() for tests.
-	EmptyArtPath string
 	// TagTimeout bounds a tag write's wait on the Xapian lock; 0 means
 	// notmuch.TagTimeout. Past it POST /tag answers 503.
 	TagTimeout time.Duration

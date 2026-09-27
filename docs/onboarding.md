@@ -421,7 +421,7 @@ Account state and progress are rendered into the page and then pushed by SSE
 ### UI
 
 - **No ready account.** The list area is an onboarding panel instead of the
-  `empty.txt` watermark, with one block per account:
+  empty list's watermark, with one block per account:
   - `unconfigured` / `unauthorized`: the exact `pneu account …` command to
     run. The app can't do these steps.
   - `pulling`: a phase line and a meter, e.g. "Listing — 41,200 found", then

@@ -120,9 +120,8 @@ and build order; this file is the working contract. Read PLAN.md before touching
   `--bg`, `--fg`, `--accent`, `--selection` to `~/.config/pneu/theme.css`;
   app.css derives muted/border/unread from bg/fg with `color-mix`. Don't add
   rungs to the hook or hardcode them in app.css.
-- An empty list shows `~/.config/pneu/empty.txt` (plain UTF-8 text art,
-  16KB cap) as a watermark. INSTALL.md links it to Omarchy's
-  `branding/about.txt`; the engine never reads `~/.config/omarchy`.
+- An empty list shows pneu's mark (the `mark` template in base.html, the
+  drawn cut of brand/mark.svg) as a faint watermark in the theme's colours.
 - HTML bodies render in the app's colors unless the sanitized document
   declares a background or text color (inline style, `<style>`, `bgcolor`/
   `text`/`color`/`background` attributes), in which case the frame is the
