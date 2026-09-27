@@ -561,12 +561,9 @@ ul.suggest li.active { background: var(--selection); }
 
 /* ---- empty list -------------------------------------------------------- */
 
-/* The desktop's logo (empty.txt, linked at install) as a watermark once a list
-   has no rows left: server-rendered always, shown by :has so triaging the
-   last row away reveals it without a reload. line-height 1.2 makes a
-   terminal cell (0.6em x 1.2em), so art drawn for terminals keeps its
-   proportions; block glyphs overrun the line box, so rows still join. */
-/* The empty list's watermark: pneu's mark, faint in the theme's colours. */
+/* The empty list's watermark: pneu's mark, faint in the theme's colours.
+   Server-rendered always, shown by :has so triaging the last row away
+   reveals it without a reload. */
 .empty-mark {
   display: none;
   flex: none;
