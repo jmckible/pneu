@@ -79,8 +79,8 @@ the social card, printed matter.
   of the word.
 - The app's UI keeps its own mono face and the theme font. The pen is for the name
   only.
-- Prose on the pages and the social card is Georgia (with a serif fallback): set type,
-  like the letter under the postmark.
+- Prose on the pages is Georgia (with a serif fallback): set type, like the letter
+  under the postmark.
 - **Lower case everywhere**, prose included: at the start of a sentence, in the
   window title, the desktop entry, the manifest and tooltips.
 
@@ -123,7 +123,7 @@ go on the small mark.
 | launcher icon | `mark.svg` alone, no tile, in the Omarchy theme's accent. `install/pneu-theme` rewrites it into the hicolor theme (scalable, one unit of margin) on every theme switch |
 | favicon | `favicon.svg` (the pixel cut on the tile) |
 | fixed-colour icon | `icon.svg`, `icon-*.png`: the mark in stamp red on the petit bleu tile, only where no theme applies |
-| social card | 1280 × 640, in the site repo: paper ground, the inked stamp, the pen name with room, one line of prose |
+| social card | 1280 × 640, in the site repo: the inked stamp and the pen name, centred as a pair on the paper ground with the waves pointing at the name. No copy: the pitch goes in the page's `og:description` |
 | window header | `mark.svg` inlined at 18 CSS px (22.5 device px at 1.25×), in the theme's colour. Softer on a 1× screen |
 | bar | `pneu-mark.ttf`, U+E000, at the bar's icon-font size, in the theme's colour |
 
