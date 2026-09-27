@@ -182,7 +182,10 @@ BarWidget {
     // its runs so it takes stateColor. Each of its 15 grid units must cover
     // a whole number of device pixels, or the walls come out uneven at
     // Omarchy's fractional scales: 15px at 1x, 30 at 2x, 30 device px at 1.6.
-    readonly property real dpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
+    // The window's ratio, not the screen's: at Hyprland scale 1.6 Qt
+    // reports the screen as 2 but renders the bar at 1.6.
+    readonly property real dpr: Window.window && Window.window.devicePixelRatio > 0
+      ? Window.window.devicePixelRatio : (Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1)
     readonly property real unit: Math.max(1, Math.round(dpr)) / dpr
     readonly property real markSize: 15 * unit
     // A first download shows its progress in place of the count.
