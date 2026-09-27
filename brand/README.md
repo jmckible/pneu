@@ -82,6 +82,16 @@ Ring texts are French, then English, lower case, joined by middle dots.
   uses. It describes the route and quietly describes pneu too: lieer and notmuch
   work underneath, out of sight.
 
+**Printed, not drawn.** On pages, use the inked export: `stamp-inked.webp` and
+`stamp-sous-la-ville-inked.webp` (1500 × 900, transparent, for up to 500 CSS px wide
+at 3×). The press is baked in: a slight bleed, a rough edge and uneven ink, sized so the
+p's walls never close. Every part goes through the same press, so the thin walls no
+longer look softer than the thick ring. Baking it rather than filtering it on the page
+keeps it identical in every browser and costs nothing at runtime. On a light ground,
+set it with `mix-blend-mode: multiply` so the paper's fibres show through the ink, as
+they would. On a dark ground, use normal blending. The SVGs stay for print and for
+anywhere that needs a vector.
+
 The stamp keeps its three waves. Two waves read as stink lines, and the waves never
 go on the small mark.
 
@@ -89,7 +99,8 @@ go on the small mark.
 
 | size | what |
 |---|---|
-| page, README, print | the postmark, or the paper stamp (`stamp-paper.webp`) |
+| page, README | the inked postmark (`stamp-inked.webp`), or the paper stamp (`stamp-paper.webp`) |
+| print | the postmark (`stamp.svg`) |
 | 48 to 512 | app icon, drawn cut: `icon.svg`, `icon-{48,64,120,128,256,512}.png` |
 | 16, 32 | app icon, pixel cut: `icon-small.svg`, `icon-16.png`, `icon-32.png` |
 | favicon | `favicon.svg` (the pixel cut on the tile) |
