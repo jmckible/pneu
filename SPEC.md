@@ -1,4 +1,4 @@
-# Pneu UI spec
+# pneu UI spec
 
 Decisions from the 2026-09-24 design pass. Colors come from the desktop theme
 (`/theme.css`, from the Omarchy theme's colors.toml); this file decides everything else.

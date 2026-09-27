@@ -150,7 +150,7 @@ func TestCookieFlow(t *testing.T) {
 	}
 
 	w = do(s, "GET", "/", func(r *http.Request) { r.AddCookie(c) })
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "<title>Inbox · Pneu</title>") {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "<title>Inbox · pneu</title>") {
 		t.Fatalf("with cookie: %d %q", w.Code, w.Body)
 	}
 	if w := do(s, "GET", "/static/app.css", withCookie); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "--bg") {

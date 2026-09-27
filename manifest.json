@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "pneu",
-  "name": "Pneu",
+  "name": "pneu",
   "version": "1.0.0",
   "author": "Jordan McKible",
   "license": "MIT",
@@ -13,7 +13,7 @@
     "barWidget": "shell/BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Pneu",
+    "displayName": "pneu",
     "description": "Unread inbox threads across your accounts; warns when sync fails or the server is down",
     "category": "Info",
     "allowMultiple": false,

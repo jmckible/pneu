@@ -3,7 +3,7 @@
 ## Shape
 
 - **Gmail stays the backend.** Server-side filters, spam handling, and the phone app
-  all keep working untouched. Pneu is a view, not a migration.
+  all keep working untouched. pneu is a view, not a migration.
 - **Substrate:** [lieer](https://github.com/gauteh/lieer) syncs each account (Gmail
   API, two-way tag↔label) into a maildir; **one notmuch database per account**.
   notmuch is the entire data layer — the app has no database of its own. Two

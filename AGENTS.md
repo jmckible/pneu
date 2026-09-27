@@ -1,4 +1,4 @@
-# Pneu — working notes for agents
+# pneu — working notes for agents
 
 Gmail-native mail client for Omarchy. README.md is the pitch, PLAN.md is the design
 and build order; this file is the working contract. Read PLAN.md before touching code.

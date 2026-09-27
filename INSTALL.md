@@ -236,6 +236,8 @@ first-pull step.
 
 ```sh
 install -Dm644 install/pneu.desktop ~/.local/share/applications/pneu.desktop
+for n in 16 32 48 64 128 256 512; do install -Dm644 brand/icon-$n.png ~/.local/share/icons/hicolor/${n}x$n/apps/pneu.png; done
+install -Dm644 brand/icon.svg ~/.local/share/icons/hicolor/scalable/apps/pneu.svg
 omarchy hook install theme-set install/pneu-theme    # copies the hook
 install/pneu-theme                                   # render the current theme once
 ln -s ~/.config/omarchy/branding/about.txt ~/.config/pneu/empty.txt   # empty-list watermark (optional)
@@ -263,6 +265,7 @@ click, for example your own scratchpad toggle.
 ```sh
 systemctl --user disable --now pneu.service
 rm ~/.config/systemd/user/pneu.service ~/.local/share/applications/pneu.desktop
+rm ~/.local/share/icons/hicolor/*/apps/pneu.{png,svg}
 rm ~/.config/omarchy/hooks/theme-set.d/pneu-theme ~/.config/omarchy/plugins/pneu
 rm ~/.local/bin/pneu
 rm -r ~/.local/state/pneu ~/.config/pneu     # token, launch nonce, configs, OAuth client JSON

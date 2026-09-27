@@ -1,0 +1,119 @@
+# pneu: the brand
+
+![The postmark, stamped in red on a petit bleu](stamp-paper.webp)
+
+Pneu is named for the Paris *pneumatique*: a letter went by tube under the city and
+arrived within the hour, on a blue card Parisians called a *petit bleu*. The brand is
+that letter's postmark. The mark is the postmark's centre, a **p drawn as a tube**:
+two walls with the bore between them, open at the foot of the stem where the letter
+comes out.
+
+It belongs to the same family as Omarchy's own icon without copying it. Both are drawn
+on a 15 × 15 grid with walls one unit thick, and Omarchy's two rings become the tube's
+two walls.
+
+## The mark
+
+Two cuts of one design. Use the one that fits the size; never scale one into the
+other's range.
+
+| file | cut | use |
+|---|---|---|
+| `mark.svg` | drawn | 48 px and up, and anywhere it's printed |
+| `mark-pixel.svg` | pixel | below 48 px: the bar, the window header, favicons. Whole multiples of 15 **device** pixels only (a whole number of device pixels per unit), with `shape-rendering: crispEdges`. At fractional scale that means sizing from `devicePixelRatio`, not a fixed CSS size |
+
+**Why two cuts.** Below about 30 px the gap between the two walls is under a pixel.
+On a curve, antialiasing smears it to grey and the p goes to mush. Round rects stay
+sharp because straight runs land on whole pixel rows; that's why they shrink well.
+The pixel cut keeps the round bowl and lays every wall on a pixel row by hand, the way
+Omarchy's icon is drawn.
+
+**Geometry** (for redrawing, not for tweaking): 15 × 15 units. The bowl is a
+superellipse, |x|^2.6 + |y|^2.6 = r^2.6, about (7.5, 6.5), with the outer wall's
+centreline at r 6, the inner at r 4, and walls 1 unit thick. The stem's walls run down
+x 1.5 and 3.5 to the foot, open. The outer wall leaves the bowl where it meets the
+stem's inner wall. n 2.6 is "nearly round": it reads as a circle, with a little more
+body at the shoulders.
+
+Both cuts use `currentColor`. Inline them to take the colour of their surroundings.
+
+## Colour
+
+| | | |
+|---|---|---|
+| petit bleu | `#86aecb` | the card; the app icon's ground |
+| stamp red | `#a8261f` | the ink: the mark on the icon, the stamp |
+| ink | `#221c1d` | the name on paper |
+| paper | `#e2d3ab` | manila, the ground behind the stamp |
+
+**Inside the app, the mark takes the theme**: `currentColor`, set from the theme's
+`--accent` (or `--fg`), never the fixed brand colours. Pneu follows the Omarchy theme
+and the mark follows with it. The fixed colours are for things that exist outside a
+theme: the app icon, the favicon, the README, printed matter.
+
+## The name
+
+- **Always lower case: pneu.** In the pen, Beth Ellen, outlined, no font needed:
+  `wordmark.svg` (currentColor, for inlining), `wordmark-ink.svg` (on light
+  grounds), `wordmark-paper.svg` (on dark). As an `<img>`, currentColor renders
+  black, so use the fixed pair in a `<picture>` with `prefers-color-scheme`.
+- **Keep the mark and the name apart.** There is no lockup file on purpose. Set them
+  with generous room, or use only one. Never let the p stand in for the first letter
+  of the word.
+- The app's UI keeps its own mono face and the theme font. The pen is for the name
+  only.
+- Prose capitalisation (the window title "Pneu", "Pneu is…" in docs) hasn't been
+  decided. Ask before changing it.
+
+## The postmark
+
+`stamp.svg`: the mark inside a ring of text with the three cancellation waves beside
+it. Special Elite, outlined. It appears only where there's room for the waves: the
+README, a page header, print. Below that, the mark goes alone.
+
+Ring texts are French, then English, lower case, joined by middle dots.
+
+- **dans l'heure · within the hour ·** is the stamp. It's the pneumatique's promise.
+- **sous la ville · under the city ·** (`stamp-sous-la-ville.svg`) is held for other
+  uses. It describes the route and quietly describes Pneu too: lieer and notmuch
+  work underneath, out of sight.
+
+The stamp keeps its three waves. Two waves read as stink lines, and the waves never
+go on the small mark.
+
+## Sizes
+
+| size | what |
+|---|---|
+| page, README, print | the postmark, or the paper stamp (`stamp-paper.webp`) |
+| 48 to 512 | app icon, drawn cut: `icon.svg`, `icon-{48,64,120,128,256,512}.png` |
+| 16, 32 | app icon, pixel cut: `icon-small.svg`, `icon-16.png`, `icon-32.png` |
+| favicon | `favicon.svg` (the pixel cut on the tile) |
+| bar, header | `mark-pixel.svg` at one device pixel per unit, rounded from the display's scale (15 device px at 1×, 30 at 2×), in the theme's colour |
+
+`icon-120.png` is the size Google's OAuth consent screen asks for.
+
+## Tried and dropped
+
+So they don't come back by accident:
+
+- **A capsule in the tube.** It doesn't read at small sizes.
+- **Two squiggles beside the mark.** Stink lines.
+- **An oval (wide) bowl.** It looks bad. The earlier "wide proportion" was right only
+  for a rectilinear p.
+- **A rectilinear p on Omarchy's grid.** The tie to Omarchy's icon was liked, but the
+  result was too boring.
+- **A round-rect bowl.** It shrinks well but reads worse than round. The pixel cut
+  solves shrinking instead.
+- **Mono type for the name.** Too plain; the pen won.
+
+## Source
+
+The mark shares an identity with the author's desktop, where the paper stamp was cut.
+The design history and the exporter that writes these files live with that work, not
+in this repo. The files here are the output: don't hand-edit them, re-export. The one
+copy is `shell/BarWidget.qml`, which draws `mark-pixel.svg`'s runs as rectangles, so
+a change to the pixel cut has to be made there too.
+
+Beth Ellen is OFL; Special Elite is Apache 2.0. Both are outlined in the SVGs, so
+nothing here loads a font.

@@ -548,7 +548,7 @@
     T.url = null;
     setFocus('list');
     setURL(L.url, false);
-    document.title = L.title || 'Pneu';
+    document.title = L.title || 'pneu';
   }
 
   // loadList (re)fills the left pane: the list already there (sync, bfcache,

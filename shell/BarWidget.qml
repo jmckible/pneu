@@ -4,7 +4,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
-// Pneu's bar presence: unread inbox threads across every account, and a
+// pneu's bar presence: unread inbox threads across every account, and a
 // warning when the mail isn't flowing.
 //
 // Everything comes from ~/.local/state/pneu/status.json, which the server
@@ -13,7 +13,7 @@ import qs.Ui
 // widget runs nothing and polls nothing; it works with the window parked or
 // closed, and it never touches notmuch or the install token.
 //
-// Warning (alert glyph, urgent colour) means the count can't be trusted:
+// Warning (the mark in the urgent colour) means the count can't be trusted:
 // no readable file, the server stopped, the file older than staleAfter
 // (so the server is gone or wedged whatever sync is doing), or an account
 // that is failing, erroring, needs re-auth, or isn't set up. An account
@@ -130,7 +130,7 @@ BarWidget {
   function accountLine(a) {
     var name = String(a.name || "?")
     if (a.state === undefined && a.pulled === false) return name + ": first pull not finished"
-    if (a.state === "reauth") return name + ": Gmail access expired or was revoked; reconnect in Pneu"
+    if (a.state === "reauth") return name + ": Gmail access expired or was revoked; reconnect in pneu"
     if (a.state === "unconfigured") return name + ": not set up (pneu account add " + name + " <address>)"
     if (a.state === "unauthorized") return name + ": not connected to Gmail (pneu account auth " + name + ")"
     var failures = parseInt(a.failures) || 0
@@ -148,11 +148,11 @@ BarWidget {
   }
 
   readonly property string tooltip: {
-    if (root.missing) return "Pneu: no status yet. Is the server installed and running?\nsystemctl --user status pneu"
-    if (root.unreadable) return "Pneu: status.json unreadable (a newer or older pneu?)"
+    if (root.missing) return "pneu: no status yet. Is the server installed and running?\nsystemctl --user status pneu"
+    if (root.unreadable) return "pneu: status.json unreadable (a newer or older pneu?)"
     var lines = []
-    if (root.stopped) lines.push("Pneu server stopped (last update " + root.clockOf(root.updatedAt) + ")")
-    else if (root.stale) lines.push("Pneu server not responding (last update " + root.clockOf(root.updatedAt) + ")")
+    if (root.stopped) lines.push("pneu server stopped (last update " + root.clockOf(root.updatedAt) + ")")
+    else if (root.stale) lines.push("pneu server not responding (last update " + root.clockOf(root.updatedAt) + ")")
     lines.push(root.unreadLine())
     for (var j = 0; j < root.pullingAccounts.length; j++) lines.push(root.pullLine(root.pullingAccounts[j]))
     for (var i = 0; i < root.sickAccounts.length; i++) lines.push(root.accountLine(root.sickAccounts[i]))
@@ -178,9 +178,13 @@ BarWidget {
     readonly property color stateColor: root.warning
       ? (root.bar ? root.bar.urgent : Color.urgent)
       : (root.unread > 0 ? Color.accent : (root.bar ? root.bar.barForeground : Color.foreground))
-    // Material Design glyphs from the Nerd Font: email-alert, email,
-    // email-outline.
-    readonly property string glyph: root.warning ? "\udb81\udecf" : (root.unread > 0 ? "\udb80\uddee" : "\udb80\uddf0")
+    // The mark is the pixel cut of pneu's p (brand/README.md), drawn from
+    // its runs so it takes stateColor. Each of its 15 grid units must cover
+    // a whole number of device pixels, or the walls come out uneven at
+    // Omarchy's fractional scales: 15px at 1x, 30 at 2x, 30 device px at 1.6.
+    readonly property real dpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
+    readonly property real unit: Math.max(1, Math.round(dpr)) / dpr
+    readonly property real markSize: 15 * unit
     // A first download shows its progress in place of the count.
     readonly property bool pulling: !root.warning && root.pullingAccounts.length > 0
     readonly property bool showCount: pulling || root.unread > 0
@@ -188,10 +192,10 @@ BarWidget {
       ? (root.pullPercent >= 0 ? root.pullPercent + "%" : "…")
       : (root.unread > 99 ? "99+" : String(root.unread))
     // Arithmetic, not measured: the labels live inside a Component. The
-    // canvas must fit glyph and count or the glyph is clipped away.
+    // canvas must fit mark and count or the mark is clipped away.
     readonly property int countSize: showCount
       ? (root.vertical ? Style.font.caption : countText.length * Style.space(6)) + Style.space(3) : 0
-    readonly property int contentSize: Style.bar.iconFont + countSize
+    readonly property int contentSize: Math.ceil(markSize) + countSize
 
     slotSize: contentSize + Style.space(10)
     opticalSize: contentSize
@@ -209,13 +213,26 @@ BarWidget {
           horizontalItemAlignment: Grid.AlignHCenter
           verticalItemAlignment: Grid.AlignVCenter
 
-          Text {
-            text: button.glyph
-            textFormat: Text.PlainText
-            color: button.stateColor
-            font.family: button.fontFamily
-            font.pixelSize: Style.bar.iconFont
-            renderType: Text.NativeRendering
+          Item {
+            width: button.markSize
+            height: button.markSize
+
+            Repeater {
+              // [x, y, width] of each run in brand/mark-pixel.svg.
+              model: [[4,0,7], [3,1,1], [11,1,1], [2,2,1], [5,2,5], [12,2,1], [1,3,1], [4,3,1], [10,3,1], [13,3,1],
+                [1,4,1], [3,4,1], [11,4,1], [13,4,1], [1,5,1], [3,5,1], [11,5,1], [13,5,1], [1,6,1], [3,6,1],
+                [11,6,1], [13,6,1], [1,7,1], [3,7,1], [11,7,1], [13,7,1], [1,8,1], [3,8,1], [11,8,1], [13,8,1],
+                [1,9,1], [4,9,1], [10,9,1], [13,9,1], [1,10,1], [5,10,5], [12,10,1], [1,11,1], [3,11,1], [11,11,1],
+                [1,12,1], [3,12,9], [1,13,1], [3,13,1], [1,14,1], [3,14,1]]
+              Rectangle {
+                x: modelData[0] * button.unit
+                y: modelData[1] * button.unit
+                width: modelData[2] * button.unit
+                height: button.unit
+                antialiasing: false
+                color: button.stateColor
+              }
+            }
           }
 
           Text {

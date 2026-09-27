@@ -74,11 +74,14 @@ body > header {
   border-bottom: 1px solid var(--border);
   box-shadow: 0 1px 0 light-dark(transparent, rgb(0 0 0 / 0.35));
 }
-body > header .wordmark {
+/* The drawn cut of the mark (brand/README.md). At the app window's
+   fractional scales the pixel cut's walls land on uneven device pixels and
+   read as rough; at 18px and up the drawn cut holds both walls. */
+body > header .mark {
+  flex: none;
+  width: 18px;
+  height: 18px;
   color: var(--accent);
-  font-weight: bold;
-  font-size: 13px;
-  letter-spacing: 0.02em;
 }
 body > header nav { white-space: nowrap; }
 body > header nav a {

@@ -263,7 +263,7 @@ func openWindow(args []string) error {
 	u, err := waitForServer(cfg.Port, host, launchPath, openWait)
 	if err != nil {
 		if n, lerr := exec.LookPath("notify-send"); lerr == nil {
-			exec.Command(n, "-u", "critical", "Pneu", "Server not running: systemctl --user status pneu").Run()
+			exec.Command(n, "-u", "critical", "pneu", "Server not running: systemctl --user status pneu").Run()
 		}
 		return err
 	}

@@ -1,10 +1,10 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=Pneu
+Name=pneu
 Comment=Gmail, read locally
 Exec=pneu open
-Icon=internet-mail
+Icon=pneu
 Terminal=false
 Categories=Network;Email;
 StartupNotify=true
