@@ -498,7 +498,39 @@ main.compose button {
 }
 main.compose button:hover, main.compose button:focus-visible { border-color: var(--accent); outline: none; }
 main.compose .ccbcc-toggle { align-self: flex-start; margin-left: calc(8ch + 1ch); color: var(--muted); }
-main.compose .send { align-self: flex-start; margin-top: 6px; color: var(--accent); border-color: var(--accent); }
+main.compose .actions { display: flex; gap: 1ch; margin-top: 6px; }
+main.compose .discard { color: var(--muted); }
+main.compose .send {
+  position: relative;
+  overflow: hidden;
+  min-width: 10ch;
+  color: var(--accent);
+  border-color: var(--accent);
+  transition: color 80ms, background-color 80ms, box-shadow 80ms;
+}
+/* Ctrl held (compose.js): Enter sends, so Send looks pressed-in-waiting. */
+main.compose form.armed .send,
+main.compose form.sending .send {
+  color: var(--bg);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 30%, transparent);
+}
+/* Sending: the form holds still under a sweep until the redirect lands. */
+main.compose form.sending > :not(.actions),
+main.compose form.sending .discard { opacity: 0.45; transition: opacity 200ms; }
+main.compose form.sending .send { cursor: progress; }
+main.compose form.sending .send::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--bg) 45%, transparent), transparent);
+  animation: send-sweep 1.1s ease-in-out infinite;
+}
+@keyframes send-sweep { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+@media (prefers-reduced-motion: reduce) {
+  main.compose form.sending .send::after { animation: none; display: none; }
+}
 
 /* Suggestions overlay the rows below the field. */
 ul.suggest {

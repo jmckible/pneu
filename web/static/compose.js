@@ -245,6 +245,8 @@
   if (location.hash === '#sent') {
     history.replaceState(history.state, '', location.pathname + location.search);
     apply(settle(marker(), { sent: true }));
+    // app.js's stored flash (its FLASH_KEY), shown when it loads just after.
+    session(function (s) { s.setItem('pneu:flash', JSON.stringify({ text: 'Sent', at: Date.now() })); });
   }
 
   // ===========================================================================
@@ -325,22 +327,75 @@
 
     form.addEventListener('input', saveSoon);
     window.addEventListener('pagehide', function () { if (saveTimer) save(); });
+    var sendBtn = form.querySelector('button.send');
+    var sendLabel = sendBtn ? sendBtn.textContent : '';
+    function sending(on) {
+      submitting = on;
+      form.classList.toggle('sending', on);
+      // inert, not disabled: disabled fields would drop out of the POST.
+      form.inert = on;
+      if (on) form.setAttribute('aria-busy', 'true'); else form.removeAttribute('aria-busy');
+      if (sendBtn) sendBtn.textContent = on ? 'Sending' : sendLabel;
+    }
     form.addEventListener('submit', function () {
       save(); // the draft stays until the send's redirect lands (settle)
-      submitting = true;
+      arm(false);
+      sending(true);
       session(function (s) {
         s.setItem(SENDING_KEY, JSON.stringify({ key: key, id: idEl ? idEl.value : '', at: Date.now() }));
       });
     });
     // A page restored from the back-forward cache after a failed navigation
     // is editable again.
-    window.addEventListener('pageshow', function (e) { if (e.persisted) submitting = false; });
+    window.addEventListener('pageshow', function (e) { if (e.persisted) sending(false); });
 
     // ---- keys ----
+
+    // Holding Ctrl (or Cmd) lights Send: Enter now sends. Any other key
+    // pressed under it (Ctrl+C, Ctrl+A) is a different chord and unlights it
+    // until the modifier is pressed again.
+    function arm(on) { form.classList.toggle('armed', on && !submitting); }
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Control' || e.key === 'Meta') arm(!e.repeat || form.classList.contains('armed'));
+      else if (e.key !== 'Enter') arm(false);
+    });
+    document.addEventListener('keyup', function (e) {
+      if (e.key === 'Control' || e.key === 'Meta' || !(e.ctrlKey || e.metaKey)) arm(false);
+    });
+    window.addEventListener('blur', function () { arm(false); });
+
+    // ---- discard ----
+
+    // Discard drops the draft and leaves: back to where compose was opened
+    // from, or the inbox when there is no page to go back to (a fresh window,
+    // or a failed send's re-render, whose Back is the compose form again).
+    function discard() {
+      if (submitting) return;
+      clearTimeout(saveTimer);
+      submitting = true; // no pagehide save
+      store(function (s) { s.removeItem(key); });
+      if (history.length > 1 && !hadError) history.back();
+      else location.replace('/');
+    }
+    var discardBtn = form.querySelector('button.discard');
+    if (discardBtn) discardBtn.addEventListener('click', discard);
+    // Esc in a field blurs it (app.js); Esc with nothing focused discards,
+    // so a second Esc leaves.
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return;
+      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      if (document.querySelector('dialog[open]')) return;
+      // The target, not activeElement: app.js has already blurred the field.
+      var t = e.target;
+      if (t && t.nodeType === 1 && t.closest('input, textarea, select')) return;
+      e.preventDefault();
+      discard();
+    });
 
     form.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) {
         e.preventDefault();
+        if (submitting) return;
         if (form.requestSubmit) form.requestSubmit(); else form.submit();
         return;
       }
