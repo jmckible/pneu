@@ -58,8 +58,9 @@ them here if they're wrong.
   the primary visual state. Mouse works everywhere but nothing is mouse-only.
 - **Keys (HEY navigation, Gmail actions).**
   Views: `1` Inbox · `2` Starred · `3` Sent · `4` Spam · `5` Trash · `6` All.
-  Move: `j/k` rows (list) or scroll three lines (thread) · `n/p`
-  messages · `Space`/`Shift+Space` page the thread · `Enter`/`o` open
+  Move: `j/k` rows (list) or scroll three lines (thread) · `g/G` first
+  and last row · `>`/`<` older and newer page (`<` lands on the last row) ·
+  `n/p` messages · `Space`/`Shift+Space` page the thread · `Enter`/`o` open
   (list) or fold (thread) · `x` select · `u`/`Esc` back to list (Esc
   first blurs any input).
   Panes: `h` list · `l` thread · `Tab`/`Shift+Tab` switch · `Esc` (list) closes the thread · `+` maximize.
@@ -91,7 +92,10 @@ them here if they're wrong.
 ## Index views
 
 Inbox (default), Starred, Sent, Spam, Trash, All Mail. Same template, different
-query. Paginated (`Newer`/`Older`).
+query. Paginated (`Newer`/`Older`, `<`/`>`). The split's title row says where
+the page sits: `Inbox · 12` on a single page, `All Mail · 51–100 of 44,095`
+when paged. The total is a thread count cached at each database's revision;
+uncached, the page shows the range first and the total follows.
 
 - **Merged stream.** Both accounts in one list sorted by date. No per-row
   account marker; the account shows on the thread page only.

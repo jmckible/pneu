@@ -264,14 +264,17 @@ func ReadStatus(path string) (StatusDoc, error) {
 
 // DescribeProgress is a first pull's progress in words, as the terminal
 // shows it; app.js and the bar widget word it the same way.
-func DescribeProgress(p *ProgressView) string {
-	n := func(v int) string {
-		s := strconv.Itoa(v)
-		for i := len(s) - 3; i > 0; i -= 3 {
-			s = s[:i] + "," + s[i:]
-		}
-		return s
+// commas writes n with thousands separators, as app.js's num does.
+func commas(n int) string {
+	s := strconv.Itoa(n)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
 	}
+	return s
+}
+
+func DescribeProgress(p *ProgressView) string {
+	n := commas
 	var out string
 	switch p.Phase {
 	case gmi.PhaseListing:

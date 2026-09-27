@@ -52,8 +52,11 @@ type Server struct {
 	undo   undoRing
 	// userNames caches each account's user.name for the list's "me".
 	userNames sync.Map
-	outbox    composeState
-	handler   http.Handler
+	// totals caches each account's thread count for a list query at the
+	// database revision it was counted at (totalKey -> totalVal).
+	totals  sync.Map
+	outbox  composeState
+	handler http.Handler
 	// RunStatus's wakeups, cap 1 so pending requests collapse.
 	statusNow, statusTags chan struct{}
 	marks                 accountMarks

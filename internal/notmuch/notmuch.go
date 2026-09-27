@@ -156,6 +156,23 @@ func (a Account) Count(ctx context.Context, query string, threads bool) (int, er
 	return strconv.Atoi(strings.TrimSpace(string(out)))
 }
 
+// Revision is the database's identity and revision ("uuid lastmod"): equal
+// revisions mean nothing in the database changed between them. It costs a
+// few milliseconds where a thread count of a large query costs a second.
+func (a Account) Revision(ctx context.Context) (string, error) {
+	// count --lastmod prints "count<TAB>uuid<TAB>lastmod"; a query that
+	// matches nothing keeps the count free.
+	out, err := a.run(ctx, nil, "count", "--lastmod", "--", "id:pneu-revision@invalid")
+	if err != nil {
+		return "", err
+	}
+	f := strings.Fields(string(out))
+	if len(f) != 3 {
+		return "", fmt.Errorf("notmuch count --lastmod: unexpected output %q", out)
+	}
+	return f[1] + " " + f[2], nil
+}
+
 // MessageIDs lists the Message-IDs matching query, newest first.
 // search.exclude_tags applies unless the query names an excluded tag.
 func (a Account) MessageIDs(ctx context.Context, query string) ([]string, error) {

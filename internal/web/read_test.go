@@ -114,7 +114,7 @@ func TestInbox(t *testing.T) {
 		`<script src="/static/purify.min.js"></script>`,
 		`<script src="/static/app.js" defer></script>`,
 		`<main class="list" data-view="inbox">`,
-		`<div class="pane-title">Inbox · <span class="n">`, // the split's title row: view · rows on this page
+		`<div class="pane-title">Inbox · <span class="n" data-start="0" data-rows="19" data-total="19">19</span></div>`, // the split's title row: view · count; one page, so no range
 		`<form class="search" action="/search" method="get"><input name="q"`,
 		`<a href="/" class="active" aria-current="page"><kbd>1</kbd>Inbox</a>`,
 		`<a href="/starred"><kbd>2</kbd>Starred</a>`, `<a href="/sent"><kbd>3</kbd>Sent</a>`,
@@ -198,6 +198,28 @@ func TestPagination(t *testing.T) {
 	}
 	if !slices.Equal(all, inboxOrder) {
 		t.Fatalf("pages concatenated:\n got %q\nwant %q", all, inboxOrder)
+	}
+	// The title says where the page sits. Nothing is counted during a
+	// render: the first look has no total and the page asks for it.
+	if body := getOK(t, s, "/?page=1"); !strings.Contains(body, `data-total="-1"`) || !strings.Contains(body, `>6–10</span>`) {
+		t.Errorf("uncounted position: %s", body)
+	}
+	w := do(s, "GET", "/?page=1&total=1", withCookie)
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"total":19}` {
+		t.Fatalf("?total=1: %d %s", w.Code, w.Body)
+	}
+	// Counted once, cached at the databases' revisions: the next render has it.
+	if body := getOK(t, s, "/?page=3"); !strings.Contains(body, `data-total="19"`) || !strings.Contains(body, `>16–19 of 19</span>`) {
+		t.Errorf("cached position: %s", body)
+	}
+	// A tag write moves the revision; the stale count is not shown.
+	first := rows(t, s, "/")[0]
+	tagOK(t, s, form("action", "archive", "account", first.Account, "ids", esc(first.MsgIDs...)))
+	if body := getOK(t, s, "/?page=1"); !strings.Contains(body, `data-total="-1"`) {
+		t.Error("stale total survived a tag write")
+	}
+	if w := do(s, "GET", "/?total=1", withCookie); strings.TrimSpace(w.Body.String()) != `{"total":18}` {
+		t.Errorf("recount after archive: %s", w.Body)
 	}
 	// Search pages keep the query.
 	s.PerPage = 1

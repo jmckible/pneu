@@ -170,10 +170,11 @@
       // A thread triaged away from its own page is gone: keep its slot.
       var saved = storage(function (s) { return s.getItem(selKey()); });
       var slot = parseInt(storage(function (s) { return s.getItem(selKey() + ':i'); }), 10) || 0;
-      want = saved ? { thread: saved, index: slot } : { index: 0 };
+      want = saved ? { thread: saved, index: slot } : { index: slot };
     }
     var start = tri ? tri.restoreIndex(L.items.map(rowKey), want) : 0;
     select(L, start, scroll !== undefined ? scroll : start > 0);
+    whenReady(function () { listTotal(root); })();
     root.addEventListener('click', function (e) {
       var row = e.target.closest('li.row');
       if (!row || e.target.closest('a')) return;
@@ -597,6 +598,33 @@
     return { thread: row && row.dataset.thread, account: row && row.dataset.account, index: Math.max(L.sel, 0) };
   }
 
+  // page follows the list's Older (dir 1) or Newer (-1) link: > lands on
+  // the first row, < on the last, so k/< and j/> read as one walk. The
+  // split swaps the pane (a thread open beside it stays); narrow, the page
+  // loads with its cursor stored where initList looks for it.
+  function page(dir) {
+    return function () {
+      var a = L.root && L.root.querySelector('nav.pages a[rel=' + (dir > 0 ? 'next' : 'prev') + ']');
+      if (!a) { flash(dir > 0 ? 'No older mail' : 'No newer mail'); return; }
+      var u = new URL(a.href);
+      var url = u.pathname + u.search;
+      var index = dir > 0 ? 0 : 1e6; // past any last row; restoreIndex clamps
+      if (!split) {
+        storage(function (s) {
+          s.removeItem('pneu:sel:' + url);
+          s.setItem('pneu:sel:' + url + ':i', String(index));
+        });
+        location.assign(url);
+        return;
+      }
+      L.url = url;
+      storage(function (s) { s.setItem(VIEW_KEY, url); });
+      if (tri.pathKind(location.pathname + location.search) === 'list') setURL(url, true);
+      else history.replaceState({ view: url }, ''); // the thread's reload shows this page beside it
+      loadList({ index: index });
+    };
+  }
+
   function threadWant() {
     return T.root ? { thread: T.root.dataset.thread, account: T.root.dataset.account, index: 0 } : null;
   }
@@ -825,10 +853,35 @@
     return { unread: el.classList.contains('unread'), flagged: el.classList.contains('flagged') };
   }
 
-  // listCount keeps the list's title row count (list.html) with the rows.
+  // listCount keeps the list's title count (list.html) with the rows: a
+  // removal takes one off the page's range and the total, an undo puts it
+  // back. data-rows is the row count data-total was counted against.
   function listCount() {
     var n = L.root && L.root.querySelector('.pane-title .n');
-    if (n) n.textContent = String(L.items.length);
+    if (!n || !tri) return;
+    var rows = L.items.length;
+    var total = parseInt(n.dataset.total, 10);
+    if (total >= 0) total += rows - (parseInt(n.dataset.rows, 10) || 0);
+    n.textContent = tri.position(parseInt(n.dataset.start, 10) || 0, rows, total, 'paged' in n.dataset);
+  }
+
+  // listTotal fills in a paged list's total when the server had none cached
+  // (read.go total): counting All Mail can take a second, so the page shows
+  // first and the count follows.
+  function listTotal(root) {
+    var n = root.querySelector('.pane-title .n');
+    if (!n || !('paged' in n.dataset) || parseInt(n.dataset.total, 10) >= 0) return;
+    var url = L.url + (L.url.indexOf('?') < 0 ? '?' : '&') + 'total=1';
+    fetch(url, { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (d) {
+        if (!d || typeof d.total !== 'number' || L.root !== root) return;
+        // Counted now: rows triaged away since the render are already out.
+        n.dataset.total = String(d.total);
+        n.dataset.rows = String(L.items.length);
+        listCount();
+      })
+      .catch(function () {}); // the range alone is still right
   }
 
   function clearSelection() {
@@ -1120,6 +1173,8 @@
     ['Move', [
       ['j / k', 'Next / previous row (list) · scroll 3 lines (thread)'],
       ['n / p', 'Next / previous message (thread)'],
+      ['g / G', 'First / last row (list)'],
+      ['> / <', 'Older / newer page (list)'],
       ['Space, ⇧Space', 'Page down / up (thread)'],
       ['Enter, o', 'Open thread (list) · fold message (thread)'],
       ['u, Esc', 'Back to the list (Esc first leaves a field) · Esc on the list closes the thread'],
@@ -1252,6 +1307,10 @@
       Escape: closePane,
       Enter: openRow,
       o: openRow,
+      g: function () { select(L, 0); },
+      G: function () { select(L, L.items.length - 1); },
+      '>': whenReady(page(1)),
+      '<': whenReady(page(-1)),
       e: whenReady(function () { listRemove('archive'); }),
       '#': whenReady(function () { listRemove('trash'); }),
       t: whenReady(function () { listRemove('trash'); }),

@@ -186,3 +186,11 @@ test('cycle: Tab and Shift+Tab toggle between the two panes', () => {
   assert.equal(T.cycle(null, 1), 'list');
   assert.equal(T.cycle('compose', -1), 'list');
 });
+
+test('position: count alone on one page, range and total when paged (read.go positionText)', () => {
+  assert.equal(T.position(0, 12, 12, false), '12');
+  assert.equal(T.position(0, 0, 0, false), '0');
+  assert.equal(T.position(50, 50, 44095, true), '51–100 of 44,095');
+  assert.equal(T.position(1000, 49, -1, true), '1,001–1,049');
+  assert.equal(T.position(50, 0, 50, true), '0');
+});
