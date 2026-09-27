@@ -167,6 +167,11 @@ BarWidget {
     root.bar.run(command !== "" ? command : "pneu open")
   }
 
+  FontLoader {
+    id: markFont
+    source: Qt.resolvedUrl("../brand/pneu-mark.ttf")
+  }
+
   BarIconButton {
     id: button
     anchors.fill: parent
@@ -178,16 +183,6 @@ BarWidget {
     readonly property color stateColor: root.warning
       ? (root.bar ? root.bar.urgent : Color.urgent)
       : (root.unread > 0 ? Color.accent : (root.bar ? root.bar.barForeground : Color.foreground))
-    // The mark is the pixel cut of pneu's p (brand/README.md), drawn from
-    // its runs so it takes stateColor. Each of its 15 grid units must cover
-    // a whole number of device pixels, or the walls come out uneven at
-    // Omarchy's fractional scales: 15px at 1x, 30 at 2x, 30 device px at 1.6.
-    // The window's ratio, not the screen's: at Hyprland scale 1.6 Qt
-    // reports the screen as 2 but renders the bar at 1.6.
-    readonly property real dpr: Window.window && Window.window.devicePixelRatio > 0
-      ? Window.window.devicePixelRatio : (Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1)
-    readonly property real unit: Math.max(1, Math.round(dpr)) / dpr
-    readonly property real markSize: 15 * unit
     // A first download shows its progress in place of the count.
     readonly property bool pulling: !root.warning && root.pullingAccounts.length > 0
     readonly property bool showCount: pulling || root.unread > 0
@@ -195,10 +190,10 @@ BarWidget {
       ? (root.pullPercent >= 0 ? root.pullPercent + "%" : "…")
       : (root.unread > 99 ? "99+" : String(root.unread))
     // Arithmetic, not measured: the labels live inside a Component. The
-    // canvas must fit mark and count or the mark is clipped away.
+    // canvas must fit glyph and count or the glyph is clipped away.
     readonly property int countSize: showCount
       ? (root.vertical ? Style.font.caption : countText.length * Style.space(6)) + Style.space(3) : 0
-    readonly property int contentSize: Math.ceil(markSize) + countSize
+    readonly property int contentSize: Style.bar.iconFont + countSize
 
     slotSize: contentSize + Style.space(10)
     opticalSize: contentSize
@@ -216,26 +211,15 @@ BarWidget {
           horizontalItemAlignment: Grid.AlignHCenter
           verticalItemAlignment: Grid.AlignVCenter
 
-          Item {
-            width: button.markSize
-            height: button.markSize
-
-            Repeater {
-              // [x, y, width] of each run in brand/mark-pixel.svg.
-              model: [[4,0,7], [3,1,1], [11,1,1], [2,2,1], [5,2,5], [12,2,1], [1,3,1], [4,3,1], [10,3,1], [13,3,1],
-                [1,4,1], [3,4,1], [11,4,1], [13,4,1], [1,5,1], [3,5,1], [11,5,1], [13,5,1], [1,6,1], [3,6,1],
-                [11,6,1], [13,6,1], [1,7,1], [3,7,1], [11,7,1], [13,7,1], [1,8,1], [3,8,1], [11,8,1], [13,8,1],
-                [1,9,1], [4,9,1], [10,9,1], [13,9,1], [1,10,1], [5,10,5], [12,10,1], [1,11,1], [3,11,1], [11,11,1],
-                [1,12,1], [3,12,9], [1,13,1], [3,13,1], [1,14,1], [3,14,1]]
-              Rectangle {
-                x: modelData[0] * button.unit
-                y: modelData[1] * button.unit
-                width: modelData[2] * button.unit
-                height: button.unit
-                antialiasing: false
-                color: button.stateColor
-              }
-            }
+          // pneu's mark (brand/README.md), a hinted glyph like the bar's own
+          // icons, in the state colour.
+          Text {
+            text: "\ue000"
+            textFormat: Text.PlainText
+            color: button.stateColor
+            font.family: markFont.name
+            font.pixelSize: Style.bar.iconFont
+            renderType: Text.NativeRendering
           }
 
           Text {
