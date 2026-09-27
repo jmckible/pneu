@@ -14,6 +14,12 @@
 # hook install theme-set`, which keeps the basename) and run once by hand at
 # install (INSTALL.md). The server watches this file and pushes a theme event,
 # so open windows repaint without a reload.
+#
+# It also recolours the launcher icon: pneu's mark alone, no tile, in the
+# theme's accent. The marks are copies of brand/mark.svg (drawn, for the
+# scalable icon) and brand/mark-pixel.svg (the pixel cut, for 16 and 32px,
+# where the drawn one goes to mush) that INSTALL.md puts in
+# ~/.local/share/pneu; this hook runs as a copy and can't see the repo.
 
 set -euo pipefail
 
@@ -83,6 +89,7 @@ print(
 )
 PY
 )"
+ACCENT="$(sed -n 's/.*--accent:\(#[0-9a-f]\{6\}\).*/\1/p' <<<"$CSS")"
 
 TMP="$(mktemp "$OUT.XXXXXX")"
 trap 'rm -f "$TMP"' EXIT
@@ -90,3 +97,24 @@ printf '%s\n' "$CSS" > "$TMP"
 chmod 644 "$TMP"
 mv "$TMP" "$OUT"
 trap - EXIT
+
+# The launcher icon. Each file goes through a temp file and a rename, so a
+# launcher never reads a half-written icon.
+MARKS="$HOME/.local/share/pneu"
+ICONS="$HOME/.local/share/icons/hicolor"
+icon() { # <mark file> <viewBox> <px or empty for scalable> <out>
+  local tmp svg
+  svg="$(sed -e "s/currentColor/$ACCENT/g" -e "s/ width=\"15\" height=\"15\" viewBox=\"0 0 15 15\"/${3:+ width=\"$3\" height=\"$3\"} viewBox=\"$2\"/" "$1")"
+  mkdir -p "$(dirname "$4")"
+  tmp="$(mktemp "$4.XXXXXX")"
+  printf '%s\n' "$svg" > "$tmp"
+  chmod 644 "$tmp"
+  mv "$tmp" "$4"
+}
+if [[ -f "$MARKS/mark.svg" && -f "$MARKS/mark-pixel.svg" ]]; then
+  # A unit of room around the drawn mark, like an app icon's margin. The
+  # pixel cut sits one pixel in, so its walls stay on whole pixels.
+  icon "$MARKS/mark.svg" "-1 -1 17 17" "" "$ICONS/scalable/apps/pneu.svg"
+  icon "$MARKS/mark-pixel.svg" "-1 -1 16 16" 16 "$ICONS/16x16/apps/pneu.svg"
+  icon "$MARKS/mark-pixel.svg" "-0.5 -0.5 16 16" 32 "$ICONS/32x32/apps/pneu.svg"
+fi

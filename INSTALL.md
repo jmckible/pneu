@@ -86,7 +86,8 @@ repo root.
      created with mode 0600 (`auth.go` `writePrivate`) and are never logged.
 8. **The desktop pieces do what they say.** Read them; they're short.
    - `install/pneu-theme` runs on every Omarchy theme switch and writes only
-     `~/.config/pneu/theme.css`.
+     `~/.config/pneu/theme.css` and the launcher icon
+     (`~/.local/share/icons/hicolor/*/apps/pneu.svg`), in the theme's colours.
    - `install/pneu.service` runs `~/.local/bin/pneu`.
    - `manifest.json` and `shell/` form the bar widget. It runs inside
      omarchy-shell with your privileges, reads
@@ -236,10 +237,9 @@ first-pull step.
 
 ```sh
 install -Dm644 install/pneu.desktop ~/.local/share/applications/pneu.desktop
-for n in 16 32 48 64 128 256 512; do install -Dm644 brand/icon-$n.png ~/.local/share/icons/hicolor/${n}x$n/apps/pneu.png; done
-install -Dm644 brand/icon.svg ~/.local/share/icons/hicolor/scalable/apps/pneu.svg
+install -Dm644 -t ~/.local/share/pneu brand/mark.svg brand/mark-pixel.svg   # the hook colours the icon from these
 omarchy hook install theme-set install/pneu-theme    # copies the hook
-install/pneu-theme                                   # render the current theme once
+install/pneu-theme                                   # render the current theme and icon once
 
 ln -s "$PWD" ~/.config/omarchy/plugins/pneu          # the bar widget
 omarchy-shell shell rescanPlugins
@@ -264,7 +264,7 @@ click, for example your own scratchpad toggle.
 ```sh
 systemctl --user disable --now pneu.service
 rm ~/.config/systemd/user/pneu.service ~/.local/share/applications/pneu.desktop
-rm ~/.local/share/icons/hicolor/*/apps/pneu.{png,svg}
+rm -r ~/.local/share/pneu ~/.local/share/icons/hicolor/*/apps/pneu.svg
 rm ~/.config/omarchy/hooks/theme-set.d/pneu-theme ~/.config/omarchy/plugins/pneu
 rm ~/.local/bin/pneu
 rm -r ~/.local/state/pneu ~/.config/pneu     # token, launch nonce, configs, OAuth client JSON
