@@ -393,14 +393,14 @@ func lockAccount(gmiDir string) (func(), error) {
 // gmiLocked runs gmi in the account's lieer dir; the caller holds the lock.
 // With term set, gmi's output goes straight to the terminal (the consent
 // flow prints its URL there); otherwise it is returned.
-func gmiLocked(gmiDir, nmConfig string, term io.Writer, args ...string) (string, error) {
+func gmiLocked(gmiDir, nmConfig string, term io.Writer, env []string, args ...string) (string, error) {
 	bin, err := exec.LookPath("gmi")
 	if err != nil {
 		return "", errors.New("gmi (lieer) not found on PATH")
 	}
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = gmiDir
-	cmd.Env = withEnv(os.Environ(), "NOTMUCH_CONFIG="+nmConfig)
+	cmd.Env = withEnv(os.Environ(), append([]string{"NOTMUCH_CONFIG=" + nmConfig}, env...)...)
 	var out bytes.Buffer
 	if term != nil {
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, term, term
@@ -418,7 +418,7 @@ func gmiCmd(gmiDir, nmConfig string, term io.Writer, args ...string) (string, er
 		return "", err
 	}
 	defer release()
-	return gmiLocked(gmiDir, nmConfig, term, args...)
+	return gmiLocked(gmiDir, nmConfig, term, nil, args...)
 }
 
 func loadAccount(cfgFlag, name string) (config.Account, error) {
@@ -442,7 +442,7 @@ func loadAccount(cfgFlag, name string) (config.Account, error) {
 func accountAuth(args []string) error {
 	fs := flag.NewFlagSet("pneu account auth", flag.ContinueOnError)
 	cfgFlag := fs.String("config", "", "config file (default ~/.config/pneu/config.json)")
-	force := fs.Bool("force", false, "replace existing credentials (lieer deletes them first)")
+	force := fs.Bool("force", false, "replace existing credentials; kept if consent fails")
 	pos, err := parseInterspersed(fs, args)
 	if err != nil {
 		return err
@@ -488,14 +488,23 @@ func accountAuth(args []string) error {
 		if *force {
 			authArgs = []string{"auth", "-f", "-c", secret}
 		}
-		if _, err := gmiLocked(a.GmiDir, a.NotmuchConfig, os.Stdout, authArgs...); err != nil {
+		// lieer -f deletes the credentials before consent: an interrupted
+		// or refused consent would leave none. Put the old ones back.
+		creds := filepath.Join(a.GmiDir, gmi.CredentialsFile)
+		old, oldErr := os.ReadFile(creds)
+		if _, err := gmiLocked(a.GmiDir, a.NotmuchConfig, &consentOpener{term: os.Stdout}, []string{"BROWSER=true"}, authArgs...); err != nil {
+			if _, statErr := os.Stat(creds); oldErr == nil && errors.Is(statErr, os.ErrNotExist) {
+				if werr := os.WriteFile(creds, old, 0o600); werr == nil {
+					fmt.Println("Consent didn't finish; the previous credentials are back in place.")
+				}
+			}
 			return fmt.Errorf("gmi auth: %w", err)
 		}
 		if err := gmi.PrivateCredentials(a.GmiDir); err != nil {
 			return err
 		}
 	}
-	out, err := gmiLocked(a.GmiDir, a.NotmuchConfig, nil, "pull", "-t")
+	out, err := gmiLocked(a.GmiDir, a.NotmuchConfig, nil, nil, "pull", "-t")
 	if err != nil && !errors.As(err, new(*exec.ExitError)) {
 		return fmt.Errorf("checking the token: %w", err) // gmi didn't run
 	}
@@ -518,6 +527,48 @@ func accountAuth(args []string) error {
 			fmt.Println("Start the pneu server (INSTALL.md step 6); it downloads the mail itself, newest first.")
 		}
 	}
+	return nil
+}
+
+// consentOpener passes `gmi auth`'s output through to the terminal and
+// opens the consent URL it announces in the default browser, once, without
+// waiting for the browser. lieer itself runs with BROWSER=true: its
+// webbrowser.open runs $BROWSER (which Omarchy sets in interactive shells)
+// and waits for it to exit, and a browser that wasn't already running exits
+// only when it's closed, so Google's redirect would sit unanswered on
+// localhost:8080 until then.
+type consentOpener struct {
+	term   io.Writer
+	line   []byte
+	opened bool
+}
+
+func (c *consentOpener) Write(b []byte) (int, error) {
+	n, err := c.term.Write(b)
+	for _, ch := range b {
+		if ch != '\n' {
+			c.line = append(c.line, ch)
+			continue
+		}
+		if u, ok := gmi.ConsentURL(string(c.line)); ok && !c.opened {
+			c.opened = true
+			if oerr := openURL(u); oerr != nil {
+				fmt.Fprintf(c.term, "Couldn't open a browser (%v): open the URL above yourself.\n", oerr)
+			}
+		}
+		c.line = c.line[:0]
+	}
+	return n, err
+}
+
+// openURL opens u with xdg-open in its own session and doesn't wait for it.
+func openURL(u string) error {
+	cmd := exec.Command("xdg-open", u)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go cmd.Wait()
 	return nil
 }
 

@@ -60,6 +60,11 @@ const (
 	lieerResume      = ".resume-pull.gmailieer.json"
 )
 
+// CredentialsFile is where lieer keeps an account's OAuth token, in its
+// repository. pneu never reads it; `pneu account auth --force` copies it
+// aside so a consent that doesn't finish can put it back.
+const CredentialsFile = lieerCredentials
+
 // FileState is an account's state from its lieer repository alone: whether
 // `gmi init` ran, whether credentials exist (a stat; pneu never reads them),
 // and whether a first pull completed. It can't see a running pull or a
@@ -283,6 +288,15 @@ func (e *Engine) frontier(ctx context.Context, a *account) (time.Time, error) {
 // consentPrompt is how google_auth_oauthlib's run_local_server announces
 // the consent URL on stdout.
 const consentPrompt = "Please visit this URL to authorize this application: "
+
+// ConsentURL is the consent URL a line of `gmi auth` output announces, and
+// whether it is one: the line is run_local_server's prompt and the URL is
+// Google's.
+func ConsentURL(line string) (string, bool) {
+	u, ok := strings.CutPrefix(line, consentPrompt)
+	u = strings.TrimSpace(u)
+	return u, ok && strings.HasPrefix(u, "https://accounts.google.com/")
+}
 
 // AuthPort is where lieer's consent flow waits for Google's redirect:
 // lieer calls run_local_server() with no arguments, so port 8080, fixed.

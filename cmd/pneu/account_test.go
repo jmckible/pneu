@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"os"
@@ -208,4 +209,58 @@ func TestAccountAddWhileServing(t *testing.T) {
 	if running, _ := serverKnows(1, "work"); running {
 		t.Error("stale status file read as a running server")
 	}
+}
+
+// A browser that wasn't already running only exits when it's closed. auth
+// must not wait for it: lieer runs with BROWSER=true and pneu opens the
+// consent URL itself, detached. The fake browser here grants consent, then
+// stays up; it's both $BROWSER, which lieer would otherwise wait on, and
+// xdg-open, which pneu uses.
+func TestAccountAuthDoesNotWaitForBrowser(t *testing.T) {
+	home := sandbox(t)
+	bin := filepath.Dir(must(exec.LookPath("gmi")))
+	if out, err := exec.Command("go", "build", "-o", filepath.Join(bin, "rehearse"), "../../internal/testmail/cmd/rehearse").CombinedOutput(); err != nil {
+		t.Fatal(string(out))
+	}
+	browser := filepath.Join(bin, "xdg-open")
+	os.WriteFile(browser, []byte("#!/bin/sh\nrehearse grant \"$1\" >/dev/null 2>&1 &\nexec sleep 20\n"), 0o755)
+	t.Setenv("BROWSER", browser)
+	t.Setenv("STUBGMI_AUTH", "browser")
+	if err := gmi.CheckAuthPort(); err != nil {
+		t.Skip(err)
+	}
+	secret := filepath.Join(t.TempDir(), "client.json")
+	os.WriteFile(secret, []byte(clientJSON), 0o644)
+	if err := account([]string{"add", "personal", "me@example.com", "--client-secret", secret}); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if _, err := capture(t, func() error { return account([]string{"auth", "personal"}) }); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Fatalf("auth took %v: it waited for the browser", d)
+	}
+	creds := filepath.Join(home, "mail", "personal", "gmail", gmi.CredentialsFile)
+	good, err := os.ReadFile(creds)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// --force with a consent that fails (a redirect whose state doesn't
+	// match) keeps the working credentials.
+	os.WriteFile(browser, []byte("#!/bin/sh\ncurl -s 'http://localhost:8080/?state=wrong&code=c' >/dev/null\n"), 0o755)
+	if _, err := capture(t, func() error { return account([]string{"auth", "personal", "--force"}) }); err == nil {
+		t.Fatal("auth --force succeeded without consent")
+	}
+	if got, err := os.ReadFile(creds); err != nil || !bytes.Equal(got, good) {
+		t.Fatalf("credentials after a failed --force: %q, %v", got, err)
+	}
+}
+
+func must[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
 }

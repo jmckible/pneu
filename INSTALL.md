@@ -289,6 +289,10 @@ the human's part.
   Gmail answers for …"). That fails if you allowed access from a different
   Google account.
 - pneu never reads the token lieer stores.
+- Credentials already in place are only checked. `pneu account auth <acct>
+  --force` replaces them, for instance after moving the app from Testing to
+  In production, whose tokens don't expire; if consent doesn't finish, the
+  old ones stay.
 
 Every manual `gmi` run for an account goes through `pneu gmi <acct> …`,
 which runs in the account's directory, against its notmuch database,
