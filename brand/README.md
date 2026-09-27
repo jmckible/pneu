@@ -20,7 +20,7 @@ other's range.
 | file | cut | use |
 |---|---|---|
 | `mark.svg` | drawn | from about 22 device px up: the window header (18 CSS px on a HiDPI screen), icons 48 and up, the page, print |
-| `mark-pixel.svg` | pixel | where the mark must be smaller than that: the bar, 16 and 32 px icons, favicons. Whole multiples of 15 **device** pixels only (a whole number of device pixels per unit), with `shape-rendering: crispEdges`. At fractional scale that means sizing from `devicePixelRatio`, not a fixed CSS size |
+| `mark-pixel.svg` | pixel | where the mark must be smaller than that and is drawn as an image: 16 and 32 px icons, favicons (the bar uses the font, below). Whole multiples of 15 **device** pixels only (a whole number of device pixels per unit), with `shape-rendering: crispEdges`. At fractional scale that means sizing from `devicePixelRatio`, not a fixed CSS size |
 
 **Why two cuts.** The drawn cut needs about one and a half device pixels per unit
 (22 device px for the whole mark) before the gap between its walls holds. Below that,
@@ -40,6 +40,16 @@ stem's inner wall. n 2.6 is "nearly round": it reads as a circle, with a little 
 body at the shoulders.
 
 Both cuts use `currentColor`. Inline them to take the colour of their surroundings.
+
+**The font.** `pneu-mark.ttf` holds the drawn mark as one glyph at U+E000, for places
+that draw icons as glyphs: the Omarchy bar, like Omarchy's own `omarchy.ttf`. It uses
+that font's em (1024 units, the 15 × 15 grid filling it, the same vertical metrics),
+so at one pixel size the two marks match in size and weight. It is autohinted with
+strong stems, so the stem and the bowl's top, bottom and sides land on whole pixels at
+any size; only the curves antialias, which a round mark can't avoid. Its walls are 1.2
+units, a touch heavier than the SVGs, so they stay solid once hinted without closing
+the gap between them. Draw it as text in the theme's colour. This replaces the pixel
+cut in the bar.
 
 ## Colour
 
@@ -111,7 +121,7 @@ go on the small mark.
 | 16, 32 | app icon, pixel cut: `icon-small.svg`, `icon-16.png`, `icon-32.png` |
 | favicon | `favicon.svg` (the pixel cut on the tile) |
 | window header | `mark.svg` inlined at 18 CSS px (22.5 device px at 1.25×), in the theme's colour. Softer on a 1× screen |
-| bar | `mark-pixel.svg` at one device pixel per unit, rounded from the display's scale (15 device px at 1×, 30 at 2×), in the theme's colour |
+| bar | `pneu-mark.ttf`, U+E000, at the bar's icon-font size, in the theme's colour |
 
 `icon-120.png` is the size Google's OAuth consent screen asks for.
 
@@ -133,9 +143,8 @@ So they don't come back by accident:
 
 The mark shares an identity with the author's desktop, where the paper stamp was cut.
 The design history and the exporter that writes these files live with that work, not
-in this repo. The files here are the output: don't hand-edit them, re-export. The one
-copy is `shell/BarWidget.qml`, which draws `mark-pixel.svg`'s runs as rectangles, so
-a change to the pixel cut has to be made there too.
+in this repo. The files here are the output: don't hand-edit them, re-export. 
 
-Beth Ellen is OFL; Special Elite is Apache 2.0. Both are outlined in the SVGs, so
+`pneu-mark.ttf` is the mark itself, under the repository's MIT licence. Beth Ellen is
+OFL; Special Elite is Apache 2.0. Both are outlined in the SVGs, so
 nothing here loads a font.
