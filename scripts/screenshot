@@ -1,0 +1,80 @@
+#!/bin/bash
+# Screenshot pneu against the fictional fixture mail (testdata/mail: Robin
+# Hale's personal and work accounts), never your own. For the README, videos
+# and marketing; see docs/screenshots.md.
+#
+#   scripts/screenshot [--size WxH] [--scale N] [--theme FILE] OUT.png [PATH...]
+#
+#   PATH     a page to capture, e.g. / (the default), /t/personal/000000000000000e,
+#            /search?q=cabin. At a width past the split, a thread path shows
+#            the inbox beside it. Several paths write OUT-1.png, OUT-2.png, ...
+#   --size   the viewport in CSS pixels (default 1400x820).
+#   --scale  the device pixel ratio (default 2).
+#   --theme  a theme.css to render in (default: yours, from
+#            ~/.config/pneu/theme.css; see install/pneu-theme).
+#
+# Everything runs in a throwaway directory: the fixture's notmuch databases,
+# stubbed lieer files that make both accounts ready, the server's state
+# (install token, launch nonce) and config, and the Chromium profile.
+# testdata/fakegmi on PATH keeps the server's sync off the network.
+# Environment: SCREENSHOT_PORT (default 7318); SCREENSHOT_DEBUG=1 shows
+# Chromium's stderr.
+set -euo pipefail
+
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+size=1400x820 scale=2 theme=${XDG_CONFIG_HOME:-$HOME/.config}/pneu/theme.css out= paths=()
+while (($#)); do
+	case $1 in
+	--size) size=$2; shift ;;
+	--scale) scale=$2; shift ;;
+	--theme) theme=$2; shift ;;
+	-*) echo "screenshot: unknown option $1" >&2; exit 2 ;;
+	*) if [[ -z $out ]]; then out=$1; else paths+=("$1"); fi ;;
+	esac
+	shift
+done
+[[ -n $out ]] || { sed -n '6p' "$0" | sed 's/^# *//' >&2; exit 2; }
+((${#paths[@]})) || paths=(/)
+[[ $size =~ ^([0-9]+)x([0-9]+)$ ]] || { echo "screenshot: --size is WxH" >&2; exit 2; }
+w=${BASH_REMATCH[1]} h=${BASH_REMATCH[2]}
+port=${SCREENSHOT_PORT:-7318}
+origin=http://pneu.localhost:$port
+out=$(realpath -m "$out")
+
+dir=$(mktemp -d "${TMPDIR:-/tmp}/pneu-screenshot.XXXXXX")
+server=
+cleanup() {
+	[[ -n $server ]] && kill "$server" 2>/dev/null && wait "$server" 2>/dev/null
+	rm -rf "$dir"
+}
+trap cleanup EXIT
+
+cd "$REPO"
+go build -o "$dir/pneu" ./cmd/pneu
+go run ./internal/testmail/cmd/fixture-server -dir "$dir" -port "$port" >/dev/null
+for acct in personal work; do
+	g=$dir/mail/$acct/gmail
+	echo '{}' >"$g/.gmailieer.json"
+	echo '{}' >"$g/.credentials.gmailieer.json"
+	echo '{"last_historyId": 1}' >"$g/.state.gmailieer.json"
+done
+mkdir -p "$dir/xdg/pneu"
+[[ -f $theme ]] && cp "$theme" "$dir/xdg/pneu/theme.css"
+
+PATH=$REPO/testdata/fakegmi:$PATH XDG_STATE_HOME=$dir/state XDG_CONFIG_HOME=$dir/xdg \
+	"$dir/pneu" -config "$dir/config.json" -listen "127.0.0.1:$port" >"$dir/server.log" 2>&1 &
+server=$!
+for _ in $(seq 50); do
+	curl -s -o /dev/null "http://127.0.0.1:$port/" -H "Host: pneu.localhost:$port" && break
+	kill -0 "$server" 2>/dev/null || { cat "$dir/server.log" >&2; exit 1; }
+	sleep 0.1
+done
+
+i=0
+for path in "${paths[@]}"; do
+	file=$out
+	((${#paths[@]} > 1)) && file=${out%.*}-$((++i)).${out##*.}
+	# The nonce is single-use and rotates on every open.
+	PROFILE=$dir/chrome node scripts/screenshot.mjs "$origin" "$(cat "$dir/state/pneu/launch")" "$path" "$file" "$w" "$h" "$scale"
+	echo "$file"
+done

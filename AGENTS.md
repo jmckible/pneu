@@ -60,6 +60,8 @@ and build order; this file is the working contract. Read PLAN.md before touching
   and token/stall/kill failures); `testdata/fakegmi` is the internal/gmi
   tests' contract fake. `scripts/rehearse` runs INSTALL.md itself in a
   sandbox (docs/rehearsal.md); keep it passing when INSTALL.md changes.
+  `scripts/screenshot` captures the app on the fixture mail for the README
+  and marketing (docs/screenshots.md); never screenshot a real inbox.
 - The Arch notmuch is built with `retry_lock`, so a contended `notmuch tag`
   blocks rather than failing; `Tag()` bounds the wait with a deadline and
   returns `ErrLocked`. A long `gmi pull` stalls triage on that account for the
