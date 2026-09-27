@@ -19,8 +19,8 @@ other's range.
 
 | file | cut | use |
 |---|---|---|
-| `mark.svg` | drawn | from about 22 device px up: the window header (18 CSS px on a HiDPI screen), icons 48 and up, the page, print |
-| `mark-pixel.svg` | pixel | where the mark must be smaller than that and is drawn as an image: 16 and 32 px icons, favicons (the bar uses the font, below). Whole multiples of 15 **device** pixels only (a whole number of device pixels per unit), with `shape-rendering: crispEdges`. At fractional scale that means sizing from `devicePixelRatio`, not a fixed CSS size |
+| `mark.svg` | drawn | from about 22 device px up: the window header (18 CSS px on a HiDPI screen), the launcher icon, the page, print |
+| `mark-pixel.svg` | pixel | where the mark must be smaller than that and is drawn as an image: the favicon (the bar uses the font, below). Whole multiples of 15 **device** pixels only (a whole number of device pixels per unit), with `shape-rendering: crispEdges`. At fractional scale that means sizing from `devicePixelRatio`, not a fixed CSS size |
 
 **Why two cuts.** The drawn cut needs about one and a half device pixels per unit
 (22 device px for the whole mark) before the gap between its walls holds. Below that,
@@ -55,8 +55,8 @@ cut in the bar.
 
 | | | |
 |---|---|---|
-| petit bleu | `#86aecb` | the card; the app icon's ground |
-| stamp red | `#a8261f` | the ink: the mark on the icon, the stamp |
+| petit bleu | `#86aecb` | the card; the ground of the fixed-colour icon |
+| stamp red | `#a8261f` | the ink: the stamp, the mark on the fixed-colour icon |
 | ink | `#221c1d` | the name on paper |
 | paper | `#e2d3ab` | manila, the ground behind the stamp |
 | night paper | `#2f2c2a` | the ground in dark mode. Darker (the ink, `#221c1d`) and the fibres fight the text |
@@ -64,8 +64,9 @@ cut in the bar.
 
 **Inside the app, the mark takes the theme**: `currentColor`, set from the theme's
 `--accent` (or `--fg`), never the fixed brand colours. pneu follows the Omarchy theme
-and the mark follows with it. The fixed colours are for things that exist outside a
-theme: the app icon, the favicon, the README, printed matter.
+and the mark follows with it, the launcher icon included. The fixed colours are for
+things that exist outside a theme: the favicon, the OAuth logo, the README, the pages,
+the social card, printed matter.
 
 ## The name
 
@@ -78,6 +79,8 @@ theme: the app icon, the favicon, the README, printed matter.
   of the word.
 - The app's UI keeps its own mono face and the theme font. The pen is for the name
   only.
+- Prose on the pages and the social card is Georgia (with a serif fallback): set type,
+  like the letter under the postmark.
 - **Lower case everywhere**, prose included: at the start of a sentence, in the
   window title, the desktop entry, the manifest and tooltips.
 
@@ -117,9 +120,10 @@ go on the small mark.
 |---|---|
 | page, README | the inked postmark (`stamp-inked.webp`), or the paper stamp (`stamp-paper.webp`) |
 | print | the postmark (`stamp.svg`) |
-| 48 to 512 | app icon, drawn cut: `icon.svg`, `icon-{48,64,120,128,256,512}.png` |
-| 16, 32 | app icon, pixel cut: `icon-small.svg`, `icon-16.png`, `icon-32.png` |
+| launcher icon | `mark.svg` alone, no tile, in the Omarchy theme's accent. `install/pneu-theme` rewrites it into the hicolor theme (scalable, one unit of margin) on every theme switch |
 | favicon | `favicon.svg` (the pixel cut on the tile) |
+| fixed-colour icon | `icon.svg`, `icon-*.png`: the mark in stamp red on the petit bleu tile, only where no theme applies |
+| social card | 1280 × 640, in the site repo: paper ground, the inked stamp, the pen name with room, one line of prose |
 | window header | `mark.svg` inlined at 18 CSS px (22.5 device px at 1.25×), in the theme's colour. Softer on a 1× screen |
 | bar | `pneu-mark.ttf`, U+E000, at the bar's icon-font size, in the theme's colour |
 
@@ -138,6 +142,10 @@ So they don't come back by accident:
 - **A round-rect bowl.** It shrinks well but reads worse than round. The pixel cut
   solves shrinking instead.
 - **Mono type for the name.** Too plain; the pen won.
+- **The tile as the launcher icon** (red mark on the blue tile). The owner didn't want
+  red on blue in the launcher; it takes the theme's accent instead.
+- **The pixel cut as a launcher icon.** The launcher scaled the 32 px icon up at 1.6×
+  and it looked pixelated. The launcher uses the scalable drawn cut only.
 
 ## Source
 
