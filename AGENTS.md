@@ -122,10 +122,10 @@ and build order; this file is the working contract. Read PLAN.md before touching
   `--bg`, `--fg`, `--accent`, `--selection` to `~/.config/pneu/theme.css`;
   app.css derives muted/border/unread from bg/fg with `color-mix`. Don't add
   rungs to the hook or hardcode them in app.css.
-  The hook also writes the launcher icon, the mark alone in `--accent`
-  (hicolor scalable from mark.svg, 16/32 from mark-pixel.svg), from the
-  copies INSTALL.md puts in `~/.local/share/pneu`: the hook runs as a copy
-  and can't read brand/.
+  The hook also writes the launcher icon, the drawn mark alone in `--accent`
+  (hicolor scalable only; launchers scale fixed sizes up on HiDPI and the
+  pixel cut shows its blocks), from the copy of mark.svg INSTALL.md puts in
+  `~/.local/share/pneu`: the hook runs as a copy and can't read brand/.
 - An empty list shows pneu's mark (the `mark` template in base.html, the
   drawn cut of brand/mark.svg) as a faint watermark in the theme's colours.
 - HTML bodies render in the app's colors unless the sanitized document

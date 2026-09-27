@@ -16,10 +16,10 @@
 # so open windows repaint without a reload.
 #
 # It also recolours the launcher icon: pneu's mark alone, no tile, in the
-# theme's accent. The marks are copies of brand/mark.svg (drawn, for the
-# scalable icon) and brand/mark-pixel.svg (the pixel cut, for 16 and 32px,
-# where the drawn one goes to mush) that INSTALL.md puts in
-# ~/.local/share/pneu; this hook runs as a copy and can't see the repo.
+# theme's accent, from a copy of brand/mark.svg that INSTALL.md puts in
+# ~/.local/share/pneu (this hook runs as a copy and can't see the repo).
+# Only the scalable icon: launchers scale a fixed-size one up on HiDPI
+# screens, and the pixel cut then shows its blocks.
 
 set -euo pipefail
 
@@ -98,23 +98,19 @@ chmod 644 "$TMP"
 mv "$TMP" "$OUT"
 trap - EXIT
 
-# The launcher icon. Each file goes through a temp file and a rename, so a
-# launcher never reads a half-written icon.
+# The launcher icon, through a temp file and a rename like theme.css, so a
+# launcher never reads a half-written one.
 MARKS="$HOME/.local/share/pneu"
 ICONS="$HOME/.local/share/icons/hicolor"
-icon() { # <mark file> <viewBox> <px or empty for scalable> <out>
-  local tmp svg
-  svg="$(sed -e "s/currentColor/$ACCENT/g" -e "s/ width=\"15\" height=\"15\" viewBox=\"0 0 15 15\"/${3:+ width=\"$3\" height=\"$3\"} viewBox=\"$2\"/" "$1")"
-  mkdir -p "$(dirname "$4")"
-  tmp="$(mktemp "$4.XXXXXX")"
-  printf '%s\n' "$svg" > "$tmp"
-  chmod 644 "$tmp"
-  mv "$tmp" "$4"
-}
-if [[ -f "$MARKS/mark.svg" && -f "$MARKS/mark-pixel.svg" ]]; then
-  # A unit of room around the drawn mark, like an app icon's margin. The
-  # pixel cut sits one pixel in, so its walls stay on whole pixels.
-  icon "$MARKS/mark.svg" "-1 -1 17 17" "" "$ICONS/scalable/apps/pneu.svg"
-  icon "$MARKS/mark-pixel.svg" "-1 -1 16 16" 16 "$ICONS/16x16/apps/pneu.svg"
-  icon "$MARKS/mark-pixel.svg" "-0.5 -0.5 16 16" 32 "$ICONS/32x32/apps/pneu.svg"
+if [[ -f "$MARKS/mark.svg" ]]; then
+  # A unit of room around the mark, like an app icon's margin.
+  ICON="$ICONS/scalable/apps/pneu.svg"
+  mkdir -p "$(dirname "$ICON")"
+  TMP="$(mktemp "$ICON.XXXXXX")"
+  trap 'rm -f "$TMP"' EXIT
+  sed -e "s/currentColor/$ACCENT/g" -e 's/ width="15" height="15" viewBox="0 0 15 15"/ width="256" height="256" viewBox="-1 -1 17 17"/' \
+    "$MARKS/mark.svg" > "$TMP"
+  chmod 644 "$TMP"
+  mv "$TMP" "$ICON"
+  trap - EXIT
 fi

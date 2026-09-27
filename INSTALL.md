@@ -87,7 +87,7 @@ repo root.
 8. **The desktop pieces do what they say.** Read them; they're short.
    - `install/pneu-theme` runs on every Omarchy theme switch and writes only
      `~/.config/pneu/theme.css` and the launcher icon
-     (`~/.local/share/icons/hicolor/*/apps/pneu.svg`), in the theme's colours.
+     (`~/.local/share/icons/hicolor/scalable/apps/pneu.svg`), in the theme's colours.
    - `install/pneu.service` runs `~/.local/bin/pneu`.
    - `manifest.json` and `shell/` form the bar widget. It runs inside
      omarchy-shell with your privileges, reads
@@ -237,7 +237,7 @@ first-pull step.
 
 ```sh
 install -Dm644 install/pneu.desktop ~/.local/share/applications/pneu.desktop
-install -Dm644 -t ~/.local/share/pneu brand/mark.svg brand/mark-pixel.svg   # the hook colours the icon from these
+install -Dm644 -t ~/.local/share/pneu brand/mark.svg    # the hook colours the launcher icon from it
 omarchy hook install theme-set install/pneu-theme    # copies the hook
 install/pneu-theme                                   # render the current theme and icon once
 
@@ -264,7 +264,7 @@ click, for example your own scratchpad toggle.
 ```sh
 systemctl --user disable --now pneu.service
 rm ~/.config/systemd/user/pneu.service ~/.local/share/applications/pneu.desktop
-rm -r ~/.local/share/pneu ~/.local/share/icons/hicolor/*/apps/pneu.svg
+rm -r ~/.local/share/pneu ~/.local/share/icons/hicolor/scalable/apps/pneu.svg
 rm ~/.config/omarchy/hooks/theme-set.d/pneu-theme ~/.config/omarchy/plugins/pneu
 rm ~/.local/bin/pneu
 rm -r ~/.local/state/pneu ~/.config/pneu     # token, launch nonce, configs, OAuth client JSON
