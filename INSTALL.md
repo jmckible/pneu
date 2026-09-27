@@ -395,8 +395,23 @@ Open pneu from the app launcher, or by clicking the bar widget; both run
 **Agents:** run this section as you ran the install, and report what you
 removed, what the human chose to keep, and what the check at the end found.
 
-Stopping the service interrupts a first download that's still running;
-mail kept after that is partial.
+**(human)** Ask both questions before running anything, in one go:
+
+- **Mail.** Each account's downloaded mail and its index are in
+  `~/mail/<acct>`. Gmail still has all of it, but downloading it again takes
+  hours on a large mailbox. The directory also holds lieer's refresh token,
+  which works until the Google step below revokes it; keeping the mail can
+  still mean deleting that. Stopping the service interrupts a first download
+  that's still running, so mail kept after that is partial.
+- **Packages**, one by one: other software may use Go or notmuch. The
+  choices are lieer (with python-tqdm), notmuch, and Go.
+
+List what the later steps need while the files that hold it still exist:
+
+```sh
+jq -r '.accounts[] | "\(.name) \(.email)"' ~/.config/pneu/config.json   # each account and its address
+jq -r .project_id ~/.config/pneu/*/client_secret.json                  # the Cloud project(s)
+```
 
 ```sh
 omarchy plugin remove pneu --yes                     # turns the widget off, unlinks it, rescans
@@ -404,41 +419,37 @@ systemctl --user disable --now pneu.service
 rm ~/.config/systemd/user/pneu.service
 systemctl --user daemon-reload
 rm ~/.local/share/applications/pneu.desktop ~/.config/omarchy/hooks/theme-set.d/pneu-theme ~/.local/bin/pneu
-rm -r ~/.local/share/pneu ~/.local/share/icons/hicolor/scalable/apps/pneu.svg
-jq -r '.accounts[].name' ~/.config/pneu/config.json   # the accounts, listed before their config goes
+rm -rf ~/.local/share/pneu ~/.local/share/icons/hicolor/scalable/apps/pneu.svg   # absent on older installs
 ```
 
-**(human)** Each account's downloaded mail and its index are in
-`~/mail/<acct>`. Gmail still has all of it, but downloading it again takes
-hours on a large mailbox: ask before deleting it.
+For each account whose mail goes (one kept goes without its refresh token:
+`rm ~/mail/<acct>/gmail/.credentials.gmailieer.json`):
 
 ```sh
-rm -r ~/mail/<acct>                                  # each account listed above
+rm -r ~/mail/<acct>
 rmdir --ignore-fail-on-non-empty ~/mail
 rm -r ~/.config/pneu ~/.local/state/pneu             # token, launch nonce, configs, OAuth client
 rm -rf ~/.cache/pneu                                 # lieer's AUR files and build
 ```
 
-**Packages** are the human's call, one by one: other software may use Go or
-notmuch.
+Remove the packages the human chose in one transaction, so one password
+dialog:
 
 ```sh
-pkexec pacman -Rns --noconfirm lieer python-tqdm
-pkexec pacman -Rns --noconfirm notmuch
+pkexec pacman -Rns --noconfirm lieer python-tqdm notmuch go   # only the chosen ones
 rm -rf ~/.cache/go-build                             # with Go: the build cache step 2 filled
-pkexec pacman -Rns --noconfirm go
 ```
 
-**(human)** Google keeps two things. Open each link with
-`setsid -f xdg-open '<url>'`, as in step 4:
+**(human)** Google keeps two things, for each address listed at the start.
+Open each link with `setsid -f xdg-open '<url>'`, as in step 4:
 
 - **The access you granted:**
   `https://myaccount.google.com/connections?authuser=<address>` → **pneu**
   → **Delete all connections**.
 - **The Cloud project:**
   `https://console.cloud.google.com/cloud-resource-manager?authuser=<address>`
-  → select the pneu project → **Delete**. Keep it to reinstall later: the
-  same project can issue a new Desktop client.
+  → select the project listed at the start → **Delete**. Keep it to
+  reinstall later: the same project can issue a new Desktop client.
 
 The browser keeps `pneu.localhost`'s cookie and site data; clear them there
 if you like.
