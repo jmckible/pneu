@@ -49,6 +49,8 @@ Both cuts use `currentColor`. Inline them to take the colour of their surroundin
 | stamp red | `#a8261f` | the ink: the mark on the icon, the stamp |
 | ink | `#221c1d` | the name on paper |
 | paper | `#e2d3ab` | manila, the ground behind the stamp |
+| night paper | `#2f2c2a` | the ground in dark mode. Darker (the ink, `#221c1d`) and the fibres fight the text |
+| stamp red, dark | `#e0655a` | the stamp's ink on night paper, where `#a8261f` vanishes |
 
 **Inside the app, the mark takes the theme**: `currentColor`, set from the theme's
 `--accent` (or `--fg`), never the fixed brand colours. pneu follows the Omarchy theme
@@ -89,7 +91,11 @@ p's walls never close. Every part goes through the same press, so the thin walls
 longer look softer than the thick ring. Baking it rather than filtering it on the page
 keeps it identical in every browser and costs nothing at runtime. On a light ground,
 set it with `mix-blend-mode: multiply` so the paper's fibres show through the ink, as
-they would. On a dark ground, use normal blending. The SVGs stay for print and for
+they would. On a dark ground, use the `-dark` exports (`stamp-inked-dark.webp`,
+`stamp-sous-la-ville-inked-dark.webp`, inked in `#e0655a`) with normal blending, in a
+`<picture>` with `prefers-color-scheme`. Don't brighten the light-ground export with a
+CSS filter; the dark ink is chosen, not derived. Keep the paper texture in dark mode
+over night paper: dropping it makes the page read as a screen again. The SVGs stay for print and for
 anywhere that needs a vector.
 
 The stamp keeps its three waves. Two waves read as stink lines, and the waves never
