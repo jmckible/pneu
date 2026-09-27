@@ -410,7 +410,7 @@ List what the later steps need while the files that hold it still exist:
 
 ```sh
 jq -r '.accounts[] | "\(.name) \(.email)"' ~/.config/pneu/config.json   # each account and its address
-jq -r .project_id ~/.config/pneu/*/client_secret.json                  # the Cloud project(s)
+jq -r .installed.project_id ~/.config/pneu/*/client_secret.json        # the Cloud project(s)
 ```
 
 ```sh
