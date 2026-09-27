@@ -1,6 +1,6 @@
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="brand/stamp-inked-dark.webp"><img src="brand/stamp-inked.webp" width="400" alt="The pneu postmark: a p drawn as a pneumatic tube, ringed by “dans l'heure · within the hour”"></picture></p>
+<p><picture><source media="(prefers-color-scheme: dark)" srcset="brand/stamp-inked-dark.webp"><img src="brand/stamp-inked.webp" width="280" alt="The pneu postmark: a p drawn as a pneumatic tube, ringed by “dans l'heure · within the hour”"></picture></p>
 
-<h1 align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="brand/wordmark-paper.svg"><img src="brand/wordmark-ink.svg" height="72" alt="pneu"></picture></h1>
+<p><picture><source media="(prefers-color-scheme: dark)" srcset="brand/wordmark-paper.svg"><img src="brand/wordmark-ink.svg" width="200" alt="pneu"></picture></p>
 
 A Gmail-native mail client for Omarchy. Named for the Paris *pneumatique*
 (1866–1984), where a letter went by tube under the city and arrived within the
