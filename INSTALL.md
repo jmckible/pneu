@@ -255,9 +255,18 @@ Open pneu from the app launcher, or by clicking the bar widget; both run
 `pneu open`. To bind a key, add a Hyprland binding that runs
 `pneu open`.
 
-**Bar widget settings.** Set `command` on the widget's entry in
-`~/.config/omarchy/shell.json` to run something other than `pneu open` on
-click, for example your own scratchpad toggle.
+**Bar widget settings.** Both go on the widget's entry in
+`~/.config/omarchy/shell.json`, e.g. `{ "id": "pneu", "style": "Minimal" }`.
+
+- `style`: `Default` always shows the mark: in the bar's text colour when
+  the inbox is read, in the accent colour with the unread count otherwise.
+  `Minimal` shows the mark only while there is unread mail, in the accent
+  colour and without a count, and takes no space in the bar otherwise.
+  Either style turns the mark the bar's urgent colour when sync is failing
+  or the server is down (Minimal shows up for it too), and the tooltip says
+  what's wrong.
+- `command`: run something other than `pneu open` on click, for example
+  your own scratchpad toggle.
 
 ## Uninstall
 

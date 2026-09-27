@@ -14,7 +14,10 @@ and build order; this file is the working contract. Read PLAN.md before touching
   at the root, because `omarchy plugin add` clones the repo; `shell/BarWidget.qml`),
   and under `install/` the systemd unit, desktop entry, and theme-set hook. A
   user's own layout — scratchpads, keybindings, window rules — does not; the
-  widget's `command` setting is how a layout takes over the click.
+  widget's `command` setting is how a layout takes over the click, and its
+  `style` (Default | Minimal) how a sparse bar drops the idle mark. A layout
+  that mounts the widget itself must hide the mount on the widget's `shown`,
+  not `visible`: `visible` reads false under a hidden parent and never recovers.
   `omarchy plugin validate .` must pass, and it refuses a symlink anywhere in
   the repo. The widget draws its icon from `brand/pneu-mark.ttf` (a hinted
   glyph, like the bar's own icons), so a plugin packaged without `brand/`

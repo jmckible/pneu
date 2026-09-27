@@ -19,6 +19,11 @@ import qs.Ui
 // that is failing, erroring, needs re-auth, or isn't set up. An account
 // downloading its mail for the first time isn't a warning: the count shows
 // its progress ("43%") instead, and the tooltip how far back it's complete.
+//
+// The Minimal style is for bars that keep only what needs attention: the
+// mark alone in the accent colour while there is unread mail, nothing
+// otherwise. A warning still shows (in urgent), or a dead server would read
+// as an empty inbox.
 BarWidget {
   id: root
   moduleName: "pneu"
@@ -55,6 +60,13 @@ BarWidget {
     return pullingAccounts.length > 0 ? pct : -1
   }
 
+  readonly property bool minimal: String(setting("style", "Default")) === "Minimal"
+
+  // `shown`, not `visible`, is what a host that mounts the widget itself
+  // should bind: `visible` reads false while any parent is hidden, so a
+  // mount that hid on it could never come back.
+  readonly property bool shown: !minimal || warning || unread > 0
+  visible: shown
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
@@ -185,7 +197,7 @@ BarWidget {
       : (root.unread > 0 ? Color.accent : (root.bar ? root.bar.barForeground : Color.foreground))
     // A first download shows its progress in place of the count.
     readonly property bool pulling: !root.warning && root.pullingAccounts.length > 0
-    readonly property bool showCount: pulling || root.unread > 0
+    readonly property bool showCount: !root.minimal && (pulling || root.unread > 0)
     readonly property string countText: pulling
       ? (root.pullPercent >= 0 ? root.pullPercent + "%" : "…")
       : (root.unread > 99 ? "99+" : String(root.unread))

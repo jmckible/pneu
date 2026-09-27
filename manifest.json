@@ -19,9 +19,21 @@
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
+      "style": "Default",
       "command": ""
     },
     "schema": [
+      {
+        "key": "style",
+        "type": "enum",
+        "label": "Style",
+        "options": [
+          "Default",
+          "Minimal"
+        ],
+        "defaultValue": "Default",
+        "description": "Default always shows the mark, with the unread count in the accent colour. Minimal shows the mark in the accent colour only while there is unread mail, with no count; it still appears in the urgent colour when sync is failing."
+      },
       {
         "key": "command",
         "type": "string",
