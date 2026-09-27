@@ -16,7 +16,10 @@ and build order; this file is the working contract. Read PLAN.md before touching
   user's own layout — scratchpads, keybindings, window rules — does not; the
   widget's `command` setting is how a layout takes over the click.
   `omarchy plugin validate .` must pass, and it refuses a symlink anywhere in
-  the repo.
+  the repo. The widget draws its icon from `brand/pneu-mark.ttf` (a hinted
+  glyph, like the bar's own icons), so a plugin packaged without `brand/`
+  must carry the font. The shell doesn't reload a changed widget; run
+  `omarchy-restart-shell`.
 - One binary: `pneu` (or `pneu serve`) is the server; `pneu open` waits for it
   and launches or focuses the window through `omarchy-launch-or-focus-webapp`
   (pattern `pneu.localhost__open`, the class minus browser prefix and profile);
