@@ -98,10 +98,11 @@ relevant line just before each:
   viewer on purpose and checking every attack failed.
 - **Step 1 downloads and compiles.** lieer comes from the AUR as source
   and is built on this machine, as them, with plenty of build output.
-- **Google's consent screen says the app isn't verified,** with a link
-  labelled "Go to pneu (unsafe)". Google says that about every personal
-  OAuth client nobody has submitted for review. The app is their own
-  client, just created.
+- **Google's consent screen says the app isn't verified,** with a
+  **Back to safety** button and a way past it (**Continue**, or
+  **Advanced** → "Go to pneu (unsafe)") that asks twice. Google says that
+  about every personal OAuth client nobody has submitted for review. The
+  app is their own client, just created.
 - **After `pneu open`, the browser may print warnings** to the terminal.
   They're the browser's, not pneu's.
 - **The first download takes hours** on a large mailbox. The inbox is
@@ -407,8 +408,9 @@ agent runs the command itself and leaves it waiting; the consent screen is
 the human's part.
 
 - A personal account's consent screen first says Google hasn't verified
-  the app, in Testing and in production alike: **Advanced** → **Go to pneu
-  (unsafe)**. It's your own client.
+  the app, in Testing and in production alike. Not **Back to safety**:
+  **Continue** (or **Advanced** → **Go to pneu (unsafe)**), and confirm
+  again on the next screen. It's your own client.
 - It refuses to start without the client JSON from step 4; lieer would
   otherwise silently use its own shared client.
 - The flow waits for Google's redirect on `localhost:8080`, so that port
@@ -475,7 +477,7 @@ omarchy plugin enable pneu
 pneu open
 ```
 
-`pneu open` should bring up a window titled "Inbox · Pneu". The browser may
+`pneu open` should bring up a window titled "Inbox · pneu". The browser may
 print warnings of its own to the terminal after `pneu open` returns; they
 aren't pneu's, and its exit status is what counts.
 
