@@ -58,12 +58,12 @@ them here if they're wrong.
   the primary visual state. Mouse works everywhere but nothing is mouse-only.
 - **Keys (HEY navigation, Gmail actions).**
   Views: `1` Inbox · `2` Starred · `3` Sent · `4` Spam · `5` Trash · `6` All.
-  Move: `j/k` rows (list) or scroll three lines (thread) · `g/G` first
+  Move: `j/k` (or `↓/↑`) rows (list) or scroll three lines (thread) · `g/G` first
   and last row · `>`/`<` older and newer page (`<` lands on the last row) ·
   `n/p` messages · `Space`/`Shift+Space` page the thread · `Enter`/`o` open
   (list) or fold (thread) · `x` select · `u`/`Esc` back to list (Esc
   first blurs any input).
-  Panes: `h` list · `l` thread · `Tab`/`Shift+Tab` switch · `Esc` (list) closes the thread · `+` maximize.
+  Panes: `h` (`←`) list · `l` (`→`) thread · `Tab`/`Shift+Tab` switch · `Esc` (list) closes the thread · `+` maximize.
   Act: `e` archive · `t` or `#` trash · `!` spam · `s` star · `U` unread ·
   `z` undo · `r` reply · `a` reply all · `w` or `c` write · `v` open in
   Gmail (forward, block, RSVP live there) · `R` sync now · `/` search ·

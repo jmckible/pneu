@@ -1171,7 +1171,7 @@
       ['6', 'All Mail'],
     ]],
     ['Move', [
-      ['j / k', 'Next / previous row (list) · scroll 3 lines (thread)'],
+      ['j / k, ↓ / ↑', 'Next / previous row (list) · scroll 3 lines (thread)'],
       ['n / p', 'Next / previous message (thread)'],
       ['g / G', 'First / last row (list)'],
       ['> / <', 'Older / newer page (list)'],
@@ -1180,8 +1180,8 @@
       ['u, Esc', 'Back to the list (Esc first leaves a field) · Esc on the list closes the thread'],
     ]],
     ['Panes', [
-      ['h', 'Keys to the list'],
-      ['l', 'Keys to the thread (opens the cursor row)'],
+      ['h, ←', 'Keys to the list'],
+      ['l, →', 'Keys to the thread (opens the cursor row)'],
       ['Tab, ⇧Tab', 'Switch pane (not inside a mail body)'],
       ['+', 'Maximize the active pane · + again restores'],
     ]],
@@ -1352,6 +1352,8 @@
     },
   });
   var ANYWHERE = { 1: true, 2: true, 3: true, 4: true, 5: true, R: true, '?': true };
+  // The arrows are hjkl.
+  var ARROWS = { ArrowLeft: 'h', ArrowDown: 'j', ArrowUp: 'k', ArrowRight: 'l' };
 
   Pneu.selection = function () {
     var k = activeKind();
@@ -1378,10 +1380,11 @@
       return;
     }
     var own = Object.prototype.hasOwnProperty;
+    var key = own.call(ARROWS, e.key) ? ARROWS[e.key] : e.key;
     var kind = activeKind();
     var map = kind ? keys[kind] : null;
-    var fn = map && own.call(map, e.key) && map[e.key];
-    if (typeof fn !== 'function' && (kind || own.call(ANYWHERE, e.key))) fn = own.call(keys.global, e.key) && keys.global[e.key];
+    var fn = map && own.call(map, key) && map[key];
+    if (typeof fn !== 'function' && (kind || own.call(ANYWHERE, key))) fn = own.call(keys.global, key) && keys.global[key];
     if (typeof fn !== 'function') return;
     // Enter on a focused link or button keeps its native meaning.
     if (e.key === 'Enter' && t && t.nodeType === 1 && t.closest('a, button')) return;
