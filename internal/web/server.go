@@ -89,6 +89,15 @@ func New(accounts []notmuch.Account, host, token string) (*Server, error) {
 		s.order[a.Name] = i
 	}
 
+	// Opening the window is when you want the mail your phone just announced.
+	// Only a nonce launch counts: the session-cookie branch of /open is a GET
+	// any localhost page can fire.
+	s.Auth.OnLaunch = func() {
+		if s.Syncer != nil {
+			s.syncAll()
+		}
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /open", s.Auth.Open)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))

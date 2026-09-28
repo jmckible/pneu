@@ -45,6 +45,8 @@ type Auth struct {
 	Host   string // e.g. "pneu.localhost:7317"
 	Origin string // e.g. "http://pneu.localhost:7317"
 	token  string
+	// OnLaunch runs after /open accepts a launch nonce: a new window.
+	OnLaunch func()
 
 	mu         sync.Mutex
 	nonce      string // "" until StartLaunch: /open refuses everything
@@ -199,6 +201,9 @@ func (a *Auth) Open(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	})
+	if a.OnLaunch != nil {
+		a.OnLaunch()
+	}
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 

@@ -1291,14 +1291,47 @@
   // re-renders the list if the pull brought anything.
   function syncNow() {
     flash('Syncing…');
-    fetch('/sync', { method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/json' } })
+    postSync().catch(function (err) { fail('Sync', err); });
+  }
+
+  function postSync() {
+    return fetch('/sync', { method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/json' } })
       .then(function (res) {
         return res.json().catch(function () { return null; }).then(function (data) {
           if (!res.ok || !data || !data.ok) throw new Error((data && data.error) || 'HTTP ' + res.status);
         });
-      })
-      .catch(function (err) { fail('Sync', err); });
+      });
   }
+
+  // Coming back to the window asks for a sync, quietly, so mail the phone
+  // just announced shows up a moment later (an idle sync is about a second)
+  // instead of on the next tick. A blur that only moved focus into a mail
+  // frame isn't leaving: the document still has focus. A launch syncs from
+  // the server (/open). At most one request per RETURN_SYNC_GAP.
+  var RETURN_SYNC_GAP = 20000;
+  var away = false;
+  var returnSyncAt = 0;
+
+  function leftWindow() {
+    setTimeout(function () {
+      if (document.hidden || !document.hasFocus()) away = true;
+    }, 0);
+  }
+
+  function returnedToWindow() {
+    if (!away || document.hidden) return;
+    away = false;
+    if (Date.now() - returnSyncAt < RETURN_SYNC_GAP) return;
+    returnSyncAt = Date.now();
+    postSync().catch(function () { /* the next tick, or R, tries again */ });
+  }
+
+  window.addEventListener('blur', leftWindow);
+  window.addEventListener('focus', returnedToWindow);
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) leftWindow();
+    else returnedToWindow();
+  });
 
   var keys = (Pneu.keys = {
     list: {

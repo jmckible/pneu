@@ -85,7 +85,11 @@ them here if they're wrong.
   `syncing` when a sync starts and `sync` when it ends, failures included;
   only an end that pulled something re-renders the list, without moving the
   cursor. `R` asks for a sync on every account now (`POST /sync`, coalesced
-  with one already running) and flashes "Syncing…" in the footer. *default*
+  with one already running) and flashes "Syncing…" in the footer. Launching
+  the window (`/open` with the nonce) and coming back to it (focus or shown
+  again, not a click into a mail frame; at most every 20s) ask the same,
+  quietly: the phone buzzes on Gmail's push, and an idle sync is about a
+  second, so the mail is there by the time you look. *default*
 - **Theme.** Everything references a CSS variable; nothing hardcodes a color.
   Verify against three Omarchy themes (one light) before merge. *default*
 

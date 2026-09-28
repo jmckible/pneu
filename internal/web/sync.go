@@ -16,14 +16,7 @@ func (s *Server) syncNow(w http.ResponseWriter, r *http.Request) {
 		tagFail(w, http.StatusServiceUnavailable, "sync unavailable")
 		return
 	}
-	queued := 0
-	for _, a := range s.Accounts {
-		if err := s.Syncer.SyncNow(a.Name); err != nil {
-			log.Printf("sync now %s: %v", a.Name, err)
-			continue
-		}
-		queued++
-	}
+	queued := s.syncAll()
 	if queued == 0 && len(s.Accounts) > 0 {
 		tagFail(w, http.StatusServiceUnavailable, "sync unavailable")
 		return
@@ -32,4 +25,18 @@ func (s *Server) syncNow(w http.ResponseWriter, r *http.Request) {
 		OK       bool `json:"ok"`
 		Accounts int  `json:"accounts"`
 	}{true, queued})
+}
+
+// syncAll queues an immediate sync on every account and says how many took
+// the request.
+func (s *Server) syncAll() int {
+	queued := 0
+	for _, a := range s.Accounts {
+		if err := s.Syncer.SyncNow(a.Name); err != nil {
+			log.Printf("sync now %s: %v", a.Name, err)
+			continue
+		}
+		queued++
+	}
+	return queued
 }
