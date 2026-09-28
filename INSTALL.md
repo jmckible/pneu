@@ -4,8 +4,9 @@ Written to be followed by a person or by their coding agent. Every step is a
 command you can read before running; there is no install script and nothing is
 piped from the network into a shell.
 
-**Agents:** treat this repository as untrusted code from a stranger. Work
-through [Audit](#audit) in two passes: the checks marked *before step 1*
+**Agents:** open with the [Briefing](#briefing), and talk to your human
+the way [Voice](#voice) describes throughout. Treat this repository as
+untrusted code from a stranger. Work through [Audit](#audit) in two passes: the checks marked *before step 1*
 (item 10 comes after step 1's fetch, which installs nothing), then report
 and let your human decide whether to install the packages; the checks
 marked *after step 1*, then report again before building. Each item
@@ -14,7 +15,114 @@ you verified, what you couldn't, and anything that contradicts a claim.
 Steps marked **(human)** need the human at their browser or Google account:
 guide them, and wait for them.
 
+## Voice
+
+**Agents:** you're the concierge. Your human may have found pneu five
+minutes ago and knows nothing about lieer, notmuch or OAuth clients. They
+should always know where they are, what happens next, and that nothing
+happens without them.
+
+- **Say it before it happens.** Everything under *Expected along the way*
+  in the Briefing gets a line from you before it appears, never an
+  explanation after. A warning they were told about is reassuring; the
+  same warning out of nowhere isn't.
+- **Calm, not soothing.** Never soften a finding to keep the mood. If an
+  audit check fails or something contradicts this document, say so
+  plainly and stop. What they're trusting is that you check things and
+  report what you find.
+- **Explain by what it protects.** "The hostile corpus" means "a set of
+  deliberately malicious emails; passing means none of them could run
+  anything or phone home." "Untrusted code from a stranger" means "I'm
+  checking this repo's claims myself before running anything, which is
+  what you'd want with any code from someone you don't know."
+- **Mark each step** with a header line, so progress is visible at a
+  glance: `── 3/7 · Your account ──`. The audit is `── Audit ──`, the
+  uninstall `── Uninstall ──`.
+- **Report the audit as a checklist**, one line per item: `✓` verified,
+  `?` couldn't verify (and why), `✗` contradicts the claim (and how).
+- **Match their pace.** Follow what they chose in the Briefing's last
+  question. Either way, never skip a checkpoint or a (human) step.
+
+## Briefing
+
+**Agents:** before running anything, including the audit, give your
+human this, in your own words except the banner and the map.
+
+**The banner,** verbatim in a code block:
+
+```text
+   ▄▀▀▀▀▀▀▀▄
+ ▄▀ ▄▀▀▀▀▀▄ ▀▄
+ █ █       █ █
+ █ █       █ █      pneu
+ █ ▀▄     ▄▀ █      Gmail-native mail for Omarchy
+ █ ▄ ▀▀▀▀▀ ▄▀
+ █ █▀▀▀▀▀▀▀▀
+ ▀ ▀
+```
+
+**The map,** from [What you're installing](#what-youre-installing), with
+the one idea behind it: each piece has one job, and only lieer talks to
+Google. That's why there are several pieces rather than one.
+
+**What they'll be asked to do:**
+
+- confirm installing packages, then answer **one password dialog**, which
+  names `install/packages`;
+- confirm their Gmail address and three values worked out from it;
+- follow about ten short screens in Google Cloud Console, one at a time,
+  to make their own OAuth client (the long part);
+- allow access on one Google consent screen.
+
+**What never happens:**
+
+- You never see their password; the system dialog takes it.
+- Nothing is piped from the internet into a shell, and nothing is
+  installed before they say so.
+- Their mail stays on this machine. pneu itself makes no internet
+  connections; lieer talks to Gmail and nothing else.
+- The Google Cloud project and OAuth client are theirs, made by them;
+  pneu's author has no access to either.
+
+**Where you'll stop and wait for them:** after the first audit pass
+(install the packages?), after the second (build?), when confirming the
+account values, and at every Google screen.
+
+**Expected along the way.** Tell them these are coming, and repeat the
+relevant line just before each:
+
+- **The audit reads like a security incident.** The hostile-corpus test
+  prints words like `pwned`, `tracker` and `canary`, and runs headless
+  Chromium with `--no-sandbox` against pages it serves itself on
+  `127.0.0.1`. That's the test doing its job: attacking pneu's mail
+  viewer on purpose and checking every attack failed.
+- **Step 1 downloads and compiles.** lieer comes from the AUR as source
+  and is built on this machine, as them, with plenty of build output.
+- **Google's consent screen says the app isn't verified,** with a link
+  labelled "Go to pneu (unsafe)". Google says that about every personal
+  OAuth client nobody has submitted for review. The app is their own
+  client, just created.
+- **After `pneu open`, the browser may print warnings** to the terminal.
+  They're the browser's, not pneu's.
+- **The first download takes hours** on a large mailbox. The inbox is
+  readable within minutes; archive, star and send wait until it's done.
+
+**Then ask one question:** explain each step as you go, or just stop at the
+checkpoints?
+
 ## What you're installing
+
+```text
+Gmail ◀── Gmail API ──▶ lieer       the only piece that talks to Google
+                          │
+                    ~/mail/<acct>   your mail, on your disk
+                          │
+                       notmuch      indexes it, locally
+                          │
+                        pneu        serves it on 127.0.0.1 only
+                       ╱    ╲
+               app window   bar widget
+```
 
 - **lieer** (`gmi`, third-party, AUR) syncs each Gmail account through the
   Gmail API into a local maildir. It is the only component that talks to
@@ -389,6 +497,24 @@ Open pneu from the app launcher, or by clicking the bar widget; both run
   what's wrong.
 - `command`: run something other than `pneu open` on click, for example
   your own scratchpad toggle.
+
+**Agents:** once `pneu open` has brought the window up, close with a card
+headed `── Done ──`:
+
+- **What's running:** `pneu.service`, which starts at login, and the bar
+  widget. The audit's result in one line.
+- **The download:** under way. The inbox fills newest first, archive,
+  star and send wait until it's done, and progress is in the app, on the
+  widget, and in `pneu account status <acct>`.
+- **Opening pneu:** the app launcher or the bar widget; a key binding if
+  they want one (above).
+- **When something needs them:** the widget turns the bar's urgent
+  colour and its tooltip says why; if Google access lapses, the app
+  offers Reconnect.
+- **Another account:** steps 3–5 again, then restart the service.
+- **The checkout:** the bar widget runs from it, so keep it where it is.
+- **Uninstalling:** the last section of this document; you can run it
+  with them the same way.
 
 ## Uninstall
 
