@@ -7,9 +7,9 @@
 # Installs go, notmuch, python-tqdm and lieer's dependencies from the Arch
 # repos, builds lieer as USER from the AUR files in DIR (fetched and
 # reviewed beforehand, audit 10), installs it, and removes the build-only
-# packages this run added. Nothing from the AUR is used but DIR: a
-# dependency that isn't in the Arch repos fails the install rather than
-# being built unreviewed.
+# packages this run added, even when a step fails. Nothing from the AUR is
+# used but DIR: a dependency that isn't in the Arch repos fails the install
+# rather than being built unreviewed.
 set -eu
 [ $# = 2 ] || { echo "usage: pkexec $0 USER DIR" >&2; exit 2; }
 user=$1 dir=$2
@@ -23,7 +23,17 @@ deps=$(field depends)
 build=$(for p in $(field makedepends) $(field checkdepends); do pacman -Q "$p" >/dev/null 2>&1 || echo "$p"; done)
 
 pacman -S --needed --noconfirm go notmuch python-tqdm $deps
+# The build-only packages go on exit, whether or not the build got through:
+# a rerun would find them installed and not know they were this run's.
+cleanup() {
+	added=$(for p in $build; do pacman -Q "$p" >/dev/null 2>&1 && echo "$p"; done)
+	[ -z "$added" ] || pacman -Rns --noconfirm $added
+}
+trap cleanup EXIT
 [ -z "$build" ] || pacman -S --needed --noconfirm --asdeps $build
 runuser -u "$user" -- makepkg --force --dir "$dir"
-pacman -U --noconfirm $(runuser -u "$user" -- makepkg --packagelist --dir "$dir")
-[ -z "$build" ] || pacman -Rns --noconfirm $build
+# --packagelist names a -debug package whenever makepkg.conf enables debug
+# (Arch's default), but an arch=any build never produces one: install what
+# was built.
+pkgs=$(for f in $(runuser -u "$user" -- makepkg --packagelist --dir "$dir"); do [ ! -f "$f" ] || echo "$f"; done)
+pacman -U --noconfirm $pkgs
