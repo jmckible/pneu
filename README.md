@@ -1,19 +1,25 @@
-<p><picture><source media="(prefers-color-scheme: dark)" srcset="brand/stamp-inked-dark.webp"><img src="brand/stamp-inked.webp" width="280" alt="The pneu postmark: a p drawn as a pneumatic tube, ringed by “dans l'heure · within the hour”"></picture></p>
+<p><picture><source media="(prefers-color-scheme: dark)" srcset="brand/stamp-inked-dark.webp"><img src="brand/stamp-inked.webp" width="280" alt="The pneu postmark"></picture></p>
 
 <p><picture><source media="(prefers-color-scheme: dark)" srcset="brand/wordmark-paper.svg"><img src="brand/wordmark-ink.svg" width="200" alt="pneu"></picture></p>
 
-A Gmail-native mail client for Omarchy. Named for the Paris *pneumatique*
-(1866–1984), where a letter went by tube under the city and arrived within the
-hour; Parisians called the letter itself *un pneu*.
+pneu is a Gmail client designed for Omarchy. It is themeable and keyboard first.
 
-Gmail stays the backend. pneu is a local view over a synced copy: lieer syncs
-each account via the Gmail API, notmuch indexes each into its own database, and
-a Go server on localhost renders them in an `--app` window of your browser. An
-Omarchy bar widget shows unread mail and warns when sync stops. The app never
-touches the network — lieer is the modem, notmuch is the disk.
+![pneu's inbox](docs/screenshot.webp)
 
-![pneu's inbox beside an open thread, with fictional mail](docs/screenshot.webp)
+In true Linux fashion, pneu is built from other specialized and battle tested tools. [lieer](https://github.com/gauteh/lieer) handles all Gmail syncing via API. [notmuch](https://notmuchmail.org/) stores and indexes your email. All that's needed is a Go server for the front end. As an added benefit, you'll have a complete copy of your email archive, locally.
 
-See [PLAN.md](PLAN.md) for scope and build order.
+Compatible with multiple mailboxes, both standard Gmail and Google Workspace accounts.
 
-The brand, its reasoning and its assets are in [brand/](brand/README.md).
+# Installation
+
+Ask your agent to follow [INSTALL.md](INSTALL.md). It will walk you through the process and address any questions or concerns.
+
+Because lieer syncs via API, you'll need to create a Google application to use oauth credentials. The installer will guide you. This also ensures you'll have complete control of your authentication; nothing is shared with other users or me.
+
+# Widget
+
+Includes two top bar widgets: a standard version with notification and a minimal option that will get out of your way.
+
+# Histoire
+
+The 'pneu' name is inspired by the *pneumatique* system that ran below the streets of Paris (1866-1984). It was a technological marvel of its time, promising letters could be sent across the city within the hour.
