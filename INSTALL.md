@@ -330,8 +330,12 @@ as the right Google account, and after the first screen
 4. **Publish** (personal accounts only). Google won't take an *External*
    app out of *Testing* until its Branding links a homepage and a privacy
    policy on an authorized domain, and the Audience page doesn't say so: its
-   **Publish app** button just stays grey. pneu publishes pages written for
-   every install, since each one is its owner's own client:
+   **Publish app** button just stays grey. pneu's developer, Jordan
+   McKible, hosts a homepage, privacy policy and terms that any install can
+   use: they're written for every install, since each one is its owner's
+   own client. The human can host their own instead, a homepage and privacy
+   policy on a domain they control, with that domain under Authorized
+   domains. With the developer's pages:
    - **Branding:**
      `https://console.cloud.google.com/auth/branding?authuser=<address>&project=<project ID>`.
      Application home page `https://jordan.mckible.com/pneu/`, privacy
@@ -344,9 +348,9 @@ as the right Google account, and after the first screen
      → **Publish app** → confirm. It's now *In production*; there's no
      verification to submit for your own account.
 
-   If the human would rather not point their app at pneu's pages, or Google
-   refuses them, stay in *Testing*: on the Audience page, **Test users** →
-   **Add users** → `<address>`. That works, but Google expires a Testing
+   If the human would rather use neither, or Google refuses the pages, stay
+   in *Testing*: on the Audience page, **Test users** → **Add users** →
+   `<address>`. That works, but Google expires a Testing
    app's tokens after seven days, so the app asks to Reconnect every week.
    Publishing later ends that, after one `pneu account auth <acct> --force`
    (step 5).
