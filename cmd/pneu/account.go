@@ -400,7 +400,9 @@ func gmiLocked(gmiDir, nmConfig string, term io.Writer, env []string, args ...st
 	}
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = gmiDir
-	cmd.Env = withEnv(os.Environ(), append([]string{"NOTMUCH_CONFIG=" + nmConfig}, env...)...)
+	// Unbuffered, as the engine runs it: term is a pipe, and the consent URL
+	// must reach it while lieer waits on the consent, not when lieer exits.
+	cmd.Env = withEnv(os.Environ(), append([]string{"NOTMUCH_CONFIG=" + nmConfig, "PYTHONUNBUFFERED=1"}, env...)...)
 	var out bytes.Buffer
 	if term != nil {
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, term, term
@@ -469,8 +471,8 @@ func accountAuth(args []string) error {
 		if _, err := gmi.CleanClientSecret(b); err != nil {
 			return fmt.Errorf("%s: %w (rerun `pneu account add` with --client-secret)", secret, err)
 		}
-		if err := gmi.CheckAuthPort(); err != nil {
-			return fmt.Errorf("%w: stop whatever listens there and rerun", err)
+		if err := checkAuthPort(); err != nil {
+			return fmt.Errorf("%w (`ss -tanp 'sport = :8080'` shows what holds it)", err)
 		}
 	}
 	// One lock across the consent and the check: released between them, the
@@ -489,17 +491,21 @@ func accountAuth(args []string) error {
 			authArgs = []string{"auth", "-f", "-c", secret}
 		}
 		// lieer -f deletes the credentials before consent: an interrupted
-		// or refused consent would leave none. Put the old ones back.
+		// or refused consent would leave none. Set the old ones aside (a
+		// rename: pneu never reads them) and put them back if it fails.
 		creds := filepath.Join(a.GmiDir, gmi.CredentialsFile)
-		old, oldErr := os.ReadFile(creds)
+		aside := strings.TrimSuffix(creds, ".json") + ".pneu-old.json" // notmuch ignores *.json
+		kept := os.Rename(creds, aside) == nil
 		if _, err := gmiLocked(a.GmiDir, a.NotmuchConfig, &consentOpener{term: os.Stdout}, []string{"BROWSER=true"}, authArgs...); err != nil {
-			if _, statErr := os.Stat(creds); oldErr == nil && errors.Is(statErr, os.ErrNotExist) {
-				if werr := os.WriteFile(creds, old, 0o600); werr == nil {
+			if _, statErr := os.Stat(creds); kept && errors.Is(statErr, os.ErrNotExist) {
+				if os.Rename(aside, creds) == nil {
 					fmt.Println("Consent didn't finish; the previous credentials are back in place.")
 				}
 			}
+			os.Remove(aside)
 			return fmt.Errorf("gmi auth: %w", err)
 		}
+		os.Remove(aside)
 		if err := gmi.PrivateCredentials(a.GmiDir); err != nil {
 			return err
 		}
@@ -529,6 +535,10 @@ func accountAuth(args []string) error {
 	}
 	return nil
 }
+
+// checkAuthPort is gmi.CheckAuthPort; tests whose stub consent never binds
+// the port replace it.
+var checkAuthPort = gmi.CheckAuthPort
 
 // consentOpener passes `gmi auth`'s output through to the terminal and
 // opens the consent URL it announces in the default browser, once, without

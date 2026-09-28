@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -570,5 +571,33 @@ func TestGroupRead(t *testing.T) {
 	})
 	if _, ok := groupRead(1 << 30); ok {
 		t.Error("found an empty group")
+	}
+}
+
+// A consent that just finished leaves its redirect's connection in
+// TIME_WAIT on the server side. lieer's bind (no SO_REUSEADDR) fails on
+// it for a minute, so the check must too.
+func TestCheckAuthPortSeesTimeWait(t *testing.T) {
+	if err := CheckAuthPort(); err != nil {
+		t.Skip(err)
+	}
+	ln, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", AuthPort))
+	if err != nil {
+		t.Skip(err)
+	}
+	client, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln.Close()
+	server.Close() // the server closes first, as http.server does
+	client.Close()
+	time.Sleep(50 * time.Millisecond)
+	if err := CheckAuthPort(); !errors.Is(err, ErrAuthPort) {
+		t.Fatalf("CheckAuthPort with the port in TIME_WAIT: %v", err)
 	}
 }

@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,7 +33,17 @@ func sandbox(t *testing.T) string {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
 	t.Setenv("NOTMUCH_CONFIG", "")
+	// pneu opens the consent URL the stub prints with xdg-open: never the
+	// real browser. TestAccountAuthDoesNotWaitForBrowser replaces this one.
+	if err := os.WriteFile(filepath.Join(bin, "xdg-open"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// The stub's instant consent never binds localhost:8080, so a real
+	// consent, or a browser test's redirect still in TIME_WAIT, mustn't
+	// fail these tests.
+	checkAuthPort = func() error { return nil }
+	t.Cleanup(func() { checkAuthPort = gmi.CheckAuthPort })
 	for _, k := range []string{"STUBGMI_FAIL", "STUBGMI_AUTH", "STUBGMI_DURATION"} {
 		t.Setenv(k, "")
 	}
@@ -226,8 +238,10 @@ func TestAccountAuthDoesNotWaitForBrowser(t *testing.T) {
 	os.WriteFile(browser, []byte("#!/bin/sh\nrehearse grant \"$1\" >/dev/null 2>&1 &\nexec sleep 20\n"), 0o755)
 	t.Setenv("BROWSER", browser)
 	t.Setenv("STUBGMI_AUTH", "browser")
-	if err := gmi.CheckAuthPort(); err != nil {
-		t.Skip(err)
+	if ln, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", gmi.AuthPort)); err != nil {
+		t.Skip(err) // something listens there: a real consent in progress
+	} else {
+		ln.Close()
 	}
 	secret := filepath.Join(t.TempDir(), "client.json")
 	os.WriteFile(secret, []byte(clientJSON), 0o644)

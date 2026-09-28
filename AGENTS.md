@@ -115,7 +115,12 @@ and build order; this file is the working contract. Read PLAN.md before touching
   stops there if the credentials work. Otherwise it runs
   `gmi auth -f -c <client JSON>` with `BROWSER=true` and hands the printed
   consent URL, which must be Google's, to the page. lieer's consent server is
-  fixed at localhost:8080.
+  fixed at localhost:8080 and binds without SO_REUSEADDR, so a connection
+  still in TIME_WAIT fails it for a minute; `CheckAuthPort` binds the same
+  way. The test suite binds 8080 too: never run it while a real consent
+  (an install's step 5, a Reconnect) is waiting. Every gmi run pneu starts
+  sets `PYTHONUNBUFFERED=1`: its output is a pipe, and lines pneu acts on
+  (the consent URL, progress) must arrive while gmi runs.
 - `gmi send` prints its "receiving content" bar and then "message sent
   successfully: <gmail id>" only after the Gmail API accepted the message; a
   failure after that is the local copy's, and the message must not be resent

@@ -367,7 +367,13 @@ func (g *gmi) consent(clientID, authURI string, frames []frame) error {
 			append(frames, frame{oauth, 458, "run_local_server", "webbrowser.get(browser).open(auth_url, new=1, autoraise=True)"},
 				frame{"/usr/lib/python3.14/webbrowser.py", 68, "get", "raise Error(\"could not locate runnable browser\")"})...)
 	}
-	fmt.Println(consentPrompt + u)
+	// print() of a Python whose stdout is a pipe is block-buffered: without
+	// PYTHONUNBUFFERED the prompt surfaces only when lieer exits.
+	if pyBuffered() {
+		defer fmt.Println(consentPrompt + u)
+	} else {
+		fmt.Println(consentPrompt + u)
+	}
 	// handle_request(): exactly one request, whatever it is.
 	tl := ln.(*net.TCPListener)
 	for {
@@ -394,6 +400,16 @@ func (g *gmi) consent(clientID, authURI string, frames []frame) error {
 		}
 		return nil
 	}
+}
+
+// pyBuffered reports whether Python would block-buffer stdout: it isn't a
+// TTY and PYTHONUNBUFFERED is unset.
+func pyBuffered() bool {
+	if os.Getenv("PYTHONUNBUFFERED") != "" {
+		return false
+	}
+	fi, err := os.Stdout.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice == 0
 }
 
 // openBrowser is webbrowser.get(None).open(url): $BROWSER's first entry, or

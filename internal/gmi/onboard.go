@@ -61,7 +61,7 @@ const (
 )
 
 // CredentialsFile is where lieer keeps an account's OAuth token, in its
-// repository. pneu never reads it; `pneu account auth --force` copies it
+// repository. pneu never reads it; `pneu account auth --force` renames it
 // aside so a consent that doesn't finish can put it back.
 const CredentialsFile = lieerCredentials
 
@@ -302,12 +302,26 @@ func ConsentURL(line string) (string, bool) {
 // lieer calls run_local_server() with no arguments, so port 8080, fixed.
 const AuthPort = 8080
 
-// ErrAuthPort means something else is listening on AuthPort.
-var ErrAuthPort = fmt.Errorf("gmi: localhost:%d is in use; the consent flow needs it for Google's redirect", AuthPort)
+// ErrAuthPort means lieer couldn't bind AuthPort now: something listens
+// there, or a recent connection to it is still closing.
+var ErrAuthPort = fmt.Errorf("gmi: localhost:%d is in use or still closing (a consent just ran?); the consent flow needs it for Google's redirect, so try again in a minute", AuthPort)
 
-// CheckAuthPort fails with ErrAuthPort when localhost:8080 is taken.
+// CheckAuthPort fails with ErrAuthPort when lieer's bind of localhost:8080
+// would. google_auth_oauthlib's server sets allow_reuse_address = False, so
+// a connection still in TIME_WAIT (the redirect of a consent that ran a
+// moment ago) fails its bind; Go's net.Listen sets SO_REUSEADDR and would
+// pass. Bind the way lieer does.
 func CheckAuthPort() error {
-	ln, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", AuthPort))
+	lc := net.ListenConfig{Control: func(_, _ string, c syscall.RawConn) error {
+		var serr error
+		if err := c.Control(func(fd uintptr) {
+			serr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 0)
+		}); err != nil {
+			return err
+		}
+		return serr
+	}}
+	ln, err := lc.Listen(context.Background(), "tcp", fmt.Sprintf("localhost:%d", AuthPort))
 	if err != nil {
 		return ErrAuthPort
 	}
