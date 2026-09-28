@@ -212,6 +212,13 @@
   loopback and LAN addresses, which closes the DNS-rebinding gap the
   browser-side URL filter can't (mailframe.js), and `img-src` narrows back
   to the app origin.
+- **Mailbox switcher.** Investigate. The merged stream (SPEC.md, Index views)
+  suits the author, but other users may want their accounts kept apart —
+  work and personal especially, where one list mixes contexts and a
+  work-hours glance shouldn't surface personal mail. A switcher with "All"
+  as one option, not a replacement for it. Open questions: whether the
+  choice persists, whether the bar count and SSE refresh follow it, what
+  `c` defaults to, and how an account marker returns to rows under "All".
 
 ## Build order
 
