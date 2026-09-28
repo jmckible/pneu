@@ -32,19 +32,21 @@ const (
 )
 
 type fakeSyncer struct {
-	mu      sync.Mutex
-	pushes  map[string]int
-	notes   map[string][]string   // account -> every id passed to NoteWrite
-	syncs   int                   // SyncNow calls
-	sent    []sentMsg             // every Send, failed ones included
-	sendErr error                 // Send's answer
-	sendOut string                // Send's Result.Output
-	sendCtx context.Context       // the last Send's context
-	states  map[string]gmi.Status // Status overrides per account
-	reauths []string              // accounts Reauth was called for
-	reURL   string                // Reauth's answer
-	reErr   error
-	cancels []string // CancelReauth calls
+	mu     sync.Mutex
+	pushes map[string]int
+	notes  map[string][]string // account -> every id passed to NoteWrite
+	// account -> the changes of each NoteWrite call
+	noteChanges map[string][][]string
+	syncs       int                   // SyncNow calls
+	sent        []sentMsg             // every Send, failed ones included
+	sendErr     error                 // Send's answer
+	sendOut     string                // Send's Result.Output
+	sendCtx     context.Context       // the last Send's context
+	states      map[string]gmi.Status // Status overrides per account
+	reauths     []string              // accounts Reauth was called for
+	reURL       string                // Reauth's answer
+	reErr       error
+	cancels     []string // CancelReauth calls
 }
 
 func (f *fakeSyncer) setStatus(account string, st gmi.Status) {
@@ -87,13 +89,15 @@ func (f *fakeSyncer) Send(ctx context.Context, account string, msg io.Reader) (g
 	return gmi.Result{Account: account, Op: gmi.OpSend, Output: f.sendOut, Err: f.sendErr}, f.sendErr
 }
 
-func (f *fakeSyncer) NoteWrite(account string, ids []string) {
+func (f *fakeSyncer) NoteWrite(account string, changes, ids []string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.notes == nil {
 		f.notes = map[string][]string{}
+		f.noteChanges = map[string][][]string{}
 	}
 	f.notes[account] = append(f.notes[account], ids...)
+	f.noteChanges[account] = append(f.noteChanges[account], changes)
 }
 
 func (f *fakeSyncer) noted(account string) []string {
@@ -251,6 +255,12 @@ func TestTagArchiveUndo(t *testing.T) {
 	}
 	if got := f.sync.noted("personal"); !slices.Equal(got, []string{kitchen1, kitchen2}) {
 		t.Fatalf("NoteWrite got %q", got)
+	}
+	f.sync.mu.Lock()
+	changes := f.sync.noteChanges["personal"]
+	f.sync.mu.Unlock()
+	if len(changes) != 1 || !slices.Equal(changes[0], []string{"-inbox"}) {
+		t.Fatalf("NoteWrite changes %q, want the archive's", changes)
 	}
 
 	undo := tagOK(t, f.s, form("action", "undo"))

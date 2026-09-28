@@ -398,7 +398,7 @@ Rerunning it finishes an interrupted run and changes nothing else. It:
   `gmi init --no-auth --replace-slash-with-dot <address>`.
   `--replace-slash-with-dot` can't be changed later without a full re-pull.
 - **Makes lieer ignore `pneu-touch`,** pneu's internal marker for tags
-  written during a full pull: `gmi set --ignore-tags-local`, keeping any
+  it re-applies after a sync: `gmi set --ignore-tags-local`, keeping any
   tags already listed. lieer must never push it.
 - **Adds the account** to `~/.config/pneu/config.json`.
 

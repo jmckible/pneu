@@ -17,6 +17,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -73,6 +76,14 @@ type Op string
 
 const (
 	OpSync Op = "sync"
+	// OpPush is the debounced push after pneu's own tag writes. It runs
+	// `gmi sync`, not `gmi push`: lieer refuses to push a message whose Gmail
+	// historyId is newer than its last pull, and pushing a message is such a
+	// change, so a second action on a message before the next pull (read,
+	// then trash) would be refused and the pull would put the labels back.
+	// The pull right after the push moves lieer's historyId past our own
+	// change. It is its own op so the page doesn't take a keystroke's push
+	// for news (see Result.Changed).
 	OpPush Op = "push"
 	OpSend Op = "send"
 	OpPull Op = "pull" // the first pull only; later pulls are part of sync
@@ -89,10 +100,13 @@ type Result struct {
 	Output   string // combined stdout+stderr, last 8KB
 	Err      error
 	// Changed is false only when lieer said nothing happened: for a sync,
-	// "pull: everything is up-to-date."; for a push, "push: everything is
-	// up-to-date." or "push: nothing to push". A sync that pulled only the
-	// labels we just pushed still reports true.
+	// "pull: everything is up-to-date." (a sync that pulled only the labels
+	// we just pushed still reports true); for a push, when its pull brought
+	// nothing but the labels it pushed (see pushPulled).
 	Changed bool
+	// Refused holds lieer's lines saying its push left changes behind (see
+	// pushRefused); those changes' writes were re-applied.
+	Refused []string
 }
 
 // Status is an account's sync health.
@@ -157,9 +171,10 @@ type account struct {
 	touchDue chan struct{} // cap 1: a NoteWrite landed just after a sync ended
 
 	nmu     sync.Mutex
-	syncing bool                // a sync holds the slot
-	syncEnd time.Time           // when the last sync's gmi exited
-	pending map[string]struct{} // Message-IDs written during a sync, to re-mark
+	syncing bool       // a sync or push holds the slot
+	syncEnd time.Time  // when the last one's gmi exited
+	writes  []tagWrite // pneu's tag writes since the last run settled them (see NoteWrite)
+	carried int        // while syncing: writes[:carried] came before the run began
 
 	smu    sync.Mutex
 	status Status
@@ -292,98 +307,137 @@ func (e *Engine) RequestPush(account string) error {
 	return nil
 }
 
-// NoteWrite records that pneu just changed tags on ids in the account's
+// tagWrite is one tag change pneu made: the changes as the tag handler
+// applied them, to exactly these Message-IDs.
+type tagWrite struct {
+	changes, ids []string
+}
+
+// NoteWrite records that pneu just applied changes to ids in the account's
 // notmuch database. Call it after every successful write, before or after
 // RequestPush.
 //
-// Why: lieer pushes the messages whose notmuch lastmod is above its stored
-// lastmod, and a full pull (first run, --force, or an expired historyId)
-// ends by setting that stored lastmod to the database revision at the end of
-// the pull. A tag written while such a sync runs sits at or below it, and the
-// next push reports "everything is up-to-date" and skips it. So ids written
-// while the account's sync holds the slot (or within noteGrace after its gmi
-// exited) are collected, and when the sync ends they are re-marked with
-// +TouchTag then -TouchTag, which bumps their lastmod, and a push follows.
-// Writes outside a sync are above lastmod already and are ignored here.
-func (e *Engine) NoteWrite(account string, ids []string) {
+// Two ways lieer loses a write, and what the end of each sync or push does
+// about them:
+//
+//   - A write that lands while the run holds the slot can be overwritten by
+//     its pull (which sets every message with Gmail history to its remote
+//     labels) or sit below the lastmod a full pull stores at its end, and
+//     the next push skips it. So writes made during a run are re-applied
+//     after it, then re-marked with +TouchTag -TouchTag (a no-op re-apply
+//     doesn't bump lastmod), and pushed.
+//   - lieer's push refuses a message whose Gmail historyId is newer than
+//     the last one it pulled ("remote has changed, will not update"), and
+//     the pull that follows puts the remote labels back. So when a run's
+//     output says "not all changes could be pushed", every write that run
+//     carried is re-applied the same way. Only pneu's own changes are
+//     replayed, not the whole tag set: a remote change to another label
+//     survives.
+//
+// Otherwise a write is settled by the run that pushed it.
+func (e *Engine) NoteWrite(account string, changes, ids []string) {
 	a, ok := e.accts[account]
-	if !ok || len(ids) == 0 || a.NotmuchConfig == "" {
+	if !ok || len(changes) == 0 || len(ids) == 0 || a.NotmuchConfig == "" {
 		return
 	}
 	a.nmu.Lock()
+	a.writes = append(a.writes, tagWrite{slices.Clone(changes), slices.Clone(ids)})
 	late := !a.syncing && !a.syncEnd.IsZero() && time.Since(a.syncEnd) < noteGrace
-	if a.syncing || late {
-		a.addPendingLocked(ids)
-	}
 	a.nmu.Unlock()
 	if late {
 		signal(a.touchDue)
 	}
 }
 
-func (a *account) addPendingLocked(ids []string) {
-	if a.pending == nil {
-		a.pending = map[string]struct{}{}
-	}
-	for _, id := range ids {
-		a.pending[id] = struct{}{}
-	}
-}
-
-// takePending empties the pending set; end also closes the sync window.
-func (a *account) takePending(end bool) []string {
+// beginSync opens a run's window: writes from here on are its own.
+func (a *account) beginSync() {
 	a.nmu.Lock()
-	defer a.nmu.Unlock()
-	if end {
-		a.syncing = false
-		a.syncEnd = time.Now()
-	}
-	ids := make([]string, 0, len(a.pending))
-	for id := range a.pending {
-		ids = append(ids, id)
-	}
-	a.pending = nil
-	return ids
-}
-
-func (a *account) setSyncing(v bool) {
-	a.nmu.Lock()
-	a.syncing = v
+	a.syncing = true
+	a.carried = len(a.writes)
 	a.nmu.Unlock()
 }
 
-// touch re-marks ids for push (see NoteWrite). The caller holds the account
-// slot and flock, so no push, ours or a manual one, runs between the two
-// writes and the throwaway tag never reaches Gmail even if a repository
-// forgot to ignore it. On failure the ids go back to pending for the next
-// sync's end.
-func (e *Engine) touch(a *account, ids []string) {
-	if len(ids) == 0 {
-		return
+// abortSync closes a run's window when gmi never started: every write stays
+// for the next run to carry.
+func (a *account) abortSync() {
+	a.nmu.Lock()
+	a.syncing = false
+	a.carried = 0
+	a.nmu.Unlock()
+}
+
+// endSync closes a run's window after gmi exited and returns the writes to
+// re-apply: those made during the run, or all of them if its push was
+// refused. The rest are settled.
+func (a *account) endSync(refused bool) []tagWrite {
+	a.nmu.Lock()
+	defer a.nmu.Unlock()
+	from := a.carried
+	if refused {
+		from = 0
+	}
+	ws := a.writes[from:]
+	a.writes, a.carried = nil, 0
+	a.syncing = false
+	a.syncEnd = time.Now()
+	return ws
+}
+
+// requeue puts ws back in front of the writes, for the next run's end.
+func (a *account) requeue(ws []tagWrite) {
+	a.nmu.Lock()
+	a.writes = append(slices.Clip(ws), a.writes...)
+	a.nmu.Unlock()
+}
+
+// reapply re-applies ws in order and re-marks their messages for push (see
+// NoteWrite). The caller holds the account slot and flock, so no push, ours
+// or a manual one, runs between the writes and the throwaway tag never
+// reaches Gmail even if a repository forgot to ignore it.
+func (e *Engine) reapply(a *account, ws []tagWrite) error {
+	if len(ws) == 0 {
+		return nil
+	}
+	var ids []string
+	seen := map[string]bool{}
+	for _, w := range ws {
+		for _, id := range w.ids {
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
 	}
 	nm := notmuch.Account{Name: a.Name, ConfigPath: a.NotmuchConfig}
 	ctx, cancel := context.WithTimeout(context.Background(), touchTimeout)
 	defer cancel()
-	err := nm.Tag(ctx, []string{"+" + TouchTag}, ids)
+	var err error
+	for _, w := range ws {
+		if err = nm.Tag(ctx, w.changes, w.ids); err != nil {
+			break
+		}
+	}
+	if err == nil {
+		err = nm.Tag(ctx, []string{"+" + TouchTag}, ids)
+	}
 	if err == nil {
 		err = nm.Tag(ctx, []string{"-" + TouchTag}, ids)
 	}
 	if err != nil {
-		a.nmu.Lock()
-		a.addPendingLocked(ids)
-		a.nmu.Unlock()
-		e.opts.Logf("gmi: sync [%s]: re-marking %d message(s) tagged during the sync: %v (retried after the next sync)", a.Name, len(ids), err)
-		return
+		e.opts.Logf("gmi: sync [%s]: re-applying %d tag write(s) on %d message(s): %v (retried after the next sync)", a.Name, len(ws), len(ids), err)
+		return err
 	}
-	e.opts.Logf("gmi: sync [%s]: re-marked %d message(s) tagged during the sync for push", a.Name, len(ids))
+	e.opts.Logf("gmi: sync [%s]: re-applied %d tag write(s) on %d message(s) for push", a.Name, len(ws), len(ids))
 	e.RequestPush(a.Name)
+	return nil
 }
 
 // touchTimeout bounds both touch writes together (the Xapian lock wait).
 const touchTimeout = 30 * time.Second
 
-// touchLate handles a NoteWrite that came just after a sync ended: take the
-// slot and flock like any run, then re-mark.
+// touchLate handles a NoteWrite that came just after a sync ended (the write
+// finished before gmi exited, the call came after): take the slot and flock
+// like any run, then re-apply.
 func (e *Engine) touchLate(ctx context.Context, a *account) {
 	select {
 	case a.run <- struct{}{}:
@@ -393,10 +447,15 @@ func (e *Engine) touchLate(ctx context.Context, a *account) {
 	defer func() { <-a.run }()
 	unlock, err := flockFile(ctx, a.LockPath, nil)
 	if err != nil {
-		return // pending kept; the next sync's end re-marks it
+		return // writes kept; the next run carries them
 	}
 	defer unlock()
-	e.touch(a, a.takePending(false))
+	// The writes stay: the next run still carries them, in case its push is
+	// refused. On failure that run's end is the retry.
+	a.nmu.Lock()
+	ws := slices.Clone(a.writes)
+	a.nmu.Unlock()
+	e.reapply(a, ws)
 }
 
 // SyncNow queues an immediate sync (after any in-flight run). Repeated calls
@@ -578,6 +637,7 @@ func (e *Engine) do(ctx context.Context, a *account, op Op) {
 			a.status.LastSync = end
 		case OpPush:
 			a.status.LastPush = end
+			a.status.LastSync = end // it pulled too
 		}
 	}
 	failures := a.status.Failures
@@ -601,14 +661,10 @@ func (a *account) setRunning(v bool) {
 	a.smu.Unlock()
 }
 
-// invoke runs one gmi op under the account mutex and flock. ok is false if
-// ctx ended before gmi started.
+// invoke runs a sync or push (both `gmi sync`, see OpPush) under the
+// account mutex and flock. ok is false if ctx ended before gmi started.
 func (e *Engine) invoke(ctx context.Context, a *account, op Op) (r Result, ok bool) {
-	timeout := e.opts.SyncTimeout
-	if op == OpPush {
-		timeout = e.opts.PushTimeout
-	}
-	return e.exec(ctx, a, op, []string{string(op)}, nil, timeout)
+	return e.exec(ctx, a, op, []string{string(OpSync)}, nil, e.opts.SyncTimeout)
 }
 
 // exec runs `gmi args...` with stdin under the account mutex and flock. ctx
@@ -644,11 +700,17 @@ func (e *Engine) run(ctx context.Context, a *account, op Op, args []string, o ru
 	defer func() { <-a.run }()
 	a.setRunning(true)
 	defer a.setRunning(false)
-	if op == OpSync {
-		// The NoteWrite window. On an early return it just closes; ids
-		// already collected stay pending for the next sync's end.
-		a.setSyncing(true)
-		defer a.setSyncing(false)
+	syncs := op == OpSync || op == OpPush
+	settled := false
+	if syncs {
+		// The NoteWrite window. On an early return it just closes; every
+		// write stays for the next run.
+		a.beginSync()
+		defer func() {
+			if !settled {
+				a.abortSync()
+			}
+		}()
 	}
 
 	unlock, err := flockFile(ctx, a.LockPath, func() {
@@ -663,7 +725,7 @@ func (e *Engine) run(ctx context.Context, a *account, op Op, args []string, o ru
 	}
 	defer unlock()
 
-	if op == OpSync {
+	if syncs {
 		// sync pushes first, and lieer pushes everything since lastmod: a push
 		// that came due before this point is covered. (If the sync fails,
 		// lastmod doesn't advance and the next sync pushes it.)
@@ -674,7 +736,7 @@ func (e *Engine) run(ctx context.Context, a *account, op Op, args []string, o ru
 	}
 
 	switch op {
-	case OpSync, OpPull, OpSend: // the runs that store mail (see cleanTmp)
+	case OpSync, OpPush, OpPull, OpSend: // the runs that store mail (see cleanTmp)
 		e.cleanTmp(a)
 	}
 	if o.before != nil {
@@ -696,9 +758,10 @@ func (e *Engine) run(ctx context.Context, a *account, op Op, args []string, o ru
 	}
 
 	tail := &tailBuffer{max: outputLimit}
-	var out io.Writer = tail
+	refused := &refusalScan{}
+	out := io.MultiWriter(tail, refused)
 	if o.out != nil {
-		out = io.MultiWriter(tail, o.out)
+		out = io.MultiWriter(tail, refused, o.out)
 	}
 	cmd := exec.CommandContext(cctx, e.opts.GmiPath, args...)
 	cmd.Stdin = o.stdin
@@ -747,9 +810,17 @@ func (e *Engine) run(ctx context.Context, a *account, op Op, args []string, o ru
 	default:
 		r.Changed = changed(op, r.Output)
 	}
-	if op == OpSync {
+	r.Refused = refused.lines
+	for _, l := range r.Refused {
+		e.opts.Logf("gmi: %s [%s]: %s", op, a.Name, l)
+	}
+	if syncs {
 		// Success or failure: a failed full pull may still have set lastmod.
-		e.touch(a, a.takePending(true))
+		settled = true
+		ws := a.endSync(len(r.Refused) > 0)
+		if e.reapply(a, ws) != nil {
+			a.requeue(ws)
+		}
 	}
 	return r, true
 }
@@ -766,10 +837,66 @@ func (r Result) Accepted() bool {
 // changed reads lieer 1.6's (non-quiet, non-TTY) summary lines. See Result.Changed.
 func changed(op Op, out string) bool {
 	if op == OpPush {
-		return !strings.Contains(out, "push: everything is up-to-date.") &&
-			!strings.Contains(out, "push: nothing to push")
+		return pushPulled(out)
 	}
 	return !strings.Contains(out, "pull: everything is up-to-date.")
+}
+
+// lieer 1.6's non-TTY bars (nobar.py) print their description and total
+// once: "pushing, 0 changed (N) ..." counts the messages pushed, "updating
+// tags (0) (N) ..." every message with Gmail history since the last pull,
+// our own pushes included.
+var (
+	pushedRE   = regexp.MustCompile(`pushing, 0 changed \((\d+)\) \.\.\.`)
+	retaggedRE = regexp.MustCompile(`updating tags \(0\) \((\d+)\) \.\.\.`)
+)
+
+// pushPulled reports whether a push's pull brought anything but the labels
+// it just pushed: new or removed messages, or more retagged messages than
+// were pushed.
+func pushPulled(out string) bool {
+	if strings.Contains(out, "receiving content") || strings.Contains(out, "removing messages") ||
+		strings.Contains(out, "pull: full synchronization") {
+		return true
+	}
+	count := func(re *regexp.Regexp) int {
+		n := 0
+		for _, m := range re.FindAllStringSubmatch(out, -1) {
+			v, _ := strconv.Atoi(m[1])
+			n += v
+		}
+		return n
+	}
+	return count(retaggedRE) > count(pushedRE)
+}
+
+// refusalScan collects lieer's lines saying a push left changes behind:
+// "update: remote has changed, will not update: <gid> ..." per message, and
+// "push: not all changes could be pushed, ..." once. It reads the whole
+// stream, since a long pull after them would push them out of the tail.
+// exec serializes writes (see tailBuffer).
+type refusalScan struct {
+	line  []byte
+	lines []string
+}
+
+func (s *refusalScan) Write(p []byte) (int, error) {
+	for _, c := range p {
+		if c != '\n' {
+			if len(s.line) < 4096 {
+				s.line = append(s.line, c)
+			}
+			continue
+		}
+		if l := strings.TrimSpace(string(s.line)); strings.Contains(l, "remote has changed, will not update") ||
+			strings.Contains(l, "not all changes could be pushed") {
+			if len(s.lines) < 50 {
+				s.lines = append(s.lines, l)
+			}
+		}
+		s.line = s.line[:0]
+	}
+	return len(p), nil
 }
 
 func lastLine(s string) string {

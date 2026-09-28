@@ -94,16 +94,25 @@ and build order; this file is the working contract. Read PLAN.md before touching
 - lieer semantics that matter (verified against upstream docs): tags `inbox`,
   `unread`, `flagged`, `trash`, `spam`, `sent`, `draft` map to labels. Archive is
   `-inbox`. Trash is `+trash -inbox` — only one of inbox/spam/trash may be set.
-  `gmi send -t` reads RFC822 from stdin. Push ignores conflicting changes
-  without `-f`; the next pull overwrites them.
+  `gmi send -t` reads RFC822 from stdin. Push refuses, without `-f`, any
+  message whose Gmail historyId is above lieer's last pull ("remote has
+  changed, will not update"), and the pull that follows overwrites the local
+  tags. Pushing a message is such a change, so pneu's debounced push runs
+  `gmi sync`, not `gmi push` (`gmi.OpPush`): its pull moves the historyId
+  past our own change, and reading then trashing a message still sticks.
+  Never `-f`: it would undo real remote changes.
 - lieer pushes messages whose notmuch lastmod is above its stored lastmod. A
   full pull (not the usual partial one) ends by storing the database revision
-  at its end, so a tag written during that sync is never pushed. The engine
-  collects ids written during a sync (`Engine.NoteWrite`, called after every
-  tag write) and re-marks them afterwards with `+pneu-touch` then
-  `-pneu-touch` (a no-op re-apply doesn't bump lastmod), then pushes. Each
-  repository ignores it (`gmi set --ignore-tags-local pneu-touch`, which
-  `pneu account add` runs).
+  at its end, so a tag written during that sync is never pushed, and any
+  pull sets messages with Gmail history to their remote labels, overwriting
+  a write made while it ran. The engine records every tag write
+  (`Engine.NoteWrite(account, changes, ids)`, called after each) and after a
+  sync or push re-applies the ones made during it, or all it carried if lieer
+  refused part of its push, then re-marks them with `+pneu-touch`
+  `-pneu-touch` (a no-op re-apply doesn't bump lastmod) and pushes. Only
+  pneu's own changes are replayed, never whole tag sets. Each repository
+  ignores the tag (`gmi set --ignore-tags-local pneu-touch`, which
+  `pneu account add` runs). lieer's refusal lines are logged.
 - Onboarding (docs/onboarding.md): `gmi.FileState` reads an account's state
   from lieer's files (credentials are only stat'ed, never read). The engine
   runs the first pull itself (`firstPull`): `--resume` when a resume file

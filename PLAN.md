@@ -64,7 +64,8 @@
    the explicit message-id list the view rendered, never `thread:X` — a reply that
    landed after render must not be swept up, and notmuch thread ids change on
    merge. Undo is the inverse tag op. The tag change lands in notmuch immediately;
-   a debounced `gmi push` (a few seconds) follows so the phone agrees.
+   a debounced push (a few seconds; `gmi sync`, see AGENTS.md) follows so the
+   phone agrees.
 4. **Threads.** notmuch threads natively; conversation view, newest context first.
 5. **Starred view.** The long-term shelf (bookings months out), one keystroke away.
 6. **Search.** notmuch query syntax passed straight through. It's the engine, not

@@ -1664,7 +1664,7 @@
     events.addEventListener('sync', function (e) {
       var d = null;
       try { d = JSON.parse(e.data); } catch (err) { /* reload anyway */ }
-      if (d && d.op === 'push') return;
+      if (d && d.op === 'push' && !d.changed) return;
       spinStop(d && d.account);
       if (d && d.changed === false) return; // ended, but pulled nothing (or failed)
       reloadWhenQuiet();

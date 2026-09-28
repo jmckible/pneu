@@ -180,6 +180,23 @@ func (f *fixture) count(op string) int {
 	return n
 }
 
+// pushes are the fake's runs after the first. A push runs `gmi sync` (see
+// OpPush), and with the fixture's hour-long interval every sync after the
+// initial one is a push, in tests that don't call SyncNow.
+func (f *fixture) pushes() []run {
+	f.t.Helper()
+	rs := f.runs()
+	if len(rs) == 0 {
+		return nil
+	}
+	for _, r := range rs {
+		if r.op != "sync" {
+			f.t.Fatalf("runs = %+v, want only gmi sync", rs)
+		}
+	}
+	return rs[1:]
+}
+
 func (f *fixture) opts(o Options) Options {
 	o.GmiPath = f.gmi
 	o.Logf = f.t.Logf
@@ -267,13 +284,13 @@ func TestPushDebounceCollapses(t *testing.T) {
 		}
 		time.Sleep(60 * time.Millisecond)
 	}
-	waitFor(t, 2*time.Second, "push", func() bool { return f.count("push") >= 1 })
+	waitFor(t, 2*time.Second, "push", func() bool { return len(f.pushes()) >= 1 })
 	time.Sleep(400 * time.Millisecond)
-	if n := f.count("push"); n != 1 {
+	if n := len(f.pushes()); n != 1 {
 		t.Fatalf("pushes = %d, want 1", n)
 	}
-	for _, r := range f.runs() {
-		if r.op == "push" && r.start.Before(last.Add(150*time.Millisecond)) {
+	for _, r := range f.pushes() {
+		if r.start.Before(last.Add(150 * time.Millisecond)) {
 			t.Errorf("push at %v, before debounce after last request %v", r.start, last)
 		}
 	}
@@ -293,16 +310,12 @@ func TestPushWaitsForSync(t *testing.T) {
 	time.Sleep(60 * time.Millisecond)
 	e.RequestPush("personal")
 	waitFor(t, 3*time.Second, "push end", func() bool {
-		for _, r := range f.runs() {
-			if r.op == "push" && !r.end.IsZero() {
-				return true
-			}
-		}
-		return false
+		ps := f.pushes()
+		return len(ps) > 0 && !ps[0].end.IsZero()
 	})
 	time.Sleep(200 * time.Millisecond)
 	rs := f.runs()
-	if len(rs) != 2 || rs[0].op != "sync" || rs[1].op != "push" {
+	if len(rs) != 2 || len(f.pushes()) != 1 {
 		t.Fatalf("runs = %+v, want sync then one push", rs)
 	}
 	assertSerialized(t, rs)
@@ -509,6 +522,29 @@ func TestChanged(t *testing.T) {
 	e.RequestPush("personal")
 	if r := <-got; r.Changed || r.Op != OpPush {
 		t.Errorf("no-op push: %+v", r)
+	}
+}
+
+// A push's pull reports a change only if it brought more than the labels
+// the push sent. lieer 1.6 non-TTY output (nobar.py).
+func TestPushPulled(t *testing.T) {
+	push := "receiving metadata (2) ...done: 2 its in 00.301s\nresolving changes (2) ...done: 2 its in 00.000s\n" +
+		"pushing, 0 changed (2) ...done: 2 its in 00.402s\nremote historyId: 7010\n" +
+		"pull: partial synchronization.. (hid: 7000)\nfetching changes ...done: 1 its in 00.2s\nresolving changes (3) ...done: 3 its in 00.0s\n"
+	for _, c := range []struct {
+		out  string
+		want bool
+	}{
+		{push + "updating tags (0) (2) ...done: 2 its in 00.1s\ncurrent historyId: 7010", false},
+		{push + "updating tags (0) (3) ...done: 3 its in 00.1s\ncurrent historyId: 7011", true},
+		{push + "receiving content (1) ...done: 1 its in 00.3s\nupdating tags (0) (2) ...done: 2 its in 00.1s", true},
+		{push + "removing messages (1) ...done: 1 its in 00.0s\nupdating tags (0) (2) ...done: 2 its in 00.1s", true},
+		{"push: everything is up-to-date.\npull: partial synchronization.. (hid: 7000)\npull: everything is up-to-date.", false},
+		{"push: everything is up-to-date.\npull: partial synchronization.. (hid: 7000)\nfetching changes ...done: 1 its in 00.2s\nupdating tags (0) (1) ...done: 1 its in 00.1s", true},
+	} {
+		if got := pushPulled(c.out); got != c.want {
+			t.Errorf("pushPulled = %v, want %v:\n%s", got, c.want, c.out)
+		}
 	}
 }
 

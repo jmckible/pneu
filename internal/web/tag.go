@@ -188,7 +188,7 @@ func (s *Server) applyTag(w http.ResponseWriter, op tagOp) bool {
 	for start := 0; start < len(op.IDs); start += maxTagIDs {
 		batch := op.IDs[start:min(start+maxTagIDs, len(op.IDs))]
 		if err := s.tagBatch(acct, op.Changes, batch); err != nil {
-			s.written(op.Account, op.IDs[:start])
+			s.written(op.Account, op.Changes, op.IDs[:start])
 			log.Printf("tag %s %v: %v", op.Account, op.Changes, err)
 			if errors.Is(err, notmuch.ErrLocked) {
 				w.Header().Set("Retry-After", "2")
@@ -199,7 +199,7 @@ func (s *Server) applyTag(w http.ResponseWriter, op tagOp) bool {
 			return false
 		}
 	}
-	s.written(op.Account, op.IDs)
+	s.written(op.Account, op.Changes, op.IDs)
 	return true
 }
 
@@ -216,9 +216,10 @@ func (s *Server) tagBatch(acct notmuch.Account, changes, ids []string) error {
 }
 
 // written tells the sync engine about a completed write: NoteWrite (so a
-// write that raced a sync still gets pushed) and a debounced push. The
+// write that raced a sync, or that lieer refused to push, is re-applied and
+// pushed) and a debounced push. The
 // status file's unread count follows, debounced too.
-func (s *Server) written(account string, ids []string) {
+func (s *Server) written(account string, changes, ids []string) {
 	if len(ids) == 0 {
 		return
 	}
@@ -226,7 +227,7 @@ func (s *Server) written(account string, ids []string) {
 	if s.Syncer == nil {
 		return
 	}
-	s.Syncer.NoteWrite(account, ids)
+	s.Syncer.NoteWrite(account, changes, ids)
 	if err := s.Syncer.RequestPush(account); err != nil {
 		log.Printf("push %s: %v", account, err)
 	}

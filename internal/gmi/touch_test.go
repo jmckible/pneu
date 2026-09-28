@@ -94,13 +94,13 @@ func TestNoteWriteDuringSyncTouchesAndPushes(t *testing.T) {
 
 	// The tag handler's write, then its NoteWrite, while gmi sync runs.
 	p.Notmuch(t, "tag", "-inbox", "--", testmail.QuoteID(touchKitchen1))
-	e.NoteWrite("personal", []string{touchKitchen1})
+	e.NoteWrite("personal", []string{"-inbox"}, []string{touchKitchen1})
 	// lieer's full pull ends by storing the revision as of now.
 	stored := revision(t, p)
 
-	waitFor(t, 3*time.Second, "push after sync", func() bool { return f.count("push") == 1 })
+	waitFor(t, 3*time.Second, "push after sync", func() bool { return len(f.pushes()) == 1 })
 	rs := f.runs()
-	if len(rs) != 2 || rs[0].op != "sync" || rs[1].op != "push" || rs[1].start.Before(rs[0].end) {
+	if len(rs) != 2 || len(f.pushes()) != 1 || rs[1].start.Before(rs[0].end) {
 		t.Fatalf("runs = %+v, want sync then push", rs)
 	}
 	if got := changedSince(t, p, stored); !slices.Equal(got, []string{touchKitchen1}) {
@@ -116,7 +116,7 @@ func TestNoteWriteDuringSyncTouchesAndPushes(t *testing.T) {
 	if slices.Contains(tags, TouchTag) || slices.Contains(tags, "inbox") {
 		t.Errorf("tags after touch: %q", tags)
 	}
-	if l := logs.find("re-marked 1 message(s)"); len(l) != 1 {
+	if l := logs.find("re-applied 1 tag write(s) on 1 message(s)"); len(l) != 1 {
 		t.Errorf("log lines %q", logs.lines)
 	}
 }
@@ -129,21 +129,21 @@ func TestNoteWriteOutsideSyncIgnored(t *testing.T) {
 	f, p, e, logs := touchFixture(t, "0")
 
 	// Before any sync has run.
-	e.NoteWrite("personal", []string{touchKitchen2})
+	e.NoteWrite("personal", []string{"-inbox"}, []string{touchKitchen2})
 	start(t, e)
 	waitFor(t, 2*time.Second, "initial sync", func() bool { st, _ := e.Status("personal"); return !st.LastSync.IsZero() })
 	time.Sleep(50 * time.Millisecond) // past the grace
 
 	before := revision(t, p)
-	e.NoteWrite("personal", []string{touchKitchen1})
+	e.NoteWrite("personal", []string{"-inbox"}, []string{touchKitchen1})
 	time.Sleep(200 * time.Millisecond)
 	if rev := revision(t, p); rev != before {
 		t.Errorf("revision moved %d -> %d without a sync", before, rev)
 	}
-	if n := f.count("push"); n != 0 {
+	if n := len(f.pushes()); n != 0 {
 		t.Errorf("%d pushes", n)
 	}
-	if l := logs.find("re-marked"); len(l) != 0 {
+	if l := logs.find("re-applied"); len(l) != 0 {
 		t.Errorf("touched: %q", l)
 	}
 }
@@ -155,13 +155,92 @@ func TestNoteWriteJustAfterSyncTouches(t *testing.T) {
 	start(t, e)
 	waitFor(t, 2*time.Second, "initial sync", func() bool { st, _ := e.Status("personal"); return !st.LastSync.IsZero() })
 	before := revision(t, p)
-	e.NoteWrite("personal", []string{touchKitchen2})
-	waitFor(t, 3*time.Second, "push", func() bool { return f.count("push") == 1 })
+	e.NoteWrite("personal", []string{"-inbox"}, []string{touchKitchen2})
+	waitFor(t, 3*time.Second, "push", func() bool { return len(f.pushes()) == 1 })
 	if got := changedSince(t, p, before); !slices.Equal(got, []string{touchKitchen2}) {
 		t.Errorf("changed since: %q", got)
 	}
-	if l := logs.find("re-marked 1 message(s)"); len(l) != 1 {
+	if l := logs.find("re-applied 1 tag write(s) on 1 message(s)"); len(l) != 1 {
 		t.Errorf("log lines %q", logs.lines)
+	}
+}
+
+// tagsOf is a message's tags.
+func tagsOf(t *testing.T, a testmail.Account, id string) []string {
+	t.Helper()
+	var tags []string
+	if err := json.Unmarshal(a.Notmuch(t, "search", "--format=json", "--output=tags", "--exclude=false", "--", testmail.QuoteID(id)), &tags); err != nil {
+		t.Fatal(err)
+	}
+	return tags
+}
+
+// A sync's pull sets every message with Gmail history to its remote labels,
+// so a write made while it ran can be overwritten; the engine re-applies it.
+func TestNoteWriteDuringSyncOverwrittenIsReapplied(t *testing.T) {
+	f, p, e, logs := touchFixture(t, "0.6")
+	start(t, e)
+	waitFor(t, 2*time.Second, "sync start", func() bool { return f.count("sync") == 1 })
+
+	p.Notmuch(t, "tag", "+trash", "-inbox", "--", testmail.QuoteID(touchKitchen1))
+	e.NoteWrite("personal", []string{"+trash", "-inbox"}, []string{touchKitchen1})
+	// The pull puts Gmail's labels back.
+	p.Notmuch(t, "tag", "-trash", "+inbox", "--", testmail.QuoteID(touchKitchen1))
+
+	waitFor(t, 3*time.Second, "push after sync", func() bool { return len(f.pushes()) == 1 })
+	if tags := tagsOf(t, p, touchKitchen1); !slices.Contains(tags, "trash") || slices.Contains(tags, "inbox") {
+		t.Errorf("tags after the sync: %q, want the trash re-applied", tags)
+	}
+	if l := logs.find("re-applied 1 tag write(s)"); len(l) != 1 {
+		t.Errorf("log lines %q", logs.lines)
+	}
+}
+
+// lieer refuses to push a message changed in Gmail since its last pull (our
+// own earlier push of it counts), and the pull after puts the labels back.
+// Every write that run carried is re-applied and pushed again; a write the
+// run carried without a refusal is settled.
+func TestRefusedPushReappliesCarriedWrites(t *testing.T) {
+	saved := noteGrace
+	noteGrace = 20 * time.Millisecond // writes here come after a run, not late for it
+	t.Cleanup(func() { noteGrace = saved })
+	f, p, e, logs := touchFixture(t, "0")
+	start(t, e)
+	waitFor(t, 2*time.Second, "initial sync", func() bool { st, _ := e.Status("personal"); return !st.LastSync.IsZero() })
+	time.Sleep(50 * time.Millisecond)
+
+	// Read, pushed without trouble: settled.
+	p.Notmuch(t, "tag", "-unread", "--", testmail.QuoteID(touchKitchen2))
+	e.NoteWrite("personal", []string{"-unread"}, []string{touchKitchen2})
+	e.RequestPush("personal")
+	waitFor(t, 3*time.Second, "first push", func() bool { ps := f.pushes(); return len(ps) == 1 && !ps[0].end.IsZero() })
+	time.Sleep(50 * time.Millisecond)
+
+	// Trash, refused; the fake "pull" reverts it while the run sleeps.
+	t.Setenv("FAKEGMI_SLEEP", "0.4")
+	t.Setenv("FAKEGMI_OUTPUT", "update: remote has changed, will not update: 19a7c3e0 (add: ['TRASH'], rem: ['INBOX']) (7001 > 7000)\n"+
+		"push: not all changes could be pushed, will re-try at next push.\npull: partial synchronization.. (hid: 7000)")
+	p.Notmuch(t, "tag", "+trash", "-inbox", "--", testmail.QuoteID(touchKitchen1))
+	e.NoteWrite("personal", []string{"+trash", "-inbox"}, []string{touchKitchen1})
+	e.RequestPush("personal")
+	waitFor(t, 3*time.Second, "refused push start", func() bool { return len(f.pushes()) == 2 })
+	p.Notmuch(t, "tag", "-trash", "+inbox", "--", testmail.QuoteID(touchKitchen1))
+	t.Setenv("FAKEGMI_OUTPUT", "")
+	t.Setenv("FAKEGMI_SLEEP", "0")
+
+	waitFor(t, 3*time.Second, "push of the re-applied write", func() bool { return len(f.pushes()) == 3 })
+	if tags := tagsOf(t, p, touchKitchen1); !slices.Contains(tags, "trash") || slices.Contains(tags, "inbox") {
+		t.Errorf("tags after the refused push: %q, want the trash re-applied", tags)
+	}
+	if l := logs.find("re-applied 1 tag write(s) on 1 message(s)"); len(l) != 1 {
+		t.Errorf("log lines %q", logs.lines)
+	}
+	if l := logs.find("push [personal]: update: remote has changed, will not update: 19a7c3e0"); len(l) != 1 {
+		t.Errorf("refusal not logged: %q", logs.lines)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if n := len(f.pushes()); n != 3 {
+		t.Errorf("%d pushes, want 3: the re-applied write's push settles it", n)
 	}
 }
 

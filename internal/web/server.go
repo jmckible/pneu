@@ -24,7 +24,7 @@ var templateFS embed.FS
 // /send sends through; *gmi.Engine satisfies it.
 type Syncer interface {
 	RequestPush(account string) error
-	NoteWrite(account string, ids []string)
+	NoteWrite(account string, changes, ids []string)
 	SyncNow(account string) error
 	Status(account string) (gmi.Status, error)
 	Send(ctx context.Context, account string, rfc822 io.Reader) (gmi.Result, error)

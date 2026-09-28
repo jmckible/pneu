@@ -150,11 +150,12 @@ func serve(args []string) error {
 	}
 	syncer, err := gmi.New(gmiAccounts, gmi.Options{
 		// The header's sync glyph spins between `syncing` and `sync`. Pushes
-		// broadcast neither: they change nothing locally, and a keystroke's
-		// own push must not reload the list out from under the row it just
-		// removed. Every sync's end is broadcast — the glyph must stop on a
-		// pull that brought nothing, or failed — but only `changed` makes the
-		// client re-render the list.
+		// (a `gmi sync` after our own writes, see gmi.OpPush) broadcast
+		// neither unless their pull brought more than the labels they pushed:
+		// a keystroke's own push must not reload the list out from under the
+		// row it just removed. Every sync's end is broadcast — the glyph must
+		// stop on a pull that brought nothing, or failed — but only `changed`
+		// makes the client re-render the list.
 		OnStart: func(account string, op gmi.Op) {
 			if op == gmi.OpSync {
 				srv.Hub.Broadcast("syncing", map[string]any{"account": account})
@@ -167,7 +168,7 @@ func serve(args []string) error {
 		// counts toward the account's failures. A first pull's end is a
 		// `sync` to the page too: the list refreshes.
 		OnSynced: func(account string, r gmi.Result) {
-			if r.Op == gmi.OpSync || r.Op == gmi.OpPull {
+			if r.Op == gmi.OpSync || r.Op == gmi.OpPull || (r.Op == gmi.OpPush && r.Changed) {
 				srv.Hub.Broadcast("sync", map[string]any{"account": account, "op": r.Op, "changed": r.Changed, "at": r.Started.Add(r.Duration)})
 			}
 			srv.StatusChanged()
