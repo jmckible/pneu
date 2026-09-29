@@ -166,6 +166,10 @@ uncached, the page shows the range first and the total follows.
   - *zip*: the archive's listing (name, size, modified), 1000 entries at
     most. No per-entry download.
   - Anything else (docx, xlsx, heic…) only downloads. *default*
+- **Drive files.** Docs, Sheets, Slides, Forms, Drawings, files and folders
+  linked in a message's text show as chips under its attachments, titled from
+  the anchor text, on the first message of the thread that links them. The
+  link is rebuilt from kind and file id with `authuser` set to the account.
 - **Body colors.** Plain text renders in app colors. HTML bodies render in
   app colors too unless the sanitized document declares its own background
   or text color anywhere (inline style, `<style>`, `bgcolor`), in which case

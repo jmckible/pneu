@@ -25,6 +25,13 @@
 {{- end}}
 </ul>
 {{- end}}
+{{- if .Drive}}
+<ul class="attachments drive-files">
+{{- range .Drive}}
+<li><a href="{{.Href}}" target="_blank" rel="noopener noreferrer" class="drive" data-kind="{{.Kind}}">{{.Title}}{{if .Named}} <span class="kind">{{.Label}}</span>{{end}}</a></li>
+{{- end}}
+</ul>
+{{- end}}
 </article>
 {{- end}}
 </main>

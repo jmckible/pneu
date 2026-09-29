@@ -459,6 +459,7 @@ type messageView struct {
 	HoldImages bool
 	Text       template.HTML
 	Attach     []attachView
+	Drive      []driveView // Drive files first linked here (thread sets it)
 }
 
 type attachView struct {
@@ -519,6 +520,7 @@ func (s *Server) thread(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var shown, unread []string
+	drive := map[string]bool{}
 	for i := range msgs {
 		m := &msgs[i]
 		if m.Excluded {
@@ -533,6 +535,7 @@ func (s *Server) thread(w http.ResponseWriter, r *http.Request) {
 		}
 		v := s.messageView(acct, m)
 		v.Pos = len(data.Messages) + 1
+		v.Drive = firstMentions(driveViews(driveRefs(m), acct.Email), drive)
 		data.Messages = append(data.Messages, v)
 	}
 	if len(data.Messages) == 0 {
