@@ -282,6 +282,10 @@ func (s *Server) row(t notmuch.ThreadSummary, me self) row {
 	if slices.Contains(t.Tags, "flagged") {
 		class += " flagged"
 	}
+	// notmuch's own index-time tag, on any message of the thread.
+	if slices.Contains(t.Tags, "attachment") {
+		class += " attach"
+	}
 	subject := t.Subject
 	if strings.TrimSpace(subject) == "" {
 		subject = "(no subject)"
@@ -739,7 +743,9 @@ func (s *Server) part(w http.ResponseWriter, r *http.Request) {
 		h.Set("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'")
 	}
 	// Ranges for <video>/<audio> seeking; HEAD is handled here too. No
-	// modtime, so no conditional requests.
+	// modtime or ETag, so If-Modified-Since is ignored and an If-Range
+	// request gets the whole body, but ServeContent still answers
+	// If-None-Match: * with 304 and an If-Match naming a tag with 412.
 	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(body))
 }
 

@@ -3,7 +3,9 @@ package web
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"path"
@@ -123,7 +125,14 @@ func viewKind(mt string) string {
 
 // ---- zip listing -----------------------------------------------------------
 
-const maxZipEntries = 1000
+const (
+	maxZipEntries   = 1000 // listed
+	maxZipNameBytes = 256 << 10
+	// Past these the archive isn't parsed at all: zip.NewReader builds a
+	// File for every central-directory entry before any cap applies.
+	maxZipDirEntries = 20000
+	maxZipDirSize    = 8 << 20
+)
 
 type zipEntry struct {
 	Name     string `json:"name"`
@@ -133,7 +142,8 @@ type zipEntry struct {
 }
 
 // partZip handles GET /part/{account}/{msgid}/{n}/zip: the archive's central
-// directory as JSON, {entries, total, truncated}. Nothing is decompressed.
+// directory as JSON, {entries, total, truncated}, or {tooMany, total} (total
+// 0 when unknown) for one too large to parse. Nothing is decompressed.
 func (s *Server) partZip(w http.ResponseWriter, r *http.Request) {
 	acct, m, p, body, _, ok := s.loadPart(w, r)
 	if !ok {
@@ -141,32 +151,131 @@ func (s *Server) partZip(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "private, no-store")
-	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	out := struct {
+		Entries   []zipEntry `json:"entries"`
+		Total     uint64     `json:"total"`
+		Truncated bool       `json:"truncated"`
+		TooMany   bool       `json:"tooMany,omitempty"`
+	}{Entries: []zipEntry{}}
+	var zr *zip.Reader
+	d, err := zipDirectory(body)
+	if err == nil {
+		if d.tooMany {
+			out.Total, out.Truncated, out.TooMany = d.entries, true, true
+		} else {
+			zr, err = zip.NewReader(bytes.NewReader(body), int64(len(body)))
+		}
+	}
 	if err != nil {
 		log.Printf("zip %s/%s/%d: %v", acct.Name, m.ID, p.ID, err)
 		w.WriteHeader(http.StatusUnsupportedMediaType)
 		json.NewEncoder(w).Encode(map[string]string{"error": "not a zip archive"})
 		return
 	}
-	out := struct {
-		Entries   []zipEntry `json:"entries"`
-		Total     int        `json:"total"`
-		Truncated bool       `json:"truncated"`
-	}{Entries: []zipEntry{}, Total: len(zr.File)}
-	for _, f := range zr.File {
-		if len(out.Entries) == maxZipEntries {
-			out.Truncated = true
-			break
+	if zr != nil {
+		out.Total = uint64(len(zr.File))
+		out.Entries, out.Truncated = zipListing(zr.File)
+	}
+	if err := json.NewEncoder(w).Encode(out); err != nil {
+		log.Printf("zip %s/%s/%d: %v", acct.Name, m.ID, p.ID, err)
+	}
+}
+
+// zipListing is the first maxZipEntries entries, fewer if their names pass
+// maxZipNameBytes; truncated says whether any were left out.
+func zipListing(files []*zip.File) (entries []zipEntry, truncated bool) {
+	entries = []zipEntry{}
+	names := 0
+	for _, f := range files {
+		names += len(f.Name)
+		if len(entries) == maxZipEntries || names > maxZipNameBytes {
+			return entries, true
 		}
 		e := zipEntry{Name: f.Name, Size: f.UncompressedSize64, Dir: f.FileInfo().IsDir()}
 		if !f.Modified.IsZero() {
 			e.Modified = f.Modified.Format(time.RFC3339)
 		}
-		out.Entries = append(out.Entries, e)
+		entries = append(entries, e)
 	}
-	if err := json.NewEncoder(w).Encode(out); err != nil {
-		log.Printf("zip %s/%s/%d: %v", acct.Name, m.ID, p.ID, err)
+	return entries, false
+}
+
+type zipDir struct {
+	entries uint64 // as the end record says; 0 when it can't be believed
+	tooMany bool
+}
+
+var errNotZip = errors.New("no end of central directory")
+
+// zipDirectory reads the End Of Central Directory record (and its zip64
+// successor) the way archive/zip does, and says whether the directory is
+// too large to hand to it. The record's 16-bit count is only the true count
+// mod 65536, and archive/zip reads headers until one fails to parse, so the
+// headers are also counted here, without allocating, up to the limit. An
+// error means archive/zip would refuse it too (or near enough): not a zip.
+func zipDirectory(b []byte) (zipDir, error) {
+	const eocdLen, loc64Len, eocd64Len, hdrLen = 22, 20, 56, 46
+	size := int64(len(b))
+	end := int64(-1)
+	for i := size - eocdLen; i >= 0 && i >= size-(eocdLen+0xffff); i-- {
+		if binary.LittleEndian.Uint32(b[i:]) == 0x06054b50 {
+			// A comment running past the end: archive/zip gives up here.
+			if int64(binary.LittleEndian.Uint16(b[i+20:]))+eocdLen+i > size {
+				return zipDir{}, errNotZip
+			}
+			end = i
+			break
+		}
 	}
+	if end < 0 {
+		return zipDir{}, errNotZip
+	}
+	rec := b[end:]
+	count := uint64(binary.LittleEndian.Uint16(rec[10:]))
+	dirSize := uint64(binary.LittleEndian.Uint32(rec[12:]))
+	dirOff := uint64(binary.LittleEndian.Uint32(rec[16:]))
+	if count == 0xffff || dirSize == 0xffffffff || dirOff == 0xffffffff {
+		// zip64: a locator just before the record points at the real one.
+		if l := end - loc64Len; l >= 0 && binary.LittleEndian.Uint32(b[l:]) == 0x07064b50 &&
+			binary.LittleEndian.Uint32(b[l+4:]) == 0 && binary.LittleEndian.Uint32(b[l+16:]) == 1 {
+			p := binary.LittleEndian.Uint64(b[l+8:])
+			if size < eocd64Len || p > uint64(size-eocd64Len) || binary.LittleEndian.Uint32(b[p:]) != 0x06064b50 {
+				return zipDir{}, errNotZip
+			}
+			end = int64(p)
+			count = binary.LittleEndian.Uint64(b[p+32:])
+			dirSize = binary.LittleEndian.Uint64(b[p+40:])
+			dirOff = binary.LittleEndian.Uint64(b[p+48:])
+		}
+	}
+	if count > maxZipDirEntries || dirSize > maxZipDirSize {
+		return zipDir{entries: count, tooMany: true}, nil
+	}
+	// Where archive/zip starts reading: just before the end record, the
+	// directory's size back. Data prepended to the archive (a
+	// self-extractor) shows as a base offset, unless a header is already at
+	// the stated offset.
+	start := end - int64(dirSize)
+	if dirOff > 1<<63-1 || start < 0 || start >= size {
+		return zipDir{}, errNotZip
+	}
+	base := start - int64(dirOff)
+	hdrAt := func(o int64) bool { return o+hdrLen <= size && binary.LittleEndian.Uint32(b[o:]) == 0x02014b50 }
+	if base > 0 && hdrAt(int64(dirOff)) {
+		start = int64(dirOff)
+	}
+	var n uint64
+	for o := start; hdrAt(o); n++ {
+		if n == maxZipDirEntries {
+			if count < n {
+				count = 0 // the record lied (or wrapped at 65536)
+			}
+			return zipDir{entries: count, tooMany: true}, nil
+		}
+		o += hdrLen + int64(binary.LittleEndian.Uint16(b[o+28:])) +
+			int64(binary.LittleEndian.Uint16(b[o+30:])) + int64(binary.LittleEndian.Uint16(b[o+32:]))
+	}
+	return zipDir{entries: count}, nil
 }
 
 // loadPart resolves {account}/{msgid}/{n} to a leaf part and its decoded

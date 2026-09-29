@@ -19,21 +19,59 @@ test('decode: by charset, unknown labels fall back to utf-8', () => {
   assert.equal(V.decode(new TextEncoder().encode('﻿a,b'), 'text/csv'), 'a,b');
 });
 
+// parse with caps too high to matter.
+const parse = (text, delim, maxRows) => V.parseCSV(text, delim, maxRows, 1000, 1e6);
+
 test('parseCSV: quotes, escapes, CRLF, breaks inside quotes', () => {
   const text = 'Point,Note\r\nP1,"Iron pin, found"\r\nP3,"Fence ""old"" line"\r\nP4,"Two-line\r\nnote"\r\n';
-  assert.deepEqual(V.parseCSV(text, ',', 100), {
+  assert.deepEqual(parse(text, ',', 100), {
     rows: [['Point', 'Note'], ['P1', 'Iron pin, found'], ['P3', 'Fence "old" line'], ['P4', 'Two-line\r\nnote']],
-    truncated: false,
+    rowsCut: false,
+    colsCut: false,
   });
   // LF, no trailing newline, empty fields, a quote mid-field is literal.
-  assert.deepEqual(V.parseCSV('a,,c\nx"y,"",z', ',', 100).rows, [['a', '', 'c'], ['x"y', '', 'z']]);
-  assert.deepEqual(V.parseCSV('a\tb,c\n1\t2', '\t', 100).rows, [['a', 'b,c'], ['1', '2']]);
-  assert.deepEqual(V.parseCSV('', ',', 100).rows, []);
+  assert.deepEqual(parse('a,,c\nx"y,"",z', ',', 100).rows, [['a', '', 'c'], ['x"y', '', 'z']]);
+  assert.deepEqual(parse('a\tb,c\n1\t2', '\t', 100).rows, [['a', 'b,c'], ['1', '2']]);
+  assert.deepEqual(parse('', ',', 100).rows, []);
+  assert.deepEqual(parse('a,\n', ',', 100).rows, [['a', '']]);
 });
 
 test('parseCSV: stops at maxRows', () => {
-  assert.deepEqual(V.parseCSV('1\n2\n3\n', ',', 2), { rows: [['1'], ['2']], truncated: true });
-  assert.deepEqual(V.parseCSV('1\n2\n', ',', 2), { rows: [['1'], ['2']], truncated: false });
+  assert.deepEqual(parse('1\n2\n3\n', ',', 2), { rows: [['1'], ['2']], rowsCut: true, colsCut: false });
+  assert.deepEqual(parse('1\n2\n', ',', 2), { rows: [['1'], ['2']], rowsCut: false, colsCut: false });
+});
+
+test('parseCSV: keeps maxCols of each row, and parses the rest', () => {
+  // The skipped fields still quote: the comma and newline inside one don't
+  // start a field or a row.
+  assert.deepEqual(V.parseCSV('a,b,c,"d,\ne"\n1,2\n', ',', 100, 2, 100), {
+    rows: [['a', 'b'], ['1', '2']], rowsCut: false, colsCut: true,
+  });
+  assert.deepEqual(V.parseCSV('a,b\n1,2', ',', 100, 2, 100).colsCut, false);
+  // A line of 100,000 commas is maxCols cells, not 100,001.
+  const wide = V.parseCSV(','.repeat(100000) + '\nx', ',', V.CSV_ROWS + 1, V.CSV_COLS, V.CSV_CELLS);
+  assert.equal(wide.rows[0].length, V.CSV_COLS);
+  assert.deepEqual(wide.rows[1], ['x']);
+  assert.equal(wide.colsCut, true);
+  assert.equal(wide.rowsCut, false);
+});
+
+test('parseCSV: stops at maxCells', () => {
+  // Three rows of three: the budget of 7 ends in the third row.
+  assert.deepEqual(V.parseCSV('1,2,3\n4,5,6\n7,8,9\n', ',', 100, 10, 7), {
+    rows: [['1', '2', '3'], ['4', '5', '6'], ['7']], rowsCut: true, colsCut: false,
+  });
+  // Spent exactly at a row's end, with more to come.
+  assert.deepEqual(V.parseCSV('1,2\n3,4\n5,6', ',', 100, 10, 4), {
+    rows: [['1', '2'], ['3', '4']], rowsCut: true, colsCut: false,
+  });
+  assert.deepEqual(V.parseCSV('1,2\n3,4\n', ',', 100, 10, 4).rowsCut, false);
+  // The real caps: no more than CSV_CELLS cells, however the file is shaped.
+  const line = Array(V.CSV_COLS).fill('x').join(',') + '\n';
+  const big = V.parseCSV(line.repeat(V.CSV_ROWS), ',', V.CSV_ROWS + 1, V.CSV_COLS, V.CSV_CELLS);
+  assert.equal(big.rows.reduce((n, r) => n + r.length, 0), V.CSV_CELLS);
+  assert.equal(big.rows.length, V.CSV_CELLS / V.CSV_COLS);
+  assert.equal(big.rowsCut, true);
 });
 
 test('icsFields: folded lines, escapes, TZID, organizer', () => {

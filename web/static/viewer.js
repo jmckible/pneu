@@ -12,8 +12,10 @@
   'use strict';
 
   var TEXT_CAP = 2 * 1024 * 1024;
-  var CSV_CAP = 16 * 1024 * 1024; // parsing stops at CSV_ROWS; this bounds the fetch
+  var CSV_CAP = 16 * 1024 * 1024; // parsing stops at CSV_ROWS or CSV_CELLS; this bounds the fetch
   var CSV_ROWS = 2000;
+  var CSV_COLS = 200;
+  var CSV_CELLS = 200000; // rows × columns, whichever runs out first
 
   // ---- pure -----------------------------------------------------------------
 
@@ -32,45 +34,66 @@
   }
 
   // parseCSV reads RFC 4180 (quoted fields, "" escapes, CRLF or LF, line
-  // breaks inside quotes), leniently: a quote mid-field is literal. It stops
-  // after maxRows rows; truncated says whether anything was left.
-  function parseCSV(text, delim, maxRows) {
-    var rows = [], row = [], field = '', quoted = false, n = text.length;
+  // breaks inside quotes), leniently: a quote mid-field is literal. It keeps
+  // at most maxCols fields of a row and maxCells in all, skipping the rest of
+  // a row without building it; the row that spends the last cell is the last.
+  // rowsCut and colsCut say what was left out.
+  function parseCSV(text, delim, maxRows, maxCols, maxCells) {
+    var rows = [], row = [], field = '', started = false, quoted = false, n = text.length;
+    var cells = 0, rowsCut = false, colsCut = false;
     var i = text.charCodeAt(0) === 0xfeff ? 1 : 0;
+    // keep is how many more fields this row may take; past it, fields are
+    // parsed (quotes still decide where the row ends) but not kept.
+    var keep = Math.min(maxCols, maxCells);
+    function push() {
+      if (keep > 0) {
+        row.push(field);
+        keep--;
+        cells++;
+      } else if (row.length === maxCols) {
+        colsCut = true;
+      } else {
+        rowsCut = true; // the cell budget ran out mid-row
+      }
+      field = '';
+      started = false;
+    }
     function endRow() {
-      row.push(field);
+      push();
       rows.push(row);
       row = [];
-      field = '';
+      keep = Math.min(maxCols, maxCells - cells);
     }
     while (i < n) {
       var c = text[i];
       if (quoted) {
         if (c === '"') {
-          if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
+          if (text[i + 1] === '"') { if (keep > 0) field += '"'; i += 2; continue; }
           quoted = false;
-        } else {
+        } else if (keep > 0) {
           field += c;
         }
         i++;
         continue;
       }
-      if (c === '"' && field === '') {
-        quoted = true;
+      if (c === '"' && !started) {
+        quoted = started = true;
       } else if (c === delim) {
-        row.push(field);
-        field = '';
+        push();
       } else if (c === '\r' || c === '\n') {
         if (c === '\r' && text[i + 1] === '\n') i++;
         endRow();
-        if (rows.length === maxRows) return { rows: rows, truncated: i + 1 < n };
+        if (rows.length === maxRows || cells === maxCells) {
+          return { rows: rows, rowsCut: rowsCut || i + 1 < n, colsCut: colsCut };
+        }
       } else {
-        field += c;
+        if (keep > 0) field += c;
+        started = true;
       }
       i++;
     }
-    if (field !== '' || row.length) endRow();
-    return { rows: rows, truncated: false };
+    if (started || row.length) endRow();
+    return { rows: rows, rowsCut: rowsCut, colsCut: colsCut };
   }
 
   // ---- iCalendar (RFC 5545), just enough to say what an invite is for.
@@ -185,7 +208,7 @@
   }
 
   var V = {
-    TEXT_CAP: TEXT_CAP, CSV_ROWS: CSV_ROWS, charset: charset, decode: decode, parseCSV: parseCSV,
+    TEXT_CAP: TEXT_CAP, CSV_ROWS: CSV_ROWS, CSV_COLS: CSV_COLS, CSV_CELLS: CSV_CELLS, charset: charset, decode: decode, parseCSV: parseCSV,
     icsFields: icsFields, size: size,
   };
   if (typeof module === 'object' && module.exports) {
@@ -226,11 +249,15 @@
     var head = el('header');
     els.name = el('span', 'name');
     els.pos = el('span', 'pos');
+    // Chromium's PDF viewer keeps the keys it's given; say how to get them back.
+    els.hint = el('span', 'hint', 'Keys go to the PDF while it has focus — click outside it for n/p/Esc');
+    els.prev = button('p', 'Previous', step(-1));
+    els.next = button('n', 'Next', step(1));
     els.download = button('d', 'Download', download);
     els.tab = button('o', 'Open in tab', openTab);
     var actions = el('span', 'actions');
-    actions.append(els.download, els.tab, button('Esc', 'Close', close));
-    head.append(els.name, els.pos, actions);
+    actions.append(els.prev, els.next, els.download, els.tab, button('Esc', 'Close', close));
+    head.append(els.name, els.pos, els.hint, actions);
     els.stage = el('div', 'stage');
     dlg.append(head, els.stage);
     dlg.addEventListener('keydown', onKey);
@@ -238,6 +265,13 @@
     // A click on the backdrop (the dialog box itself is covered by its
     // children) closes, as the help overlay does.
     dlg.addEventListener('click', function (e) { if (e.target === dlg) close(); });
+    // A click anywhere in the dialog but a control takes the keys back from
+    // a frame or player (the PDF viewer never hands them on).
+    dlg.addEventListener('pointerdown', function (e) {
+      if (e.target.closest && !e.target.closest('button, a, input, select, textarea, video, audio, iframe')) {
+        dlg.focus({ preventScroll: true });
+      }
+    });
     document.body.appendChild(dlg);
   }
 
@@ -327,9 +361,15 @@
     els.name.title = it.name;
     els.pos.textContent = (i + 1) + ' of ' + s.items.length;
     els.tab.hidden = !it.inline;
-    // Focus in the outgoing content (a mail frame, a player) would fall to
-    // the inert page and take the keys with it.
-    if (els.stage.contains(document.activeElement)) dlg.focus();
+    els.hint.hidden = it.kind !== 'pdf';
+    // Focus in the outgoing content (a mail frame, a player), or on a button
+    // about to be disabled, would fall to the inert page and take the keys
+    // with it.
+    var atEnd = (els.prev === document.activeElement && i === 0) ||
+      (els.next === document.activeElement && i === s.items.length - 1);
+    if (atEnd || els.stage.contains(document.activeElement)) dlg.focus();
+    els.prev.disabled = i === 0;
+    els.next.disabled = i === s.items.length - 1;
     els.stage.replaceChildren();
     els.stage.dataset.kind = it.kind;
     els.stage.scrollTop = 0;
@@ -466,12 +506,14 @@
     csv: function (it, signal) {
       return withText(it, CSV_CAP, signal, function (got) {
         var tsv = /\.tsv$/i.test(it.name) || /tab-separated/i.test(got.ctype);
-        var parsed = parseCSV(got.text, tsv ? '\t' : ',', CSV_ROWS + 1);
+        var parsed = parseCSV(got.text, tsv ? '\t' : ',', CSV_ROWS + 1, CSV_COLS, CSV_CELLS);
         var rows = parsed.rows;
         if (!rows.length) { note('Empty file.'); return; }
-        var body = rows.slice(1, CSV_ROWS + 1);
-        if (parsed.truncated || rows.length > CSV_ROWS + 1) note('Showing the first ' + CSV_ROWS + ' rows.');
-        els.stage.appendChild(table(rows[0], body));
+        var cut = [];
+        if (parsed.rowsCut) cut.push((rows.length - 1) + ' rows');
+        if (parsed.colsCut) cut.push(CSV_COLS + ' columns');
+        if (cut.length) note('Showing the first ' + cut.join(' and ') + '.');
+        els.stage.appendChild(table(rows[0], rows.slice(1)));
       });
     },
     markdown: function (it, signal) {
@@ -511,6 +553,10 @@
         })
         .then(function (data) {
           if (signal.aborted) return;
+          if (data.tooMany) {
+            unshown('Too many entries to list' + (data.total ? ' (' + data.total + ')' : '') + '.');
+            return;
+          }
           if (data.truncated) note('Showing the first ' + data.entries.length + ' of ' + data.total + ' entries.');
           els.stage.appendChild(table(['Name', 'Size', 'Modified'], data.entries.map(function (e) {
             return [

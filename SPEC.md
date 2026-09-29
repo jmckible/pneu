@@ -107,7 +107,9 @@ uncached, the page shows the range first and the total follows.
   subject truncate; date is right-aligned and fixed width. The authors column
   scales with the viewport (`clamp(14ch, 22vw, 28ch)`). Count renders as a
   small bordered pill after the subject, only for threads with more than
-  one message; on unread rows it takes an accent wash.
+  one message; on unread rows it takes an accent wash. A thread with an
+  attachment (notmuch's index-time `attachment` tag, any message) shows a
+  paperclip ahead of the date, in the date's muted tone.
 - **Authors** show the account's own `user.name` (or address) as `me`, once,
   as Gmail does. Sent shows `To: …` instead: the recipients of the thread's
   newest sent message, `me` for the account's own address.
@@ -143,11 +145,14 @@ uncached, the page shows the range first and the total follows.
   first), a plain click the one clicked (a modified click keeps the link's
   own behaviour). It is a
   near-fullscreen modal in the help overlay's dress: a title row with the
-  name, `i of N` and Download / Open in tab / Close, the attachment below.
+  name, `i of N` and Previous / Next (disabled at the ends) / Download /
+  Open in tab / Close, the attachment below.
   `n`/`p` (`→`/`←`, unless a player has focus) step through every viewable
   attachment in the thread in document order; `d` downloads, `o` opens in a
   tab (only what `/part` serves inline), `Esc`/`q` close and give the keys
-  back to the thread. Keys work from inside its frames too. The server
+  back to the thread. Keys work from inside its frames too, except
+  Chromium's PDF viewer, which keeps them: a PDF shows a hint, and a click
+  anywhere in the dialog outside a control takes the keys back. The server
   decides the kind (`data-view`) from the declared type, or the filename
   when the type is generic (`application/octet-stream` and kin; a
   `text/plain` `.csv`/`.md`/`.ics` is refined too):
@@ -157,14 +162,18 @@ uncached, the page shows the range first and the total follows.
   - *video*, *audio*: the native player (`/part` answers ranges).
   - *text* (plain, json, logs, patches, source): a `<pre>`, decoded by the
     part's charset. Over 2 MB: a note and Download.
-  - *csv* (csv, tsv): a table, first row as its header, 2000 rows at most.
+  - *csv* (csv, tsv): a table, first row as its header, at most 2000 rows,
+    200 columns and 200,000 cells; a note says what was cut.
   - *markdown*: rendered (marked, GFM) into a mail frame at a reading
     width. *html*: the source rendered in a mail frame. Both are sanitized
     and sandboxed like a mail body, remote images behind a click.
   - *ics*: the first event's title, times, place, organizer and details. A
     TZID time shows as written with its zone named; a UTC time in local time.
-  - *zip*: the archive's listing (name, size, modified), 1000 entries at
-    most. No per-entry download.
+  - *zip*: the archive's listing (name, size, modified), 1000 entries and
+    256 KB of names at most. An archive of more than 20,000 entries or an
+    8 MB central directory (read from its end record, zip64 too) isn't
+    parsed: "Too many entries to list (N)" and Download. No per-entry
+    download.
   - Anything else (docx, xlsx, heic…) only downloads. *default*
 - **Drive files.** Docs, Sheets, Slides, Forms, Drawings, files and folders
   linked in a message's text show as chips under its attachments, titled from

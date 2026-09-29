@@ -168,6 +168,13 @@ func TestInbox(t *testing.T) {
 	if !strings.Contains(body, `data-msgids="northwind%2Fapp%2Fpull%2F4821%40codehost.example"`) {
 		t.Error("msgids not QueryEscape'd")
 	}
+	// notmuch's index-time attachment tag marks the row; a body alone doesn't.
+	if lease := find(t, rs, "Fwd: Signed lease addendum"); !strings.HasSuffix(lease.Class, " attach") {
+		t.Errorf("lease row class %q, want the attachment mark", lease.Class)
+	}
+	if w9 := find(t, rs, "Contractor W-9"); strings.Contains(w9.Class, "attach") {
+		t.Errorf("w-9 row class %q: no attachment", w9.Class)
+	}
 	if cafe := find(t, rs, "Café"); cafe.Class != "row" || cafe.URL != "/t/personal/"+cafe.Thread {
 		t.Errorf("cafe row %+v", cafe)
 	}

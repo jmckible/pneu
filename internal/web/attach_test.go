@@ -1,7 +1,11 @@
 package web
 
 import (
+	"archive/zip"
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -207,5 +211,125 @@ func TestPartZip(t *testing.T) {
 	}
 	if w := do(s, "GET", survey2+"5/zip", func(r *http.Request) { withCookie(r); r.Host = "127.0.0.1:7317" }); w.Code != http.StatusMisdirectedRequest {
 		t.Errorf("wrong host: %d", w.Code)
+	}
+}
+
+// zipOf is an archive of n empty files named by name(i).
+func zipOf(t *testing.T, n int, name func(int) string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for i := 0; i < n; i++ {
+		if _, err := zw.CreateHeader(&zip.FileHeader{Name: name(i), Method: zip.Store}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func short(i int) string { return fmt.Sprintf("f%d", i) }
+
+func TestZipDirectory(t *testing.T) {
+	check := func(label string, b []byte, entries uint64, tooMany bool) {
+		t.Helper()
+		d, err := zipDirectory(b)
+		if err != nil || d.entries != entries || d.tooMany != tooMany {
+			t.Errorf("%s: %+v %v, want %d %v", label, d, err, entries, tooMany)
+		}
+	}
+	small := zipOf(t, 3, short)
+	check("small", small, 3, false)
+	check("empty archive", zipOf(t, 0, short), 0, false)
+	check("at the limit", zipOf(t, maxZipDirEntries, short), maxZipDirEntries, false)
+	// Over it, by the end record's count: refused before archive/zip parses.
+	check("over the limit", zipOf(t, maxZipDirEntries+1, short), maxZipDirEntries+1, true)
+	// zip.Writer writes zip64 records from 65535 entries on.
+	check("zip64", zipOf(t, 70000, short), 70000, true)
+
+	// A count that understates (the 16-bit count wraps at 65536): the
+	// headers are counted too, and the total isn't known.
+	lie := zipOf(t, maxZipDirEntries+5, short)
+	binary.LittleEndian.PutUint16(lie[len(lie)-22+8:], 5)
+	binary.LittleEndian.PutUint16(lie[len(lie)-22+10:], 5)
+	check("lying count", lie, 0, true)
+
+	// A central directory claimed larger than any listing needs.
+	big := bytes.Clone(small)
+	binary.LittleEndian.PutUint32(big[len(big)-22+12:], maxZipDirSize+1)
+	check("huge directory", big, 3, true)
+
+	// A small archive dressed as zip64 (locator and record before the end
+	// record, which then holds only 0xffff…): read through, and archive/zip
+	// agrees.
+	eocd := len(small) - 22
+	var z64 bytes.Buffer
+	z64.Write(small[:eocd])
+	le := binary.LittleEndian
+	rec := make([]byte, 56)
+	le.PutUint32(rec, 0x06064b50)
+	le.PutUint64(rec[4:], 44)
+	le.PutUint16(rec[12:], 45)
+	le.PutUint16(rec[14:], 45)
+	le.PutUint64(rec[24:], 3)
+	le.PutUint64(rec[32:], 3)
+	le.PutUint64(rec[40:], uint64(le.Uint32(small[eocd+12:])))
+	le.PutUint64(rec[48:], uint64(le.Uint32(small[eocd+16:])))
+	z64.Write(rec)
+	loc := make([]byte, 20)
+	le.PutUint32(loc, 0x07064b50)
+	le.PutUint64(loc[8:], uint64(eocd))
+	le.PutUint32(loc[16:], 1)
+	z64.Write(loc)
+	end := bytes.Clone(small[eocd:])
+	le.PutUint16(end[8:], 0xffff)
+	le.PutUint16(end[10:], 0xffff)
+	le.PutUint32(end[12:], 0xffffffff)
+	le.PutUint32(end[16:], 0xffffffff)
+	z64.Write(end)
+	check("small zip64", z64.Bytes(), 3, false)
+	if zr, err := zip.NewReader(bytes.NewReader(z64.Bytes()), int64(z64.Len())); err != nil || len(zr.File) != 3 {
+		t.Errorf("small zip64: archive/zip says %v", err)
+	}
+
+	// Malformed: all errors, none a panic.
+	badLoc := bytes.Clone(z64.Bytes())
+	le.PutUint64(badLoc[len(badLoc)-22-20+8:], 1<<62)
+	badComment := bytes.Clone(small)
+	le.PutUint16(badComment[len(badComment)-2:], 100)
+	badOffset := bytes.Clone(small)
+	le.PutUint32(badOffset[len(badOffset)-22+12:], uint32(len(small)))
+	for label, b := range map[string][]byte{
+		"nothing": nil, "text": []byte("not a zip at all"), "truncated": small[:len(small)-5],
+		"end record alone": small[eocd:], "zip64 locator past the end": badLoc,
+		"comment past the end": badComment, "directory before the file": badOffset,
+		"zip64 locator alone": z64.Bytes()[eocd+56:],
+	} {
+		if d, err := zipDirectory(b); err == nil {
+			t.Errorf("%s: %+v, want an error", label, d)
+		}
+	}
+}
+
+func TestZipListing(t *testing.T) {
+	read := func(b []byte) []*zip.File {
+		zr, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return zr.File
+	}
+	if e, tr := zipListing(read(zipOf(t, maxZipEntries+1, short))); len(e) != maxZipEntries || !tr {
+		t.Errorf("entries: %d %v", len(e), tr)
+	}
+	// Long names stop the listing at maxZipNameBytes.
+	long := func(i int) string { return fmt.Sprintf("%04d", i) + strings.Repeat("x", 996) }
+	if e, tr := zipListing(read(zipOf(t, 300, long))); len(e) != maxZipNameBytes/1000 || !tr {
+		t.Errorf("names: %d %v", len(e), tr)
+	}
+	if e, tr := zipListing(read(zipOf(t, 3, short))); len(e) != 3 || tr {
+		t.Errorf("small: %d %v", len(e), tr)
 	}
 }
