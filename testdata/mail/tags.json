@@ -120,6 +120,10 @@
     "hostile-15-cid@partner-agency.example": [
       "inbox",
       "unread"
+    ],
+    "sso-plan-share-7Hq2@docs-share.google.com": [],
+    "CAJm4kR9-sso-plan-reply@mail.gmail.com": [
+      "sent"
     ]
   }
 }

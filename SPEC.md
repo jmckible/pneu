@@ -137,6 +137,10 @@ uncached, the page shows the range first and the total follows.
 - **Expanded message:** from, to/cc, date, then the body in the sandboxed
   frame (HTML) or a `<pre>` (text). Quoted text folds by default. Attachments
   as a list under the body.
+- **Drive files.** Docs, Sheets, Slides, Forms, Drawings, files and folders
+  linked in a message's text show as chips under its attachments, titled from
+  the anchor text, on the first message of the thread that links them. The
+  link is rebuilt from kind and file id with `authuser` set to the account.
 - **Body colors.** Plain text renders in app colors. HTML bodies render in
   app colors too unless the sanitized document declares its own background
   or text color anywhere (inline style, `<style>`, `bgcolor`), in which case

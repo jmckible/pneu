@@ -276,6 +276,23 @@ iframe.mail.sheet {
 }
 
 .attachments { margin: 0; padding: 4px 1ch 6px 3ch; border-top: 1px solid var(--border); }
+/* Drive files the message links to (drive.go): chips, not bullets. */
+.drive-files { display: flex; flex-wrap: wrap; gap: 4px 1ch; padding-left: 1ch; list-style: none; }
+.attachments + .drive-files { border-top: 0; padding-top: 0; }
+a.drive {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0 0.75ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+a.drive:hover { border-color: var(--accent); }
+a.drive .kind { color: var(--muted); font-size: 12px; }
 
 /* ---- split pane --------------------------------------------------------- */
 /* app.js sets body.split at 140ch of this font (tri.SPLIT_CH × a measured
