@@ -1,0 +1,5 @@
+version: 18.0.14
+sha256:  21568877a938d2c4e7d74e27f18e60da96bb73a68809610ca39216e1efebae62  marked.umd.js
+source:  https://registry.npmjs.org/marked/-/marked-18.0.14.tgz (sha512-mBHK6FBHuBAlhgRe88w9F0O1AbwwXJUcQibUbC/QcdTbVGAD7aWza+xt3N6oT/jCZx3/OMeS+8rnuiHZcQ9s7A==)
+check:   byte-identical to package/lib/marked.umd.js in that tarball (already minified; no separate .min build ships)
+fetched: 2026-09-29

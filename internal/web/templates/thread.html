@@ -21,7 +21,7 @@
 {{- if .Attach}}
 <ul class="attachments">
 {{- range .Attach}}
-<li>{{if .Inline}}<a href="{{.Href}}" target="_blank" rel="noopener">{{.Name}}</a>{{else}}<a href="{{.Href}}" download="{{.Name}}">{{.Name}}</a>{{end}}</li>
+<li>{{if .Inline}}<a href="{{.Href}}" target="_blank" rel="noopener"{{if .View}} data-view="{{.View}}"{{end}}>{{.Name}}</a>{{else}}<a href="{{.Href}}" download="{{.Name}}"{{if .View}} data-view="{{.View}}"{{end}}>{{.Name}}</a>{{end}}</li>
 {{- end}}
 </ul>
 {{- end}}

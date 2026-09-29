@@ -117,6 +117,7 @@ func New(accounts []notmuch.Account, host, token string) (*Server, error) {
 	// {msgid} is one path segment: callers url.PathEscape it ('/' is legal in a Message-ID).
 	mux.HandleFunc("GET /body/{account}/{msgid}", s.body)
 	mux.HandleFunc("GET /part/{account}/{msgid}/{n}", s.part)
+	mux.HandleFunc("GET /part/{account}/{msgid}/{n}/zip", s.partZip)
 	mux.HandleFunc("POST /tag", s.tag)
 	mux.HandleFunc("POST /sync", s.syncNow)
 	mux.HandleFunc("GET /status", s.status)

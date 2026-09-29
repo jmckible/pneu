@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -463,7 +464,8 @@ type messageView struct {
 type attachView struct {
 	Href   string
 	Name   string
-	Inline bool // the part endpoint serves it inline: open it in a tab, don't force a download
+	Inline bool   // the part endpoint serves it inline: open it in a tab, don't force a download
+	View   string // the in-app viewer's kind (attach.go viewKind); "" downloads only
 }
 
 type threadPage struct {
@@ -586,7 +588,8 @@ func (s *Server) messageView(acct notmuch.Account, m *notmuch.Message) messageVi
 		v.HoldImages = holdImages(m.Tags)
 	}
 	for _, a := range an.Attachments {
-		v.Attach = append(v.Attach, attachView{Href: prefix + strconv.Itoa(a.Part), Name: a.Name, Inline: inlineTypes[a.Type]})
+		mt := effectiveType(a.Type, a.Name)
+		v.Attach = append(v.Attach, attachView{Href: prefix + strconv.Itoa(a.Part), Name: a.Name, Inline: inlineTypes[mt], View: viewKind(mt)})
 	}
 	return v
 }
@@ -679,10 +682,15 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request) (notmuch.Accoun
 // ---- part ------------------------------------------------------------------
 
 // inlineTypes may render in the browser when navigated to. Everything else
-// downloads. SVG is deliberately absent: it is a scriptable document.
+// downloads. SVG is deliberately absent: it is a scriptable document. Audio
+// and video are inline so <video>/<audio> can play them; navigated to, they
+// are the browser's own player, which runs nothing from the file.
 var inlineTypes = map[string]bool{
 	"image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true,
 	"image/avif": true, "image/bmp": true, "application/pdf": true,
+	"video/mp4": true, "video/webm": true, "video/quicktime": true, "video/ogg": true,
+	"audio/mpeg": true, "audio/ogg": true, "audio/wav": true, "audio/mp4": true, "audio/flac": true,
+	"audio/opus": true, "audio/aac": true, "audio/webm": true,
 }
 
 // neuter reports media types that are active documents in a browser; they
@@ -693,57 +701,59 @@ func neuter(mt string) bool {
 }
 
 func (s *Server) part(w http.ResponseWriter, r *http.Request) {
-	n, err := strconv.Atoi(r.PathValue("n"))
-	if err != nil || n < 1 {
-		http.NotFound(w, r)
-		return
-	}
-	acct, m, ok := s.message(w, r)
+	_, _, p, body, ct, ok := s.loadPart(w, r)
 	if !ok {
 		return
 	}
-	p := findPart(&m, n)
-	if p == nil || strings.HasPrefix(lowerType(p), "multipart/") {
-		http.NotFound(w, r)
-		return
-	}
-	body, ct, err := acct.Part(r.Context(), m.ID, n)
-	if err != nil {
-		log.Printf("part %s/%s/%d: %v", acct.Name, m.ID, n, err)
-		http.Error(w, "notmuch failed", http.StatusInternalServerError)
-		return
-	}
-	ctype, inline := partHeaders(ct)
 	name := partName(p)
 	if lowerType(p) == "message/rfc822" {
 		name = emlName(p)
+	}
+	ctype, inline := partHeaders(ct, name)
+	if strings.HasPrefix(ctype, "text/plain") && r.Header.Get("Sec-Fetch-Dest") == "image" && svgPart(ct, name) {
+		// An <img> (the viewer's) renders SVG as an image: no scripts, no
+		// subresources. Only the browser sets Sec-Fetch-Dest; a navigation
+		// or fetch() still gets text/plain.
+		ctype = "image/svg+xml"
 	}
 	h := w.Header()
 	h.Set("Content-Type", ctype)
 	h.Set("X-Content-Type-Options", "nosniff")
 	// Not in the disk cache: the --app window shares the daily browser's profile.
 	h.Set("Cache-Control", "private, no-store")
-	h.Set("Content-Length", strconv.Itoa(len(body)))
 	disp := "attachment"
 	if inline {
 		disp = "inline"
 	}
 	h.Set("Content-Disposition", disp+"; filename*=UTF-8''"+rfc5987(name))
-	if !strings.HasPrefix(ctype, "application/pdf") {
+	if strings.HasPrefix(ctype, "application/pdf") {
+		// The viewer frames it (<iframe src>): same origin only.
+		h.Set("X-Frame-Options", "SAMEORIGIN")
+		h.Set("Content-Security-Policy", "frame-ancestors 'self'")
+	} else {
 		// If anything here is ever navigated to and rendered, it runs nothing.
 		// (Chromium refuses to show PDFs under a sandbox CSP, hence the exception.)
 		h.Set("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'")
 	}
-	w.WriteHeader(http.StatusOK)
-	if r.Method != http.MethodHead {
-		w.Write(body)
-	}
+	// Ranges for <video>/<audio> seeking; HEAD is handled here too. No
+	// modtime, so no conditional requests.
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(body))
+}
+
+// svgPart: the part is SVG, by declared type or by name.
+func svgPart(declared, name string) bool {
+	mt, _, _ := mime.ParseMediaType(declared)
+	return effectiveType(strings.ToLower(mt), name) == "image/svg+xml"
 }
 
 // partHeaders turns a message-declared content type into the one served.
-func partHeaders(declared string) (ctype string, inline bool) {
+func partHeaders(declared, name string) (ctype string, inline bool) {
 	mt, params, err := mime.ParseMediaType(declared)
-	if err != nil || !strings.Contains(mt, "/") {
+	if err != nil {
+		mt = ""
+	}
+	mt = effectiveType(strings.ToLower(mt), name)
+	if !strings.Contains(mt, "/") {
 		return "application/octet-stream", false
 	}
 	out := map[string]string{}

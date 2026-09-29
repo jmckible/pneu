@@ -355,6 +355,11 @@
     T.items = Array.prototype.slice.call(root.querySelectorAll('article.message'));
     T.sel = -1;
     leaving = false;
+    root.addEventListener('click', function (e) {
+      var link = e.target.closest('.attachments a[data-view]');
+      if (!link || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      if (openViewer(link)) e.preventDefault();
+    });
     T.items.forEach(function (a) {
       if (!a.classList.contains('collapsed')) renderBody(a);
       var header = a.querySelector('header');
@@ -1196,6 +1201,7 @@
       ['a', 'Reply all (thread)'],
       ['w, c', 'Write'],
       ['v', 'Open in Gmail (new tab)'],
+      ['f', 'View attachments (thread) · n/p step, d download, o open in tab, Esc closes'],
       ['/', 'Search'],
       ['?', 'This help · Esc closes'],
     ]],
@@ -1228,6 +1234,39 @@
     }
     if (help.open) help.close();
     else help.showModal();
+  }
+
+  // ---- attachment viewer --------------------------------------------------
+  // viewer.js shows one attachment at a time and steps through all of the
+  // thread's that the server marked viewable (data-view). f opens the cursor
+  // message's first, a plain click the one clicked; the link stays the real
+  // /part URL for a modified click.
+
+  function openViewer(link) {
+    var links = Array.prototype.slice.call(T.root.querySelectorAll('.attachments a[data-view]'));
+    var i = links.indexOf(link);
+    if (i < 0 || !Pneu.viewer) return false;
+    Pneu.viewer.open({
+      items: links.map(function (a) {
+        // A link without download= is one /part serves inline (thread.html).
+        return { href: a.getAttribute('href'), name: a.textContent, kind: a.dataset.view, inline: !a.hasAttribute('download') };
+      }),
+      index: i, origin: origin, theme: frameTheme, loadMailFrame: loadMailFrame,
+      onClose: function () {
+        if (!T.root || !T.root.isConnected) return;
+        T.root.focus({ preventScroll: true });
+        setFocus('thread');
+      },
+    });
+    return true;
+  }
+
+  function viewAttachments() {
+    if (!T.root) return;
+    var a = cur(T);
+    var link = (a && a.querySelector('.attachments a[data-view]')) || T.root.querySelector('.attachments a[data-view]');
+    if (!link) { flash('Nothing here to view'); return; }
+    openViewer(link);
   }
 
   // ---- reply / compose ----------------------------------------------------
@@ -1367,6 +1406,7 @@
       r: reply(false),
       a: reply(true),
       v: openGmail,
+      f: viewAttachments,
     },
     // Consulted after the active pane's map. On a page with no pane
     // (compose) only ANYWHERE applies: its fields and buttons own the rest.

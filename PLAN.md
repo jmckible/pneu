@@ -86,6 +86,9 @@
    and cached. Send via `gmi send -t` in that account's directory; pull right
    after so the sent message appears in the thread.
 8. **Attachments.** List, download, open — served from the same part endpoint.
+   An in-app viewer (SPEC.md, Thread page) shows images, PDFs, media, text,
+   CSV, Markdown, HTML, invites and zip listings; the server picks the kind,
+   so the part endpoint and the viewer agree on what a part is.
 9. **Open in Gmail.** One key per thread. lieer filenames carry the Gmail message
    id, which deep-links. This is the escape hatch that makes every exclusion below
    safe: RSVP, labels, rich compose, forwarding with attachments.

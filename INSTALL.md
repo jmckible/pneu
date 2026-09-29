@@ -188,16 +188,21 @@ the repo root.
 5. **Mail HTML can't run scripts.** *Before step 1:* message HTML reaches
    the screen only through `web/static/mailframe.js`: DOMPurify, then a
    sandboxed `iframe srcdoc` with no `allow-scripts`, under its own CSP.
+   HTML and Markdown attachments take the same path (`web/static/viewer.js`).
    `grep -rn 'allow-scripts' web/ internal/` should turn up only comments
    forbidding it. Run the hostile corpus with `testdata/hostile/run.sh`
    (needs `chromium`, `openssl` and `python3`); it must pass. It runs
    headless Chromium with `--no-sandbox`, against pages it serves itself on
    `127.0.0.1`.
-6. **The vendored DOMPurify is upstream's.** *Before step 1:*
-   `web/static/PURIFY_VERSION` records the version, sha256 and source. Check
-   the hash against the npm tarball:
+6. **The vendored DOMPurify and marked are upstream's.** *Before step 1:*
+   `web/static/PURIFY_VERSION` and `MARKED_VERSION` record the version,
+   sha256 and source. Check each hash against its npm tarball:
    `curl -sL https://registry.npmjs.org/dompurify/-/dompurify-<ver>.tgz | tar -xzO package/dist/purify.min.js | sha256sum`
-   must match `sha256sum web/static/purify.min.js`.
+   must match `sha256sum web/static/purify.min.js`, and
+   `curl -sL https://registry.npmjs.org/marked/-/marked-<ver>.tgz | tar -xzO package/lib/marked.umd.js | sha256sum`
+   must match `sha256sum web/static/marked.umd.js`. (marked turns Markdown
+   attachments into HTML, which then goes through DOMPurify and the frame
+   like any mail.)
 7. **Secrets stay local and private.** *Before step 1, by reading; on disk
    after step 5.* Your Gmail OAuth refresh token is written by lieer to
    `<gmiDir>/.credentials.gmailieer.json`. pneu never reads it.

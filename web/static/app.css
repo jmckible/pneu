@@ -441,6 +441,84 @@ dialog#keys dt { text-align: right; }
 dialog#keys dd { margin: 0; }
 dialog#keys kbd { font: inherit; color: var(--accent); }
 
+/* The attachment viewer (viewer.js): near-fullscreen, dressed as the help
+   overlay. Its header is a title row; the stage scrolls. */
+dialog#viewer {
+  width: calc(100vw - 4ch);
+  height: calc(100vh - 32px);
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font: inherit;
+}
+dialog#viewer[open] { display: flex; flex-direction: column; }
+dialog#viewer::backdrop { background: rgb(0 0 0 / 0.45); }
+dialog#viewer:focus { outline: none; }
+dialog#viewer > header {
+  display: flex;
+  gap: 2ch;
+  align-items: baseline;
+  padding: 6px 1.5ch;
+  background: var(--bar);
+  border-bottom: 1px solid var(--border);
+}
+dialog#viewer .name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+dialog#viewer .pos { color: var(--muted); font-size: 12px; white-space: nowrap; }
+dialog#viewer .actions { margin-left: auto; display: flex; gap: 1ch; }
+dialog#viewer button {
+  padding: 1px 8px;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+dialog#viewer button:hover { border-color: var(--muted); }
+dialog#viewer button[hidden] { display: none; }
+dialog#viewer kbd { font: inherit; color: var(--accent); }
+dialog#viewer .stage { flex: 1; min-height: 0; overflow: auto; background: var(--bg); }
+dialog#viewer .stage .note { padding: 12px 1.5ch; }
+dialog#viewer .stage .note button { margin-left: 1ch; }
+dialog#viewer .stage[data-kind=image],
+dialog#viewer .stage[data-kind=video],
+dialog#viewer .stage[data-kind=audio] { display: flex; align-items: center; justify-content: center; padding: 12px; }
+dialog#viewer .stage img,
+dialog#viewer .stage video { max-width: 100%; max-height: 100%; object-fit: contain; }
+dialog#viewer .stage audio { width: min(60ch, 100%); }
+/* Transparent images (logos, SVG) on a checkerboard of the theme's tones. */
+dialog#viewer .stage img {
+  background: repeating-conic-gradient(var(--border) 0 25%, transparent 0 50%) 0 0 / 16px 16px;
+}
+dialog#viewer .stage[data-kind=pdf] { overflow: hidden; }
+dialog#viewer .stage > iframe:not(.mail) { display: block; width: 100%; height: 100%; border: 0; }
+dialog#viewer .stage pre {
+  margin: 0 auto;
+  padding: 12px 1.5ch;
+  max-width: 120ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+dialog#viewer .stage table { border-collapse: collapse; margin: 8px 1.5ch; }
+dialog#viewer .stage th,
+dialog#viewer .stage td {
+  padding: 2px 1ch;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+}
+dialog#viewer .stage th { position: sticky; top: 0; background: var(--bar); font-weight: normal; color: var(--muted); }
+dialog#viewer .stage td.num { text-align: right; white-space: nowrap; color: var(--muted); }
+dialog#viewer .stage td.dir { color: var(--muted); }
+dialog#viewer .stage dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 3ch; margin: 16px 2ch; max-width: 100ch; }
+dialog#viewer .stage dt { text-align: right; color: var(--muted); }
+dialog#viewer .stage dd { margin: 0; white-space: pre-wrap; }
+
 /* ---- compose ----------------------------------------------------------- */
 
 main.compose { padding: 8px 1ch 24px; max-width: 110ch; }

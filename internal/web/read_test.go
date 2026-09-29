@@ -385,8 +385,8 @@ func TestThread(t *testing.T) {
 		`<div class="body" data-kind="html" data-body-url="/body/personal/5f2e9a10-trip-photos@fastmail.example"></div>`,
 		// PDF and images open inline in a tab (the part endpoint serves them
 		// inline); everything else downloads.
-		`<li><a href="/part/personal/5f2e9a10-trip-photos@fastmail.example/8" target="_blank" rel="noopener">itinerary.pdf</a></li>`,
-		`<li><a href="/part/personal/5f2e9a10-trip-photos@fastmail.example/9" download="packing-list.txt">packing-list.txt</a></li>`,
+		`<li><a href="/part/personal/5f2e9a10-trip-photos@fastmail.example/8" target="_blank" rel="noopener" data-view="pdf">itinerary.pdf</a></li>`,
+		`<li><a href="/part/personal/5f2e9a10-trip-photos@fastmail.example/9" download="packing-list.txt" data-view="text">packing-list.txt</a></li>`,
 	} {
 		if !strings.Contains(body, s) {
 			t.Errorf("photos thread missing %s", s)
@@ -398,14 +398,14 @@ func TestThread(t *testing.T) {
 
 	// Calendar parts are attachments, even inside multipart/alternative.
 	body = getOK(t, s, threadURL(t, s, "/", "Invitation: Dental"))
-	if !strings.Contains(body, `data-kind="html"`) || !strings.Contains(body, `/5" download="part-5.ics"`) || !strings.Contains(body, `/6" download="invite.ics"`) {
+	if !strings.Contains(body, `data-kind="html"`) || !strings.Contains(body, `/5" download="part-5.ics" data-view="ics"`) || !strings.Contains(body, `/6" download="invite.ics" data-view="ics"`) {
 		t.Errorf("dental thread: %s", body)
 	}
 
 	// A forward's text is folded in; its attachment is listed.
 	body = getOK(t, s, threadURL(t, s, "/", "Fwd: Signed lease"))
 	if !strings.Contains(body, "---------- Forwarded message ----------\nFrom: Graham Ellis &lt;graham.ellis@example.org&gt;") ||
-		!strings.Contains(body, "Signed and attached.") || !strings.Contains(body, `/6" target="_blank" rel="noopener">addendum-signed.pdf`) {
+		!strings.Contains(body, "Signed and attached.") || !strings.Contains(body, `/6" target="_blank" rel="noopener" data-view="pdf">addendum-signed.pdf`) {
 		t.Errorf("fwd thread: %s", body)
 	}
 
@@ -493,23 +493,37 @@ func TestPart(t *testing.T) {
 
 func TestPartHeaders(t *testing.T) {
 	cases := []struct {
-		in, ct string
-		inline bool
+		in, name, ct string
+		inline       bool
 	}{
-		{"image/png", "image/png", true},
-		{"IMAGE/JPEG", "image/jpeg", true},
-		{"image/svg+xml", "text/plain", false},
-		{"text/html; charset=utf-8", "text/plain; charset=utf-8", false},
-		{"application/xhtml+xml", "text/plain", false},
-		{"text/javascript", "text/plain", false},
-		{"application/pdf", "application/pdf", true},
-		{"application/zip; name=\"x.zip\"", "application/zip", false},
-		{"garbage", "application/octet-stream", false},
-		{"", "application/octet-stream", false},
+		{"image/png", "a.png", "image/png", true},
+		{"IMAGE/JPEG", "a.jpg", "image/jpeg", true},
+		{"image/jpg", "a.jpg", "image/jpeg", true},
+		{"image/svg+xml", "a.svg", "text/plain", false},
+		{"text/html; charset=utf-8", "a.html", "text/plain; charset=utf-8", false},
+		{"application/xhtml+xml", "a.xhtml", "text/plain", false},
+		{"text/javascript", "a.js", "text/plain", false},
+		{"application/pdf", "a.pdf", "application/pdf", true},
+		{"application/zip; name=\"x.zip\"", "x.zip", "application/zip", false},
+		{"garbage", "part-3", "application/octet-stream", false},
+		{"", "part-3", "application/octet-stream", false},
+		{"audio/mp3", "a.mp3", "audio/mpeg", true},
+		{"video/mp4", "a.mp4", "video/mp4", true},
+		// A generic type takes the name's; an active one is still neutered.
+		{"application/octet-stream", "scan.PDF", "application/pdf", true},
+		{"application/octet-stream", "x.svg", "text/plain", false},
+		{"application/octet-stream", "x.html", "text/plain", false},
+		{"application/octet-stream", "data.json", "application/json", false},
+		{"application/octet-stream", "blob.bin", "application/octet-stream", false},
+		// A specific type is never overridden by a name, except text/plain
+		// into a text format.
+		{"image/png", "evil.html", "image/png", true},
+		{"text/plain; charset=iso-8859-1", "t.csv", "text/csv; charset=iso-8859-1", false},
+		{"text/plain", "x.pdf", "text/plain", false},
 	}
 	for _, c := range cases {
-		if ct, inline := partHeaders(c.in); ct != c.ct || inline != c.inline {
-			t.Errorf("%q: %q %v", c.in, ct, inline)
+		if ct, inline := partHeaders(c.in, c.name); ct != c.ct || inline != c.inline {
+			t.Errorf("%q %q: %q %v", c.in, c.name, ct, inline)
 		}
 	}
 	if got := rfc5987(`naïve "résumé"/x.pdf`); got != `na%C3%AFve%20%22r%C3%A9sum%C3%A9%22%2Fx.pdf` {

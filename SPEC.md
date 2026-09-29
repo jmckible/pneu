@@ -137,6 +137,35 @@ uncached, the page shows the range first and the total follows.
 - **Expanded message:** from, to/cc, date, then the body in the sandboxed
   frame (HTML) or a `<pre>` (text). Quoted text folds by default. Attachments
   as a list under the body.
+- **Attachments.** Each is a link to its `/part` URL: images, PDFs, audio
+  and video open in a tab, everything else downloads. What pneu can show
+  gets a viewer: `f` opens the cursor message's first (else the thread's
+  first), a plain click the one clicked (a modified click keeps the link's
+  own behaviour). It is a
+  near-fullscreen modal in the help overlay's dress: a title row with the
+  name, `i of N` and Download / Open in tab / Close, the attachment below.
+  `n`/`p` (`→`/`←`, unless a player has focus) step through every viewable
+  attachment in the thread in document order; `d` downloads, `o` opens in a
+  tab (only what `/part` serves inline), `Esc`/`q` close and give the keys
+  back to the thread. Keys work from inside its frames too. The server
+  decides the kind (`data-view`) from the declared type, or the filename
+  when the type is generic (`application/octet-stream` and kin; a
+  `text/plain` `.csv`/`.md`/`.ics` is refined too):
+  - *image* (png, jpeg, gif, webp, avif, bmp, svg): an `<img>`, on a
+    checkerboard. SVG only ever as an image.
+  - *pdf*: Chromium's viewer in an `<iframe>`.
+  - *video*, *audio*: the native player (`/part` answers ranges).
+  - *text* (plain, json, logs, patches, source): a `<pre>`, decoded by the
+    part's charset. Over 2 MB: a note and Download.
+  - *csv* (csv, tsv): a table, first row as its header, 2000 rows at most.
+  - *markdown*: rendered (marked, GFM) into a mail frame at a reading
+    width. *html*: the source rendered in a mail frame. Both are sanitized
+    and sandboxed like a mail body, remote images behind a click.
+  - *ics*: the first event's title, times, place, organizer and details. A
+    TZID time shows as written with its zone named; a UTC time in local time.
+  - *zip*: the archive's listing (name, size, modified), 1000 entries at
+    most. No per-entry download.
+  - Anything else (docx, xlsx, heic…) only downloads. *default*
 - **Body colors.** Plain text renders in app colors. HTML bodies render in
   app colors too unless the sanitized document declares its own background
   or text color anywhere (inline style, `<style>`, `bgcolor`), in which case

@@ -41,11 +41,23 @@ and build order; this file is the working contract. Read PLAN.md before touching
   is the account. Retry notmuch writes on "already locked" — Xapian has one writer.
 - Tag actions take the message-id list the view rendered, never `thread:X`.
 - Frontend is server-rendered HTML plus vanilla JS. Vendor JS locally (DOMPurify
-  included); no CDN, no bundler, no framework.
+  and marked included, each with a `*_VERSION` provenance file); no CDN, no
+  bundler, no framework.
 - Sanitized mail renders only inside a sandboxed `iframe srcdoc` with its own CSP.
   `allow-same-origin` is fine; `allow-scripts` never is — the sandbox is the
   script wall. Never inject message HTML into the app document. Any change to the sanitizer,
   sandbox flags, or CSP is verified against the hostile corpus before merge.
+- Attachments (docs: SPEC.md, Thread page): the server picks each one's viewer
+  kind (`attach.go`, `data-view`) from the same effective type `/part` serves,
+  so the two agree. HTML attachments and Markdown render through
+  `renderMailFrame` like a body; Markdown is parsed in the browser by vendored
+  marked (Go's stdlib has no Markdown, and this way its output goes straight
+  to DOMPurify). Everything else the viewer builds with textContent. `/part` never
+  serves an active type: SVG is `image/svg+xml` only to `Sec-Fetch-Dest:
+  image` (an `<img>` runs no script), text/plain otherwise. A PDF is the one
+  unsandboxed frame, because Chromium's viewer refuses a sandbox CSP; it gets
+  `frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN` in place of the
+  global DENY, and nothing else is frameable.
 - Mutations are POST with Host and Origin checks. localhost is not a boundary:
   the default browser is also the daily browser, so every open tab can reach
   this port.

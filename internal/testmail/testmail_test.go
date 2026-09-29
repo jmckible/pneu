@@ -34,7 +34,7 @@ func TestManifestApplied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]int{"personal": 21, "work": 16}
+	want := map[string]int{"personal": 23, "work": 16}
 	for _, a := range env.Accounts {
 		if got := len(manifest[a.Name]); got != want[a.Name] {
 			t.Errorf("%s: manifest has %d messages, want %d", a.Name, got, want[a.Name])
@@ -152,7 +152,7 @@ func TestExcludeTags(t *testing.T) {
 		"personal": {"x9q7w.rewards.20260920@rewards-center.example", "digest-2026-37-8812@neighbors.example"},
 		"work":     {"seo-outreach-99812@seo-growth.example", "trial-ending-5521@formstack-trials.example"},
 	}
-	wantThreads := map[string]int{"personal": 16, "work": 10}
+	wantThreads := map[string]int{"personal": 17, "work": 10}
 	for _, a := range env.Accounts {
 		ids := strings.Fields(string(a.Notmuch(t, "search", "--output=messages", "*")))
 		for _, id := range excluded[a.Name] {
