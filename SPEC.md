@@ -176,9 +176,10 @@ uncached, the page shows the range first and the total follows.
     download.
   - Anything else (docx, xlsx, heic…) only downloads. *default*
 - **Drive files.** Docs, Sheets, Slides, Forms, Drawings, files and folders
-  linked in a message's text show as chips under its attachments, titled from
-  the anchor text, on the first message of the thread that links them. The
-  link is rebuilt from kind and file id with `authuser` set to the account.
+  linked anywhere in the thread show as chips under the newest message's
+  attachments (it is always expanded), once each in order of first mention,
+  titled from the anchor text. The link is rebuilt from kind and file id with
+  `authuser` set to the account.
 - **Body colors.** Plain text renders in app colors. HTML bodies render in
   app colors too unless the sanitized document declares its own background
   or text color anywhere (inline style, `<style>`, `bgcolor`), in which case

@@ -463,7 +463,7 @@ type messageView struct {
 	HoldImages bool
 	Text       template.HTML
 	Attach     []attachView
-	Drive      []driveView // Drive files first linked here (thread sets it)
+	Drive      []driveView // the thread's Drive files, on its newest message (thread sets it)
 }
 
 type attachView struct {
@@ -524,7 +524,7 @@ func (s *Server) thread(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var shown, unread []string
-	drive := map[string]bool{}
+	var drive []driveView
 	for i := range msgs {
 		m := &msgs[i]
 		if m.Excluded {
@@ -539,13 +539,16 @@ func (s *Server) thread(w http.ResponseWriter, r *http.Request) {
 		}
 		v := s.messageView(acct, m)
 		v.Pos = len(data.Messages) + 1
-		v.Drive = firstMentions(driveViews(driveRefs(m), acct.Email), drive)
+		drive = mergeDrive(drive, driveViews(driveRefs(m), acct.Email))
 		data.Messages = append(data.Messages, v)
 	}
 	if len(data.Messages) == 0 {
 		http.NotFound(w, r)
 		return
 	}
+	// On the newest message, which is always expanded: the one that first
+	// linked a file is often an older, folded one.
+	data.Messages[len(data.Messages)-1].Drive = drive
 	if strings.TrimSpace(data.Subject) == "" {
 		data.Subject = "(no subject)"
 	}

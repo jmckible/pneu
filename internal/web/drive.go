@@ -4,6 +4,7 @@ import (
 	"html"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -13,7 +14,8 @@ import (
 // A shared Doc, Sheet or folder is not a MIME part, only a link in the body.
 // The thread page lists each one under the message as a chip, like an
 // attachment. The link is rebuilt from kind and file id, never the sender's
-// URL, with authuser set so the account the mail came to opens it.
+// URL, with authuser set so the account the mail came to opens it. The
+// thread's files are listed together on its newest message.
 
 // driveKind is one kind of Drive file: its data-kind, label, and link.
 type driveKind struct {
@@ -192,15 +194,18 @@ func driveViews(refs []driveRef, email string) []driveView {
 	return out
 }
 
-// firstMentions drops the files an earlier message of the thread already
-// showed (a quoted reply repeats its links) and records the rest in seen.
-func firstMentions(vs []driveView, seen map[string]bool) []driveView {
-	var out []driveView
-	for _, v := range vs {
-		if !seen[v.Key] {
-			seen[v.Key] = true
-			out = append(out, v)
+// mergeDrive adds a message's files to the thread's, once each in order of
+// first mention (a quoted reply repeats its links). A later mention's title
+// fills in for an untitled earlier one.
+func mergeDrive(all, add []driveView) []driveView {
+	for _, v := range add {
+		i := slices.IndexFunc(all, func(o driveView) bool { return o.Key == v.Key })
+		switch {
+		case i < 0:
+			all = append(all, v)
+		case !all[i].Named && v.Named:
+			all[i] = v
 		}
 	}
-	return out
+	return all
 }

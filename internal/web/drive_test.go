@@ -129,22 +129,24 @@ func TestDriveViews(t *testing.T) {
 	}
 }
 
-func TestFirstMentions(t *testing.T) {
-	seen := map[string]bool{}
+func TestMergeDrive(t *testing.T) {
 	a := driveViews([]driveRef{{Kind: kindDoc, ID: docID}, {Kind: kindSheet, ID: sheetID}}, "")
-	b := driveViews([]driveRef{{Kind: kindSheet, ID: sheetID}, {Kind: kindFile, ID: fileID}}, "")
-	if got := firstMentions(a, seen); len(got) != 2 {
-		t.Errorf("first: %v", got)
+	b := driveViews([]driveRef{{Kind: kindSheet, ID: sheetID, Title: "Budget"}, {Kind: kindFile, ID: fileID}, {Kind: kindDoc, ID: docID}}, "")
+	got := mergeDrive(mergeDrive(nil, a), b)
+	var keys []string
+	for _, v := range got {
+		keys = append(keys, v.Kind+" "+v.Title)
 	}
-	if got := firstMentions(b, seen); len(got) != 1 || got[0].Kind != "file" {
-		t.Errorf("second: %v", got)
+	// First-mention order; the sheet takes its title from the later mention.
+	if want := []string{"doc Google Doc", "sheet Budget", "file Drive file"}; !slices.Equal(keys, want) {
+		t.Errorf("merged %q, want %q", keys, want)
 	}
 }
 
 var driveChipRE = regexp.MustCompile(`<a href="([^"]*)" target="_blank" rel="noopener noreferrer" class="drive" data-kind="([^"]*)">(.*?)</a>`)
 
-// A Drive share gets its chip; the reply quoting it gets only the file it
-// adds, not the quoted one again.
+// The thread's files, the shared Doc and the Sheet the reply adds, show
+// once each on the newest message (the reply), none on the folded share.
 func TestThreadDriveChips(t *testing.T) {
 	s := newServer(t)
 	body := getOK(t, s, threadURL(t, s, "/all", `Document shared with you: "SSO rollout plan"`))
@@ -162,13 +164,16 @@ func TestThreadDriveChips(t *testing.T) {
 	}
 	q := "?authuser=robin%40northwind.example"
 	want := [][]string{
-		{"doc https://docs.google.com/document/d/" + docID + "/edit" + q + ` SSO rollout plan <span class="kind">Google Doc</span>`},
-		{"sheet https://docs.google.com/spreadsheets/d/" + sheetID + "/edit" + q + " Google Sheet"},
+		nil,
+		{
+			"doc https://docs.google.com/document/d/" + docID + "/edit" + q + ` SSO rollout plan <span class="kind">Google Doc</span>`,
+			"sheet https://docs.google.com/spreadsheets/d/" + sheetID + "/edit" + q + " Google Sheet",
+		},
 	}
 	if !slices.EqualFunc(got, want, slices.Equal) {
 		t.Errorf("chips:\n got %q\nwant %q", got, want)
 	}
-	if strings.Count(body, `<ul class="attachments drive-files">`) != 2 || strings.Contains(body, `<ul class="attachments">`) {
+	if strings.Count(body, `<ul class="attachments drive-files">`) != 1 || strings.Contains(body, `<ul class="attachments">`) {
 		t.Errorf("chip lists: %s", body)
 	}
 }
