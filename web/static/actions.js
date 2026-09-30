@@ -1,7 +1,8 @@
 // actions.js — message actions that act on what the sender wrote
-// (docs/actions.md): the unsubscribe confirmation (X), and the shared
-// pieces later actions (o, L) use: the browser-open check and the arming
-// rule for confirming controls. The pure half also runs under node --test
+// (docs/actions.md): the unsubscribe confirmation (X), the declared
+// primary link (o: JSON-LD, shown as a chip), link hints (L), and the
+// pieces they share: the browser-open check and the arming rule for
+// confirming controls. The pure half also runs under node --test
 // (web/actions.test.js); the DOM half only in the browser.
 //
 // The sender is the adversary. Every sender-supplied string reaches this
@@ -88,6 +89,9 @@
     if (h.charAt(0) === '[' || IPV4_LAST.test(h.split('.').pop())) return { ok: false, reason: 'an IP address' };
     if (h === 'localhost' || /\.localhost$/.test(h)) return { ok: false, reason: 'a local address' };
     if (h.indexOf('.') < 0) return { ok: false, reason: 'a single-label host' };
+    // https://github.com@evil.example/ reads as the first name and goes to
+    // the second.
+    if (u.username || u.password) return { ok: false, reason: 'a user name in the address' };
     return { ok: true, url: u.href };
   }
 
@@ -152,10 +156,303 @@
       (after != null ? '?after=' + encodeURIComponent(after) : '');
   }
 
+  // ---- declared action (o) ------------------------------------------------
+  // schema.org JSON-LD, as mailframe.js captured it from DOMPurify's own
+  // parse: the text of each <script type="application/ld+json"> in the
+  // document tree. The sender's suggestion, never evidence: the chip shows
+  // where it goes, derived from the URL that opens.
+
+  var LD = { blocks: 4, bytes: 65536, nodes: 2000, depth: 6 };
+  // The action types that name a page to open, with a label for one that
+  // has no name of its own.
+  var ACTION_TYPES = { ViewAction: 'View', TrackAction: 'Track', ConfirmAction: 'Confirm', SaveAction: 'Save', RsvpAction: 'RSVP' };
+  var NAME_CAP = 60;
+  var own = Object.prototype.hasOwnProperty;
+
+  function utf8Length(s) {
+    if (s.length * 3 <= LD.bytes) return s.length; // short enough either way
+    var n = 0;
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i);
+      if (c < 0x80) n += 1;
+      else if (c < 0x800) n += 2;
+      else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { n += 4; i++; }
+      else n += 3;
+    }
+    return n;
+  }
+
+  // actionType is t's fallback label if t (an @type: a string or a list of
+  // them) names one of ACTION_TYPES, bare or as a schema.org IRI.
+  function actionType(t) {
+    var list = Array.isArray(t) ? t : [t];
+    for (var i = 0; i < list.length; i++) {
+      if (typeof list[i] !== 'string') continue;
+      var n = list[i].replace(/^https?:\/\/schema\.org\//, '').replace(/^schema:/, '');
+      if (own.call(ACTION_TYPES, n)) return ACTION_TYPES[n];
+    }
+    return null;
+  }
+
+  // ldURL is raw as an absolute http(s) URL that passes browserCheck, or
+  // null. Stricter than the URL parser, which takes https:host and
+  // backslashes, and drops tabs and newlines from inside a URL; with no
+  // base, a relative URL is refused outright. No whitespace of any kind
+  // (\s is Unicode's, U+0085 and U+180E besides), no C0 or C1 control, no
+  // format character (Cf) and no lone surrogate: none of them belongs in
+  // an address, and each can make one read as another.
+  var LD_URL_BAD = /[\u0000-\u0020\u007f-\u009f\\\s\u180e\p{Cf}\p{Cs}]/u;
+  function ldURL(raw, appOrigins) {
+    if (typeof raw !== 'string' || !/^https?:\/\/[^\/]/i.test(raw) || LD_URL_BAD.test(raw)) return null;
+    if (Array.from(raw).length > WHOLE.url) return null;
+    var c = browserCheck(raw, appOrigins);
+    return c.ok ? c.url : null;
+  }
+
+  // ldAction resolves one qualifying action to {url, name}, or null: url,
+  // or target as a string or {url}; both given, they must agree. A
+  // urlTemplate refuses it: that's a form to fill, not a link.
+  function ldAction(a, appOrigins) {
+    if (own.call(a, 'urlTemplate')) return null;
+    var urls = [];
+    if (own.call(a, 'url')) urls.push(a.url);
+    if (own.call(a, 'target')) {
+      var t = a.target;
+      if (t && typeof t === 'object' && !Array.isArray(t)) {
+        if (own.call(t, 'urlTemplate') || !own.call(t, 'url')) return null;
+        urls.push(t.url);
+      } else {
+        urls.push(t);
+      }
+    }
+    if (!urls.length) return null;
+    var url = null;
+    for (var i = 0; i < urls.length; i++) {
+      var u = ldURL(urls[i], appOrigins);
+      if (!u || (url && u !== url)) return null;
+      url = u;
+    }
+    var name = typeof a.name === 'string' ? a.name.replace(/[\t\n\f\r ]+/g, ' ').trim() : '';
+    if (!name) name = actionType(a['@type']);
+    return { url: url, name: name }; // the full name: duplicates compare on it
+  }
+
+  // declaredAction is the message's one declared action, {url, name}, or
+  // null. blocks: the captured script texts in document order (anything but
+  // a string is a block the capture refused). Past any bound (4 blocks,
+  // 64 KiB each, 2000 JSON nodes, depth 6) there is no action at all: what
+  // the walk didn't see might have been a second one. potentialAction is
+  // read on any object; exactly one qualifying action (identical duplicates
+  // count once), else none. A block that isn't JSON contributes nothing.
+  function declaredAction(blocks, appOrigins) {
+    if (!Array.isArray(blocks) || blocks.length > LD.blocks) return null;
+    var found = [], nodes = 0, OVER = {};
+    function walk(v, depth) {
+      if (++nodes > LD.nodes || depth > LD.depth) throw OVER;
+      if (v === null || typeof v !== 'object') return;
+      if (Array.isArray(v)) {
+        for (var i = 0; i < v.length; i++) walk(v[i], depth + 1);
+        return;
+      }
+      var keys = Object.keys(v);
+      for (var k = 0; k < keys.length; k++) walk(v[keys[k]], depth + 1);
+      if (!own.call(v, 'potentialAction')) return;
+      [].concat(v.potentialAction).forEach(function (a) {
+        if (a && typeof a === 'object' && !Array.isArray(a) && actionType(a['@type'])) found.push(a);
+      });
+    }
+    try {
+      for (var b = 0; b < blocks.length; b++) {
+        if (typeof blocks[b] !== 'string' || utf8Length(blocks[b]) > LD.bytes) return null;
+        var v;
+        try { v = JSON.parse(blocks[b]); } catch (e) { continue; }
+        walk(v, 1);
+      }
+    } catch (e) {
+      if (e === OVER) return null;
+      throw e;
+    }
+    // Identical duplicates count once, compared before the name is capped:
+    // two names that differ only past the cap are two actions.
+    var one = null;
+    for (var i = 0; i < found.length; i++) {
+      var r = ldAction(found[i], appOrigins);
+      if (!r || (one && (r.url !== one.url || r.name !== one.name))) return null;
+      one = r;
+    }
+    return one && { url: one.url, name: cap(one.name, NAME_CAP).text };
+  }
+
+  // Click-tracking redirectors known to sit in front of the real page. Any
+  // host may redirect; these are the ones the chip says so for.
+  var REDIRECTORS = ['list-manage.com', 'sendgrid.net', 'mandrillapp.com', 'mailchi.mp'];
+  function redirector(raw) {
+    var h;
+    try { h = new URL(String(raw)).hostname.toLowerCase().replace(/\.+$/, ''); } catch (e) { return false; }
+    return REDIRECTORS.some(function (d) { return h === d || h.slice(-d.length - 1) === '.' + d; });
+  }
+
+  // chipParts is what the chip draws for action: the name (capped by
+  // declaredAction), the destination (scheme, host, port unless default)
+  // and whether the host is a known redirector; null if it can't be shown.
+  function chipParts(action) {
+    if (!action || typeof action.url !== 'string') return null;
+    var dest = destination(action.url);
+    if (!dest) return null;
+    return { name: String(action.name || ''), dest: cap(dest, CAPS.destination).text, redirect: redirector(action.url) };
+  }
+
+  // ---- link hints (L) -----------------------------------------------------
+
+  var HINT_ALPHABET = 'asdfghjkl';
+  var HINT_MAX = 200;
+
+  // hintLabels is n labels over alphabet, all the same length (so none is
+  // a prefix of another), the shortest that fits.
+  function hintLabels(n, alphabet) {
+    alphabet = alphabet || HINT_ALPHABET;
+    var k = alphabet.length, len = 1, room = k;
+    while (room < n) { len++; room *= k; }
+    var out = [];
+    for (var i = 0; i < n; i++) {
+      var s = '', x = i;
+      for (var j = 0; j < len; j++) { s = alphabet.charAt(x % k) + s; x = Math.floor(x / k); }
+      out.push(s);
+    }
+    return out;
+  }
+
+  // intersect is the overlap of two rects ({left, top, right, bottom}), or
+  // null when it has no area.
+  function intersect(a, b) {
+    if (!a || !b) return null;
+    var r = {
+      left: Math.max(a.left, b.left), top: Math.max(a.top, b.top),
+      right: Math.min(a.right, b.right), bottom: Math.min(a.bottom, b.bottom),
+    };
+    return r.right > r.left && r.bottom > r.top ? r : null;
+  }
+
+  // hintURL is a link's destination as a hint shows and opens it: http(s)
+  // as browserCheck normalizes it ({kind: 'web', url}, or with refused: the
+  // reason, shown and never opened), or a mailto ({kind: 'mailto', url});
+  // null for anything else, which gets no label.
+  function hintURL(raw, appOrigins) {
+    if (typeof raw !== 'string') return null;
+    var s = raw.trim();
+    if (/^mailto:/i.test(s)) {
+      try { new URL(s); } catch (e) { return null; }
+      // Labelled and refused, as an overlong http(s) link is: it can't be
+      // shown in full, and a link that just went unlabelled would look
+      // like no link at all.
+      if (Array.from(s).length > WHOLE.url) return { kind: 'mailto', refused: 'too long to show in full', url: s };
+      return { kind: 'mailto', url: s };
+    }
+    if (!/^https?:\/\//i.test(s)) return null;
+    var c = browserCheck(s, appOrigins);
+    if (!c.ok) return { kind: 'web', refused: c.reason, url: s };
+    if (Array.from(c.url).length > WHOLE.url) return { kind: 'web', refused: 'too long to show in full', url: c.url };
+    return { kind: 'web', url: c.url };
+  }
+
+  // The keys that inspect a long destination on the status line.
+  var HINT_SCROLL = {
+    ArrowDown: ['line', 1], ArrowUp: ['line', -1], PageDown: ['page', 1], PageUp: ['page', -1],
+    End: ['end', 1], Home: ['end', -1],
+  };
+
+  // placeLabel is where a label of size w × h goes for a link whose visible
+  // box is box, in coordinates relative to clip's top-left: at the box's
+  // top-left, moved in until the whole label lies inside clip, so a link
+  // with a sliver showing still gets a label that can be read. null when
+  // the label can't fit inside clip at all.
+  function placeLabel(box, clip, w, h) {
+    var cw = clip.right - clip.left, ch = clip.bottom - clip.top;
+    if (!(w > 0 && h > 0) || w > cw || h > ch) return null;
+    return {
+      left: Math.min(Math.max(box.left - clip.left, 0), cw - w),
+      top: Math.min(Math.max(box.top - clip.top, 0), ch - h),
+    };
+  }
+
+  // inside reports whether rect r (with area) lies wholly within b, to half
+  // a pixel (layout rounds).
+  function inside(r, b) {
+    if (!r || !b || !(r.right > r.left && r.bottom > r.top)) return false;
+    var E = 0.5;
+    return r.left >= b.left - E && r.top >= b.top - E && r.right <= b.right + E && r.bottom <= b.bottom + E;
+  }
+
+  // usable is the part of pane (a rect) that shows: pane ∩ view, less the
+  // app's own sticky or fixed chrome (covers: rects) that overlaps it, each
+  // taken off the edge it is anchored to: a bar across the top (the narrow
+  // layout's header, the split's sticky title) lowers the top, one along
+  // the bottom (the key bar) raises the bottom. The result may have no
+  // area; inside() then fails for everything.
+  function usable(pane, view, covers) {
+    var b = {
+      left: Math.max(pane.left, view.left), top: Math.max(pane.top, view.top),
+      right: Math.min(pane.right, view.right), bottom: Math.min(pane.bottom, view.bottom),
+    };
+    (covers || []).forEach(function (c) {
+      if (!c || !(c.right > b.left && c.left < b.right && c.bottom > b.top && c.top < b.bottom)) return;
+      if (c.top <= b.top) b.top = Math.max(b.top, c.bottom);
+      else if (c.bottom >= b.bottom) b.bottom = Math.min(b.bottom, c.top);
+      else if (c.top - b.top < b.bottom - c.bottom) b.top = Math.max(b.top, c.bottom);
+      else b.bottom = Math.min(b.bottom, c.top);
+    });
+    return b;
+  }
+
+  // primaryKey decides an o on a message's chip (docs/actions.md, Primary
+  // link): a repeat does nothing; while the chip (rect, in the same
+  // coordinates as bounds: the thread pane ∩ the viewport, above the key
+  // bar and below the sticky title) isn't wholly in view it is 'reveal' —
+  // scroll the chip into view and mark it — and only an o with the chip in
+  // view is 'open'. So the destination the chip previews has always been
+  // on screen when o opens it, from the pane or from inside a frame.
+  function primaryKey(e, rect, bounds) {
+    if (e && e.repeat) return 'none';
+    return inside(rect, bounds) ? 'open' : 'reveal';
+  }
+
+  // hintKey is the hint session's key state machine. st: {typed, selected}
+  // (selected: a label, or null); labels: the frozen list. Every key is the
+  // session's; act says what to do with it:
+  //   close   Esc
+  //   open    Enter with a selection
+  //   select  the typed label is complete: st.selected is it
+  //   narrow  typed is a prefix of some labels (Backspace included)
+  //   scroll  an inspection key: scroll the status line's destination by
+  //           {by: 'line'|'page'|'end', dir: 1|-1}, never the page
+  //   none    dropped: repeats, modifiers (Shift included: Shift+Enter
+  //           opens nothing), keys that match nothing
+  function hintKey(st, e, labels) {
+    var next = { typed: st.typed, selected: st.selected };
+    if (e.repeat || e.isComposing) return { st: next, act: 'none' };
+    if (e.key === 'Escape') return { st: next, act: 'close' };
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return { st: next, act: 'none' };
+    if (own.call(HINT_SCROLL, e.key)) return { st: next, act: 'scroll', by: HINT_SCROLL[e.key][0], dir: HINT_SCROLL[e.key][1] };
+    if (e.key === 'Enter') return { st: next, act: next.selected ? 'open' : 'none' };
+    if (e.key === 'Backspace') {
+      if (!next.typed) return { st: next, act: 'none' };
+      return { st: { typed: next.typed.slice(0, -1), selected: null }, act: 'narrow' };
+    }
+    if (typeof e.key !== 'string' || e.key.length !== 1 || HINT_ALPHABET.indexOf(e.key) < 0) return { st: next, act: 'none' };
+    // A letter after a selection starts a new label.
+    var typed = (next.selected ? '' : next.typed) + e.key;
+    if (labels.indexOf(typed) >= 0) return { st: { typed: typed, selected: typed }, act: 'select' };
+    if (labels.some(function (l) { return l.indexOf(typed) === 0; })) return { st: { typed: typed, selected: null }, act: 'narrow' };
+    return { st: next, act: 'none' };
+  }
+
   var A = {
     segments: segments, visible: visible, cap: cap, CAPS: CAPS, WHOLE: WHOLE,
     browserCheck: browserCheck, destination: destination, Arming: Arming, previewURL: previewURL,
     dialogKey: dialogKey,
+    LD: LD, declaredAction: declaredAction, redirector: redirector, chipParts: chipParts,
+    HINT_ALPHABET: HINT_ALPHABET, HINT_MAX: HINT_MAX, hintLabels: hintLabels, intersect: intersect,
+    hintURL: hintURL, hintKey: hintKey, placeLabel: placeLabel, inside: inside, primaryKey: primaryKey, usable: usable,
   };
   if (typeof module === 'object' && module.exports) {
     module.exports = A;
@@ -231,10 +528,12 @@
   // pendingPreview: X was pressed and the preview hasn't answered yet.
   function pendingPreview() { return !!(S && !S.dlg); }
 
-  // pendingKey takes every keydown while the preview loads, before the app's
-  // key map (app.js asks first), so nothing falls through to archive or
-  // reply: Esc cancels, the rest are dropped. Returns whether it took e.
+  // pendingKey takes every keydown while the preview loads, or while link
+  // hints are up, before the app's key map (app.js asks first), so nothing
+  // falls through to archive or reply: Esc cancels, the rest are dropped
+  // (or, for hints, typed). Returns whether it took e.
   function pendingKey(e) {
+    if (H) { hintKeydown(e); return true; }
     if (!pendingPreview()) return false;
     e.preventDefault();
     if (e.stopPropagation) e.stopPropagation();
@@ -246,6 +545,7 @@
   // closes. An unsubscribe already POSTed runs on; its outcome goes to the
   // status line.
   function cancel() {
+    closeHints();
     if (!S) return;
     var s = S;
     if (s.abort) s.abort.abort();
@@ -266,7 +566,10 @@
   }
 
   // cancelFor cancels a session bound to article (its frame was replaced).
-  function cancelFor(article) { if (S && S.ident.article === article) cancel(); }
+  function cancelFor(article) {
+    if (H && H.ident.article === article) closeHints();
+    if (S && S.ident.article === article) cancel();
+  }
 
   A.unsubscribe = unsubscribe;
   A.keyup = keyup;
@@ -274,7 +577,7 @@
   A.cancelFor = cancelFor;
   A.pendingPreview = pendingPreview;
   A.pendingKey = pendingKey;
-  A.active = function () { return !!S; };
+  A.active = function () { return !!S || !!H; };
 
   function live(s) { return s === S; }
 
@@ -647,4 +950,329 @@
       }], CLOSE],
     }, e);
   }
+
+  // ---- the chip and o ---------------------------------------------------
+  // The chip is the preview: `o  <name> → <destination>`, each sender
+  // string its own isolated <bdi> with controls drawn. The destination is
+  // derived from the URL that opens and never gives way to the name (CSS:
+  // the name shrinks, the destination wraps). There is no confirmation
+  // after it; o and a click open, through browserCheck again.
+
+  // chip is the header chip for action (declaredAction's), or null if its
+  // URL can't be shown. open runs on a click.
+  function chip(action, open) {
+    var p = chipParts(action);
+    if (!p) return null;
+    var b = el('button', 'cta');
+    b.type = 'button';
+    b.tabIndex = -1;
+    b.appendChild(el('kbd', null, 'o'));
+    b.appendChild(field(p.name, { cls: 'name' }));
+    b.appendChild(el('span', 'arrow', '→'));
+    var d = el('span', 'dest');
+    d.appendChild(field(p.dest, { cls: 'destination' }));
+    if (p.redirect) d.appendChild(el('span', 'redirect', '(redirect)'));
+    b.appendChild(d);
+    b.pneuAction = { url: action.url, name: p.name };
+    b.addEventListener('click', function (e) {
+      e.stopPropagation(); // not a header click: no fold
+      b.blur(); // a later Enter is the app's again
+      open();
+    });
+    return b;
+  }
+
+  // openAction opens the action a chip carries, re-checked now; returns
+  // the check (ok, url | reason).
+  function openAction(chipEl) {
+    var a = chipEl && chipEl.pneuAction;
+    if (!a) return { ok: false, reason: 'no link' };
+    return openInBrowser(a.url);
+  }
+
+  // primary handles an o on chipEl (primaryKey): with the chip wholly
+  // inside bounds and nothing over it, it opens; otherwise the chip is
+  // scrolled into view and marked for a moment, and nothing opens until a
+  // later, separate o finds it in view. Returns {act: 'none' | 'reveal' |
+  // 'open', why: 'bounds' | 'covered' (for a reveal), check: openAction's
+  // (when it opened)}.
+  function primary(chipEl, e, bounds) {
+    var r = chipEl.getBoundingClientRect();
+    var act = primaryKey(e, r, bounds), why = act === 'reveal' ? 'bounds' : null;
+    if (act === 'open' && covered(chipEl, r)) { act = 'reveal'; why = 'covered'; }
+    if (act === 'none') return { act: act };
+    if (act === 'reveal') {
+      chipEl.scrollIntoView({ block: 'center', inline: 'nearest' });
+      chipEl.classList.add('reveal');
+      clearTimeout(chipEl.pneuReveal);
+      chipEl.pneuReveal = setTimeout(function () { chipEl.classList.remove('reveal'); }, 1500);
+      return { act: act, why: why };
+    }
+    return { act: act, check: openAction(chipEl) };
+  }
+
+  // covered reports whether anything but the chip shows at its centre, its
+  // top and bottom rows, or any line of its name and destination (a
+  // wrapped destination is several): whatever is in front hides it.
+  function covered(chipEl, r) {
+    var cx = (r.left + r.right) / 2;
+    var pts = [[cx, (r.top + r.bottom) / 2], [cx, r.top + 2], [cx, r.bottom - 2]];
+    Array.prototype.forEach.call(chipEl.querySelectorAll('bdi'), function (b) {
+      Array.prototype.forEach.call(b.getClientRects(), function (l) {
+        if (!(l.width > 0 && l.height > 0)) return;
+        var y = (l.top + l.bottom) / 2;
+        pts.push([l.left + 1, y], [(l.left + l.right) / 2, y], [l.right - 1, y]);
+      });
+    });
+    return pts.some(function (p) {
+      var hit = document.elementFromPoint(p[0], p[1]);
+      return !hit || !chipEl.contains(hit);
+    });
+  }
+
+  A.chip = chip;
+  A.openAction = openAction;
+  A.primary = primary;
+
+  // ---- link hints -------------------------------------------------------
+  // Labels are drawn in this document, over the frame, never inside it (the
+  // sender's CSS comes after ours there). One session at a time, bound to
+  // the message identity taken when L was pressed; the label → URL map is
+  // frozen when it opens, and a resize, a scroll (the pane's, the window's
+  // or the frame's), the frame resizing or being replaced, or the cursor
+  // moving (cancel/cancelFor) closes it. It takes every key (pendingKey).
+
+  var H = null;
+
+  // The frame's document is the sender's, same-origin: read it through the
+  // prototypes, so a named element can't stand in for a method.
+  function docRoot(doc) {
+    return Object.getOwnPropertyDescriptor(Document.prototype, 'documentElement').get.call(doc);
+  }
+
+  // hintItems collects the labelable links of frame, clipped to bounds (app
+  // coordinates): anchors with an http(s) or mailto href, a client rect with
+  // area that survives frame ∩ bounds, whose centre hits the anchor (or
+  // something inside it) in the frame and hits the frame in this document,
+  // and not faded under 0.5 opacity. At most HINT_MAX, in document order.
+  function hintItems(frame, bounds, origins) {
+    var doc = frame.contentDocument;
+    if (!doc) return { items: [], clip: null };
+    var fr = frame.getBoundingClientRect();
+    var ox = fr.left + frame.clientLeft, oy = fr.top + frame.clientTop;
+    var clip = intersect({ left: ox, top: oy, right: ox + frame.clientWidth, bottom: oy + frame.clientHeight }, bounds);
+    if (!clip) return { items: [], clip: null };
+    var root = docRoot(doc);
+    if (!root) return { items: [], clip: clip };
+    var anchors = Element.prototype.querySelectorAll.call(root, 'a[href]');
+    var getAttr = Element.prototype.getAttribute, rects = Element.prototype.getClientRects;
+    var contains = Node.prototype.contains, fromPoint = Document.prototype.elementFromPoint;
+    var items = [];
+    for (var i = 0; i < anchors.length && i < 2000 && items.length < HINT_MAX; i++) {
+      var a = anchors[i];
+      var dest = hintURL(getAttr.call(a, 'href'), origins);
+      if (!dest) continue;
+      var rs = rects.call(a), box = null;
+      for (var j = 0; j < rs.length && !box; j++) {
+        var r = rs[j];
+        if (!(r.width > 0 && r.height > 0)) continue;
+        box = intersect({ left: r.left + ox, top: r.top + oy, right: r.right + ox, bottom: r.bottom + oy }, clip);
+      }
+      if (!box) continue;
+      var cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+      var hit = fromPoint.call(doc, cx - ox, cy - oy);
+      if (!hit || !contains.call(a, hit)) continue;
+      if (document.elementFromPoint(cx, cy) !== frame) continue;
+      if (faded(a, root)) continue;
+      items.push({ dest: dest, box: box });
+    }
+    return { items: items, clip: clip };
+  }
+
+  function faded(a, root) {
+    var o = 1;
+    for (var n = a; n && o >= 0.5; n = n === root ? null : n.parentElement) {
+      var v = parseFloat(getComputedStyle(n).opacity);
+      if (v >= 0 && v <= 1) o *= v;
+    }
+    return o < 0.5;
+  }
+
+  // hints opens link hints on ident's message. ctx (app.js):
+  //   frame      the message's iframe.mail
+  //   bounds     {left, top, right, bottom}: the thread pane ∩ the viewport
+  //              above the key bar, in this document's coordinates
+  //   status(n)  show node n on the status line until status(null)
+  //   statusBox()  the status line's element: its own scrolling (a long
+  //              destination) doesn't close hints, and the inspection keys
+  //              scroll it
+  //   flash(text, kind)
+  //   onClose()  the session has ended
+  function hints(ident, e, ctx) {
+    if (H || S || !ident || (e && e.repeat)) return;
+    var got = ctx.frame ? hintItems(ctx.frame, ctx.bounds, appOrigins()) : { items: [] };
+    if (!got.items.length) { ctx.flash('No links in view to label'); return; }
+    var labels = hintLabels(got.items.length);
+    var ov = el('div');
+    ov.id = 'hints';
+    ov.setAttribute('aria-hidden', 'true');
+    var c = got.clip;
+    ov.style.left = c.left + 'px';
+    ov.style.top = c.top + 'px';
+    ov.style.width = (c.right - c.left) + 'px';
+    ov.style.height = (c.bottom - c.top) + 'px';
+    var labs = got.items.map(function (it, i) {
+      var lab = el('span', 'hint', labels[i]);
+      ov.appendChild(lab);
+      return lab;
+    });
+    // Each label's whole box goes inside the clip (placeLabel): measured
+    // once laid out, all reads before any write. One that can't fit gets
+    // no label, and its link none.
+    document.body.appendChild(ov);
+    var sizes = labs.map(function (lab) { return [lab.offsetWidth, lab.offsetHeight]; });
+    var map = {}, kept = [];
+    got.items.forEach(function (it, i) {
+      var at = placeLabel(it.box, c, sizes[i][0], sizes[i][1]);
+      if (!at) { labs[i].remove(); return; }
+      labs[i].style.left = at.left + 'px';
+      labs[i].style.top = at.top + 'px';
+      map[labels[i]] = { dest: it.dest, el: labs[i] };
+      kept.push(labels[i]);
+    });
+    if (!kept.length) { ov.remove(); ctx.flash('No links in view to label'); return; }
+    var h = H = { ident: ident, ctx: ctx, labels: kept, map: map, ov: ov, st: { typed: '', selected: null } };
+    h.close = function () { if (H === h) closeHints(); };
+    // Any scroll closes them but the status line's own: a long destination
+    // scrolls there, and reading it mustn't end the session.
+    h.onScroll = function (ev) {
+      var box = ctx.statusBox && ctx.statusBox(), t = ev && ev.target;
+      if (box && t && t.nodeType === 1 && box.contains(t)) return;
+      h.close();
+    };
+    var fdoc = ctx.frame.contentDocument;
+    window.addEventListener('resize', h.close);
+    document.addEventListener('scroll', h.onScroll, true);
+    if (fdoc) fdoc.addEventListener('scroll', h.close, true);
+    h.fdoc = fdoc;
+    // A new document in the frame (a re-render) is new links.
+    h.frame = ctx.frame;
+    h.frame.addEventListener('load', h.close);
+    // The labels sit where the links were: the frame changing size (an
+    // image arriving) moves them.
+    var w = ctx.frame.offsetWidth, ht = ctx.frame.offsetHeight;
+    h.ro = new ResizeObserver(function () {
+      if (ctx.frame.offsetWidth !== w || ctx.frame.offsetHeight !== ht) h.close();
+    });
+    h.ro.observe(ctx.frame);
+    ctx.status(hintPrompt(kept.length));
+  }
+
+  function hintPrompt(n) {
+    var p = el('span');
+    p.appendChild(document.createTextNode(n + ' link' + (n === 1 ? '' : 's') + ' · type a label · '));
+    p.appendChild(el('kbd', null, 'Esc'));
+    p.appendChild(document.createTextNode(' closes'));
+    return p;
+  }
+
+  function closeHints() {
+    if (!H) return;
+    var h = H;
+    H = null;
+    window.removeEventListener('resize', h.close);
+    document.removeEventListener('scroll', h.onScroll, true);
+    if (h.fdoc) h.fdoc.removeEventListener('scroll', h.close, true);
+    h.frame.removeEventListener('load', h.close);
+    if (h.ro) h.ro.disconnect();
+    h.ov.remove();
+    h.ctx.status(null);
+    if (h.ctx.onClose) h.ctx.onClose();
+  }
+
+  function hintKeydown(e) {
+    var h = H;
+    e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
+    var r = hintKey(h.st, e, h.labels);
+    h.st = r.st;
+    if (r.act === 'close') { closeHints(); return; }
+    if (r.act === 'open') { openHint(h); return; }
+    if (r.act === 'scroll') { scrollStatus(h, r); return; }
+    if (r.act === 'none') return;
+    Object.keys(h.map).forEach(function (l) {
+      var m = h.map[l];
+      m.el.classList.toggle('off', l.indexOf(h.st.typed) !== 0);
+      m.el.classList.toggle('on', l === h.st.selected);
+    });
+    h.ctx.status(h.st.selected ? selection(h.map[h.st.selected].dest) : hintPrompt(h.labels.length));
+    shade(h);
+  }
+
+  // shade hides, while a label is selected, every label whose box meets
+  // the status line: nothing may sit over the destination Enter opens (the
+  // key bar stacks above the labels too, app.css).
+  function shade(h) {
+    var box = h.st.selected && h.ctx.statusBox && h.ctx.statusBox();
+    var sr = box ? box.getBoundingClientRect() : null;
+    Object.keys(h.map).forEach(function (l) {
+      var m = h.map[l];
+      m.el.classList.remove('under');
+      if (sr && intersect(m.el.getBoundingClientRect(), sr)) m.el.classList.add('under');
+    });
+  }
+
+  // scrollStatus scrolls the status line (a long destination) for an
+  // inspection key; the page never moves (its scroll would close hints).
+  function scrollStatus(h, r) {
+    var box = h.ctx.statusBox && h.ctx.statusBox();
+    if (!box) return;
+    if (r.by === 'end') { box.scrollTop = r.dir > 0 ? box.scrollHeight : 0; return; }
+    var line = parseFloat(getComputedStyle(box).lineHeight) || 18;
+    box.scrollTop += r.dir * (r.by === 'page' ? Math.max(line, box.clientHeight - line) : line);
+  }
+
+  // selection is the status line for a selected label: the full
+  // destination under the confirmation's rules, and what Enter will do.
+  function selection(dest) {
+    var p = el('span', 'hintsel');
+    if (dest.refused) {
+      // Nothing opens, so a cut can hide nothing that runs.
+      p.appendChild(el('span', 'bad', 'Refused (' + dest.refused + '): '));
+      p.appendChild(field(dest.url, { cls: 'url', cap: WHOLE.url }));
+      return p;
+    }
+    p.appendChild(el('kbd', null, '⏎'));
+    p.appendChild(document.createTextNode(dest.kind === 'mailto' ? ' writes to ' : ' opens '));
+    p.appendChild(field(dest.url, { cls: 'url' }));
+    if (dest.kind === 'web' && redirector(dest.url)) p.appendChild(el('span', 'redirect', ' (redirect)'));
+    return p;
+  }
+
+  // openHint opens the selection: http(s) through the browser-open check
+  // again; mailto as a body click opens it, in a new window, so the
+  // browser hands it to its mail handler.
+  function openHint(h) {
+    var dest = h.map[h.st.selected].dest, ctx = h.ctx;
+    closeHints();
+    if (dest.refused) { ctx.flash('Refused for safety: ' + dest.refused, 'error'); return; }
+    if (dest.kind === 'mailto') {
+      window.open(dest.url, '_blank', 'noopener,noreferrer');
+      ctx.flash('Opened the mail link');
+      return;
+    }
+    var c = openInBrowser(dest.url);
+    if (c.ok) ctx.flash('Opened ' + destination(c.url));
+    else ctx.flash('Refused for safety: ' + c.reason, 'error');
+  }
+
+  // yieldStatus is called before anything else writes the status line: a
+  // hint session owns it while up, and a line that no longer shows the
+  // selection must not leave Enter armed for it, so the session ends.
+  function yieldStatus() { if (H) closeHints(); }
+
+  A.hints = hints;
+  A.closeHints = closeHints;
+  A.yieldStatus = yieldStatus;
+  A.hintsOpen = function () { return !!H; };
 })(typeof window !== 'undefined' ? window : this);

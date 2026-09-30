@@ -185,6 +185,20 @@ uncached, the page shows the range first and the total follows.
   else the sender's first mailto or web option. A confirmation shows the
   exact destination, or the whole message for a mailto, and `y` confirms.
   Design and security contract: docs/actions.md.
+- **Primary link** (`o`): a message whose HTML declares exactly one
+  schema.org JSON-LD action (GitHub's "View Pull Request" is the common
+  one) gets a chip in its header, `o  <name> → <destination>`, the
+  destination derived from the URL that opens (`(redirect)` for known
+  click-trackers). `o` on the expanded cursor message, or from inside its
+  frame, or a click on the chip opens it in the browser; the chip is the
+  preview, so an `o` with it scrolled out of view brings it into view and
+  a second `o` opens. The URL is checked again as it opens. No guessing from body
+  links yet. docs/actions.md.
+- **Link hints** (`L`): labels over every visible http(s)/mailto link in the
+  message's body, drawn by the app over the frame. Typing a label selects it
+  and shows the full destination on the status line; `Enter` opens it (a
+  mailto as a body click does), `Esc` closes; scrolling, resizing or moving
+  the cursor closes them. docs/actions.md.
 - **Actions** (`e` `#` `!` `s`) apply to the whole thread and return to the
   list at the same cursor position.
 - **Reply** is an inline box under the last message: `r` opens it with the

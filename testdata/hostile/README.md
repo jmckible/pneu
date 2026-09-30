@@ -79,6 +79,14 @@ an app path outside the message's parts (35, 36), or a receipt-tracker host (38)
 | `43-inline-color.html` | a `color:` in a style attribute. Rendered with a theme | render in the app's colors | render on the light sheet, the mail's color intact | A |
 | `44-no-colors.html` | no colors: `transparent`, `inherit`, `currentcolor` and an empty `<font color>`. Rendered with a theme; also as `harness-theme-invalid` with a `--bg` carrying a CSS injection, and `harness-theme-missing` with no theme | leave the theme's values anywhere in the document unless each is a 6-digit hex (or `light`/`dark`) | render in the theme's bg, fg and accent; fall back to the light sheet when the theme is malformed or absent | A |
 | `45-font-substitution.html` | Gmail's `font-family:sans-serif` span, a newsletter stack behind an unloadable web font, a serif and a mono stack, an `!important` Arial, a legacy `<font face>`, and an `@font-face` named Arial | rewrite serif or mono stacks, a family the sender put ahead of the stand-ins, `!important`, or an `@font-face` name | put the mail sans (Inter) ahead of the first sans stand-in (Arial, Helvetica, `sans-serif`…) in style attributes, `<style>` rules and `face` | A |
+| `46-ldjson-markup.html` | an ld+json block whose JSON string holds `</script><img onerror>` (the parser ends the script there, so the img is markup), and a valid block whose `name` holds `<img onerror>` and an escaped `<\/script><svg onload>` | execute; take anything from the broken blocks | capture three blocks; yield the valid block's action, its name the markup as text, capped at 60 code points | S, P, A |
+| `47-ldjson-huge.html` | a valid small block beside a block past 64 KiB | yield an action: past any bound there is none, not the small block's | render the canary | A |
+| `48-ldjson-hidden.html` | ld+json inside a comment, `<template>`, `<noscript>`, `<textarea>`, `<xmp>`, `<svg>`, `<math><mi>`, and with types `application/json` and `application/ld+json;x`; one real block in head | capture any but the head block (DOMPurify's own parse is the truth: none of those is an HTML script in the document tree with exactly that type) | capture one block and yield its action; a second capture would make two actions, and so none | P, A |
+| `49-ldjson-javascript-url.html` | the one declared action's `url` is `javascript:` | yield an action | render the canary | A |
+| `50-ldjson-data-url.html` | the one declared action's `url` is `data:text/html` | yield an action | render the canary | A |
+| `51-ldjson-relative-url.html` | the one declared action's `url` is relative (`/status`) | yield an action (with no base, a relative URL is refused, not resolved against the app) | render the canary | A |
+| `52-ldjson-ip-url.html` | the one declared action's `url` is on `127.0.0.1` | yield an action | render the canary | A |
+| `53-ldjson-github.html` | nothing hostile: GitHub's notification shape, an array holding an `EmailMessage` whose `potentialAction` is a `ViewAction` with both `url` and `target`, and a `publisher` | lose the action | yield `View Pull Request` and the pull request's URL | A |
 
 ## Sources
 
@@ -137,6 +145,50 @@ carries harness-only cases that need the live port:
   `theme` pass it as `opts.theme`; `colors`, `sheet` and `fits` assert the
   detection result, the frame mode and class, and that the frame's height
   covers its content, sheet border included, without clipping or slack.
+- JSON-LD cases (46–53) carry `ldBlocks`, the number of ld+json blocks the sanitize
+  hook captured, and `action`, what `declaredAction` (actions.js, loaded by the
+  harness) made of them: `{url, name}` or null. Each also checks that the hook was
+  removed after the call (DOMPurify's hooks are global).
+- After the cases, checks of the sinks that put sender data into the app's own
+  document, run in an app-shaped document (`#app`: a thread pane, the key bar
+  and status line, the shipping `app.css`, `mailframe.js` and `actions.js`),
+  with `window.open` intercepted, each reported like a case:
+  `app-chip-sinks` (every chip the corpus yields contains only the chip's own
+  elements and attributes, 46's markup shown as text, and its destination
+  stays inside the chip and the pane at 600px and 180px, wrapping rather than
+  clipped); `app-o-reveal` (`o` with the chip scrolled away reveals and opens
+  nothing, a repeat does nothing, the next `o` opens); `app-hints-positioning`
+  (fixed, absolute, transformed, negative-margin and huge links, 3-letter
+  labels, and 2px slivers on each edge of the clip: every label's box inside
+  it); `app-hints-frozen-url` (anchors re-pointed after hints open; the URL
+  shown at selection is what opens, and Shift+Enter opens nothing);
+  `app-hints-status-scroll` (a long destination scrolls by the status line's
+  own scroll and the inspection keys without closing hints or reaching the
+  app); `app-hints-yield-status` (another flash ends the session);
+  `app-hints-listeners` (three rounds of opening and ending hints every way,
+  frame replacement included: every listener and ResizeObserver a session
+  added is gone); `sanitize-throw-hook` (a sanitize call that throws still
+  removes the capture hook); `sanitize-hook-identical` (every case's assembled
+  document is byte-identical with the capture hook installed and without).
+  Under the harness's virtual time no rendering step runs, so where the
+  browser would fire a scroll event the harness dispatches one.
+- Then the shipping `app.js` on the real thread page: `app-thread.html` is
+  `base.html` and `thread.html` as the server renders them (checked in;
+  `go test ./internal/web -run TestHarnessThreadPage` fails when the templates
+  change, `-update-harness` regenerates it), loaded in a same-origin frame
+  with a script ahead of the page's own that stands in for the network only
+  (fetch answers the body URL with a mail carrying a JSON-LD action and a grid
+  of long links, and 404s the rest; EventSource is inert; `window.open` is
+  recorded). run.sh serves `/static/` and a fixed `/theme.css` for it. In the
+  narrow layout (700px) and the split (1400px), keys dispatched on the thread
+  pane and in the mail frame's document: `page-*-o-under-chrome` (a wrapped
+  chip half under the fixed key bar, narrow, or the split's sticky title: the
+  first `o` goes through `primary` and reveals for the bounds, the second
+  opens); `page-*-o-covered` (another element over the chip's top row, its
+  centre clear: no open); `page-*-o-from-frame`; `page-*-hints-status` (the
+  selected label under the status line is hidden, every label that meets it
+  stacks below it, and `Pneu.flash` ends the session so `Enter` opens
+  nothing).
 - `harness-link-opener-control`: the positive control. The shipping assembly, then
   `rel=opener` put back on the link before `srcdoc`. `opener.html` sees an opener and
   uses it to navigate the frame (reverse tabnabbing); the case passes only if the

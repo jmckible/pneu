@@ -253,7 +253,19 @@
     });
     mail.frame = built.frame;
     mail.colors = built.colors;
+    setChip(article, built.action);
     return built;
+  }
+
+  // setChip puts the message's declared action (mailframe.js, from its
+  // JSON-LD) in its header as the o chip, or takes an old one away.
+  function setChip(article, action) {
+    var header = article.querySelector(':scope > header');
+    if (!header || !Pneu.actions) return;
+    var old = header.querySelector(':scope > .cta');
+    if (old) old.remove();
+    var c = action ? Pneu.actions.chip(action, function () { openChip(article, null); }) : null;
+    if (c) header.appendChild(c);
   }
 
   // rethemeFrames repaints every loaded body in the new theme's colors. A
@@ -816,6 +828,9 @@
   }
 
   function flash(text, kind, action) {
+    // Link hints own the line while up; anything else that writes it ends
+    // them first, so Enter is never armed for a destination not shown.
+    if (Pneu.actions && Pneu.actions.yieldStatus) Pneu.actions.yieldStatus();
     if (!statusEl) {
       statusEl = document.createElement('div');
       statusEl.id = 'status';
@@ -842,6 +857,21 @@
   }
 
   Pneu.flash = flash; // compose.js: "Draft restored"
+
+  // statusNode shows node on the status line until statusNode(null): link
+  // hints (actions.js) put their prompt and the selected destination here,
+  // in full, so the line grows upward while one is up (app.css #status.hint).
+  function statusNode(node) {
+    if (!statusEl) flash('');
+    clearTimeout(statusTimer);
+    if (!node) {
+      if (statusEl.classList.contains('hint')) { statusEl.className = ''; statusEl.replaceChildren(); }
+      return;
+    }
+    statusEl.replaceChildren(node);
+    statusEl.className = 'show hint';
+    statusKind = '';
+  }
 
   function done(action, undoable) {
     flash(tri.label(action) + (undoable ? ' · z to undo' : ''), '', undoable ? { label: 'Undo', run: undo } : null);
@@ -1190,7 +1220,7 @@
       ['g / G', 'First / last row (list)'],
       ['> / <', 'Older / newer page (list)'],
       ['Space, ⇧Space', 'Page down / up (thread)'],
-      ['Enter, o', 'Open thread (list) · fold message (thread)'],
+      ['Enter, o', 'Open thread (list) · Enter folds a message (thread)'],
       ['u, Esc', 'Back to the list (Esc first leaves a field) · Esc on the list closes the thread'],
     ]],
     ['Panes', [
@@ -1211,6 +1241,8 @@
       ['w, c', 'Write'],
       ['v', 'Open in Gmail (new tab)'],
       ['X', 'Unsubscribe (headers only) · y confirms'],
+      ['o', "Open the message's link (shown as a chip)"],
+      ['L', "Label the message's links · type a label to select, Enter opens, Esc closes"],
       ['f', 'View attachments (thread) · n/p step, d download, o open in tab, Esc closes'],
       ['/', 'Search'],
       ['?', 'This help · Esc closes'],
@@ -1280,7 +1312,7 @@
   }
 
   // ---- message actions (docs/actions.md) ---------------------------------
-  // X (and later o, L) binds to one message when the key is pressed and
+  // X, o and L bind to one message when the key is pressed and
   // keeps it: a key from inside a mail frame is that frame's message (its
   // listener carries the identity, paintMail); from the thread pane, the
   // cursor message, which must be expanded. actions.js does the rest.
@@ -1324,6 +1356,73 @@
         T.root.focus({ preventScroll: true });
         setFocus('thread');
       },
+    });
+  }
+
+  // o opens the message's declared link, the one its chip shows: only an
+  // expanded message whose chip is rendered (the chip is the preview; no
+  // dialog follows), and only while the chip is in view: an o with it
+  // scrolled away brings it into view instead, and a later o opens
+  // (actions.js primary). The URL is checked again as it opens.
+  function primaryLink(e, ident) {
+    if (e.repeat || !Pneu.actions || paneBusy()) return;
+    var target = actionTarget(ident);
+    if (!target) return;
+    openChip(target.article, e, target.root);
+  }
+
+  // openChip: e is the o keydown, or null for a click on the chip (which
+  // is on screen to be clicked).
+  function openChip(article, e, root) {
+    var c = article.querySelector(':scope > header > .cta');
+    if (!c || article.classList.contains('collapsed') || !c.getClientRects().length) {
+      flash('No link on this message');
+      return;
+    }
+    var r;
+    if (e) {
+      var p = Pneu.actions.primary(c, e, paneBounds(root || article.closest('main.thread')));
+      if (p.act === 'none') return;
+      if (p.act === 'reveal') { flash('The link is in the chip · o again opens it'); return; }
+      r = p.check;
+    } else {
+      r = Pneu.actions.openAction(c);
+    }
+    if (r.ok) flash('Opened ' + Pneu.actions.destination(r.url));
+    else flash('Refused for safety: ' + r.reason, 'error');
+  }
+
+  // paneBounds is what of the thread pane shows: its rect ∩ the viewport,
+  // less every piece of app chrome that is sticky or fixed and overlaps it,
+  // in either layout: the page header (sticky when narrow), the split's
+  // sticky pane titles, the key bar (actions.js usable). o and L both use
+  // it.
+  function paneBounds(root) {
+    var covers = [];
+    var chrome = document.querySelectorAll('body > *:not(#hints):not(dialog), main.thread > h1, main.list > .pane-title');
+    Array.prototype.forEach.call(chrome, function (el) {
+      var pos = getComputedStyle(el).position;
+      if ((pos === 'sticky' || pos === 'fixed') && el.getClientRects().length) covers.push(el.getBoundingClientRect());
+    });
+    return Pneu.actions.usable(root.getBoundingClientRect(),
+      { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }, covers);
+  }
+
+  // L labels the links of the message's body where they show, over its
+  // frame, clipped to the thread pane and the viewport above the key bar.
+  function linkHints(e, ident) {
+    if (e.repeat || !Pneu.actions || paneBusy()) return;
+    var target = actionTarget(ident);
+    if (!target) return;
+    var frame = target.article.querySelector('.body[data-kind=html] iframe.mail');
+    if (!frame || !frame.contentDocument) { flash('No links to label'); return; }
+    Pneu.actions.hints(target, e, {
+      frame: frame,
+      bounds: paneBounds(target.root),
+      status: statusNode,
+      statusBox: function () { return statusEl; },
+      flash: flash,
+      onClose: function () {},
     });
   }
 
@@ -1466,6 +1565,8 @@
       v: openGmail,
       f: viewAttachments,
       X: unsubscribe,
+      o: primaryLink,
+      L: linkHints,
     },
     // Consulted after the active pane's map. On a page with no pane
     // (compose) only ANYWHERE applies: its fields and buttons own the rest.
@@ -1495,8 +1596,9 @@
   // ident: the message whose mail frame the key was typed in (paintMail).
   function onKey(e, ident) {
     lastKey = Date.now();
-    // While an X preview loads, the session takes every key (Esc cancels),
-    // so nothing falls through to archive or reply (docs/actions.md).
+    // While an X preview loads, or link hints are up, the session takes
+    // every key (Esc cancels), so nothing falls through to archive or reply
+    // (docs/actions.md).
     if (Pneu.actions && Pneu.actions.pendingKey(e)) return;
     if (help && help.open) {
       // The modal owns the keyboard; Esc closes it natively.

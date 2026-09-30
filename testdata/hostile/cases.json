@@ -585,6 +585,66 @@
   "fits": true
  },
  {
+  "id": "46-ldjson-markup",
+  "file": "46-ldjson-markup.html",
+  "ldBlocks": 3,
+  "action": {
+   "url": "https://example.com/pull/46",
+   "name": "View <img src=x onerror=top.__pwned='46-ldjson-name'> </scri…"
+  }
+ },
+ {
+  "id": "47-ldjson-huge",
+  "file": "47-ldjson-huge.html",
+  "ldBlocks": 2,
+  "action": null
+ },
+ {
+  "id": "48-ldjson-hidden",
+  "file": "48-ldjson-hidden.html",
+  "ldBlocks": 1,
+  "action": {
+   "url": "https://example.com/48-real",
+   "name": "The real one"
+  }
+ },
+ {
+  "id": "49-ldjson-javascript-url",
+  "file": "49-ldjson-javascript-url.html",
+  "ldBlocks": 1,
+  "action": null
+ },
+ {
+  "id": "50-ldjson-data-url",
+  "file": "50-ldjson-data-url.html",
+  "ldBlocks": 1,
+  "action": null
+ },
+ {
+  "id": "51-ldjson-relative-url",
+  "file": "51-ldjson-relative-url.html",
+  "ldBlocks": 1,
+  "action": null
+ },
+ {
+  "id": "52-ldjson-ip-url",
+  "file": "52-ldjson-ip-url.html",
+  "ldBlocks": 1,
+  "action": null
+ },
+ {
+  "id": "53-ldjson-github",
+  "file": "53-ldjson-github.html",
+  "ldBlocks": 1,
+  "links": [
+   "https://github.com/northwind/app/pull/4821#pullrequestreview-1"
+  ],
+  "action": {
+   "url": "https://github.com/northwind/app/pull/4821#pullrequestreview-1",
+   "name": "View Pull Request"
+  }
+ },
+ {
   "id": "harness-theme-invalid",
   "file": "44-no-colors.html",
   "theme": {

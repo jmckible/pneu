@@ -222,7 +222,64 @@ never presents it as a fallback for a security refusal.
    `RsvpAction`; `url`, or `target` as a string or `{url}`. `urlTemplate`
    is refused, `@context` is never fetched; exactly one qualifying action,
    else none; the URL must be absolute.
-2. **Button heuristic.** Runs *after* the frame has laid out, on its live
+
+   Decided in building it (2026-09-30):
+   - *Which scripts.* An HTML-namespace `script` whose `type`, trimmed of
+     ASCII whitespace and lowercased, is exactly `application/ld+json` (a
+     parameter, `;x`, disqualifies), whose every ancestor is an HTML
+     element up to `<html>`, none of them `noscript` or `template`. DOMPurify
+     drops both of those whole without visiting their content, so the
+     ancestor rule is a second wall; it is what refuses a script under
+     `<svg>` or `<math>`. The hook is added immediately before the one
+     `sanitize` call and removed in a `finally`: DOMPurify's hooks are
+     global, and the viewer's calls must not see it.
+   - *Bounds.* Past any of them there is no action at all, not the action
+     found so far: what went unread might have been a second one. 64 KiB is
+     UTF-8 bytes. Depth counts the block's top value as 1 (GitHub's shape
+     is 4 or 5 deep). A block that isn't JSON contributes nothing, and the
+     others still count (a `</script>` inside a JSON string ends the script
+     there, leaving two broken blocks around real markup; hostile 46).
+   - *Where.* `potentialAction` is read on any object, `@graph` and nested
+     ones included. `@type` may be a list; a bare name (`ViewAction`), the
+     full IRI (`https://schema.org/ViewAction` or `http://…`) and the
+     compact `schema:ViewAction` all count, since senders write all three
+     and they name the same type. Exactly those prefixes, case-sensitive:
+     `@context` is never read to expand anything else.
+   - *One.* Identical duplicates (same URL after normalization, same full
+     name, compared before the 60-point cap) count once; two names that
+     differ only past the cap are two actions, so none. Both `url` and `target` given, they must agree. A
+     qualifying action with an unusable URL still counts toward "one", so
+     it can't be dropped to promote another.
+   - *URL.* Must start `http://` or `https://` literally and contain no
+     whitespace (Unicode's, `\s`, plus U+0085 and U+180E), C0 or C1 control,
+     format character (Cf), lone surrogate or backslash (the URL parser accepts
+     `https:host`, backslashes and embedded newlines), be at most 4096 code
+     points, and pass the browser-open check, which also refuses a user name
+     in the address (`https://github.com@evil.example/`) for everything that
+     uses it.
+   - *Name.* Runs of ASCII whitespace become one space; empty or missing, it
+     is the type (`View`, `Track`, `Confirm`, `Save`, `RSVP`); capped at 60
+     code points with `…`; drawn with controls visible.
+   - *Redirectors.* Exactly `list-manage.com`, `sendgrid.net`,
+     `mandrillapp.com`, `mailchi.mp` and their subdomains. A `click.*` or
+     `links.*` host is not evidence.
+   - *No dialog.* The chip is the preview. `o` needs the message expanded
+     and its chip rendered, ignores repeats, and runs the browser-open check
+     again at open time; a click on the chip does the same.
+   - *In view.* Being the preview, the chip must be on screen when `o`
+     opens it: its whole rect inside the thread pane ∩ the viewport less
+     every piece of app chrome that is sticky or fixed and overlaps the
+     pane, in either layout (the page header, the split's sticky titles,
+     the key bar; `usable`), and nothing else in front of it: hit-tested at
+     its centre, its top and bottom rows, and each line of its name and
+     destination (a wrapped destination is several). Otherwise — scrolled away while reading a tall body, say —
+     `o` scrolls the chip into view and marks it for a moment, and opens
+     nothing; a later, separate `o` (repeats never count) that finds it in
+     view opens. The same from inside a frame. A click needs no such check:
+     the chip was on screen to be clicked. (`primaryKey`, `primary` in
+     actions.js.)
+2. **Button heuristic.** *Not built yet;* the first cut is tier 1 only. The
+   design, for when it is: runs *after* the frame has laid out, on its live
    (script-less) document (R5). Candidates: anchors with an http(s) href,
    at most 500 considered. A candidate must be visible: non-zero client
    rect inside the document, no ancestor with `opacity` < 0.5,
@@ -261,8 +318,67 @@ and sits below dialogs. At most 200 labels, home-row alphabet. The
 label → URL map is frozen when hints open; a resize, scroll, frame
 replacement or cursor move closes them. Typing a label *selects*: the
 status line shows the full destination (confirmation rules), and `Enter`
-opens it through the browser-opened check (mailto opens compose, as a
-body click would). `Esc` closes.
+opens it through the browser-opened check (a mailto goes to the browser's
+mail handler, as a body click on it does today; see *mailto* below).
+`Esc` closes.
+
+Decided in building it (2026-09-30):
+
+- *Which links.* `a[href]` only (an `<area>`'s rect is its map's image),
+  whose href, as the sanitizer left it, is `mailto:` or an absolute
+  http(s) URL; at most 2000 anchors considered, 200 labelled, in document
+  order. An http(s) link the browser-open check refuses (an IP literal,
+  the app itself) still gets a label, and selecting it shows the refusal
+  and the address; `Enter` opens nothing. A link over 4096 code points,
+  http(s) or mailto, is refused the same way, since it can't be shown in
+  full; a link that silently got no label would read as no link at all.
+- *Visible.* The first client rect with area that survives frame ∩ pane ∩
+  viewport (above the key bar, below the split's sticky title); its
+  centre must hit the anchor or something inside it in the frame
+  (`elementFromPoint`, which also skips `visibility:hidden` and
+  `pointer-events:none`) and hit the frame itself in the app document (so
+  nothing of ours covers it); and the anchor's opacity, multiplied up its
+  ancestors, must be at least 0.5, as for the heuristic.
+- *Labels.* All the same length over `asdfghjkl` (1 up to 9 links, 2 up to
+  81, 3 beyond), so none is a prefix of another. Typing narrows (the rest
+  hide); a complete label selects; a letter after a selection starts a
+  new label; `Backspace` steps back; the arrows, PageUp/PageDown and
+  Home/End scroll the status line (below); anything else is dropped,
+  repeats and every modifier included: Shift+Enter opens nothing. Every key
+  is the session's, from the frame too, and the page never scrolls under
+  it.
+- *Placement.* Each label's whole box, measured once drawn, lies inside
+  the clip: it sits at its link's visible top-left, moved in from any edge
+  it would cross, so a link with a sliver showing still gets a label that
+  can be read. A label that can't fit at all is not drawn, and its link
+  gets none.
+- *Closing.* A resize of the window or of the frame (compared with its
+  size at open, so an image arriving closes them), any scroll (the
+  pane's, the window's, the frame's; not the status line's), the frame
+  being replaced (app.js cancels, and the frame's own `load` closes them
+  too), the cursor moving, the thread re-rendering, or another flash.
+- *Status line.* The prompt, then the selection: `⏎ opens <URL>` (or
+  `writes to` for a mailto), the URL as it will open, its own isolated
+  `<bdi>` with controls drawn, never cut; the line lifts off the key bar
+  and wraps (scrolling past a few lines). A known redirector is marked.
+  Its own scrolling (wheel, scrollbar, or the inspection keys above) is
+  the one scroll that doesn't close hints.
+- *Nothing over it.* The key bar, and the status line in it, stack above
+  the labels (`#hints` is z-index 1, the key bar 2), and while a label is
+  selected any label whose box meets the status line is hidden, the
+  selected one included: the destination `Enter` opens is never
+  obscured.
+- *Owning the line.* While hints are up nothing else writes the status
+  line: any other flash (a sync failure, a tag's result) ends the hint
+  session first (`yieldStatus`), then shows. Deferring the flash instead
+  would keep the destination up, but cancelling is the safer failure:
+  `Enter` is never left armed for a destination no longer on screen.
+- *mailto.* pneu has no compose-from-mailto route today; a body click on a
+  mailto opens it in a new window, which the browser hands to its mail
+  handler. `Enter` on a mailto hint does exactly that
+  (`window.open(url, '_blank', 'noopener,noreferrer')`), so a hint never
+  does more than the click it stands for. Opening it in pneu's compose is
+  a later change, to both.
 
 ## Why these lines
 
