@@ -1352,8 +1352,11 @@
       help.addEventListener('click', function () { help.close(); });
       document.body.appendChild(help);
     }
-    if (help.open) help.close();
-    else help.showModal();
+    if (help.open) { help.close(); return; }
+    var info = help.querySelector('.syncinfo');
+    if (info) info.replaceWith(syncDetails());
+    else help.prepend(syncDetails());
+    help.showModal();
   }
 
   // ---- attachment viewer --------------------------------------------------
@@ -1567,27 +1570,33 @@
 
   function goView(e) { location.assign(VIEWS[e.key]); }
 
-  // R: POST /sync queues a sync on every account; the SSE `sync` event
-  // re-renders the list if the pull brought anything.
+  // R: POST /sync queues a sync on every account; the status line says
+  // Checking… from the keypress, and the SSE `sync` event re-renders the
+  // list if the pull brought anything.
   function syncNow() {
-    flash('Syncing…');
     postSync().catch(function (err) { fail('Sync', err); });
   }
 
+  // postSync asks for a sync and shows Checking… until the server's first
+  // word on it (lineAsked).
   function postSync() {
+    lineAsk();
     return fetch('/sync', { method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/json' } })
       .then(function (res) {
         return res.json().catch(function () { return null; }).then(function (data) {
           if (!res.ok || !data || !data.ok) throw new Error((data && data.error) || 'HTTP ' + res.status);
         });
-      });
+      })
+      .catch(function (err) { lineAsked(); throw err; });
   }
 
-  // Coming back to the window asks for a sync, quietly, so mail the phone
-  // just announced shows up a moment later (an idle sync is about a second)
-  // instead of on the next tick. A blur that only moved focus into a mail
-  // frame isn't leaving: the document still has focus. A launch syncs from
-  // the server (/open). At most one request per RETURN_SYNC_GAP.
+  // Coming back to the window asks for a sync, so mail the phone just
+  // announced shows up a moment later (an idle sync is about a second)
+  // instead of on the next tick; the status line says Checking… meanwhile.
+  // A blur that only moved focus into a mail frame isn't leaving: the
+  // document still has focus. A launch is `pneu open`'s, over the control
+  // socket. At most one request per RETURN_SYNC_GAP; the age refreshes
+  // every time.
   var RETURN_SYNC_GAP = 20000;
   var away = false;
   var returnSyncAt = 0;
@@ -1601,6 +1610,7 @@
   function returnedToWindow() {
     if (!away || document.hidden) return;
     away = false;
+    renderLine();
     if (Date.now() - returnSyncAt < RETURN_SYNC_GAP) return;
     returnSyncAt = Date.now();
     postSync().catch(function () { /* the next tick, or R, tries again */ });
@@ -1743,49 +1753,6 @@
       return;
     }
     reloadTimer = setTimeout(reloadWhenQuiet, Math.max(wait, 500));
-  }
-
-  // ---- sync glyph ---------------------------------------------------------
-  // The header's far-right glyph (SPEC "Sync state"): a braille spinner while
-  // any account's sync runs, empty when idle. The per-account cap retires a
-  // spin whose end event was lost across an SSE reconnect; a real sync is
-  // bounded by gmi's own 10m timeout, so the cap sits just above it.
-
-  var SPIN_FRAMES = '⣾⣽⣻⢿⡿⣟⣯⣷';
-  var spinEl = document.getElementById('sync');
-  var spinOn = {}; // account -> cap timer
-  var spinTimer = 0;
-  var spinFrame = 0;
-
-  function spinDraw() {
-    if (!spinEl) return;
-    var any = Object.keys(spinOn).length > 0;
-    if (any && !spinTimer) {
-      spinEl.textContent = SPIN_FRAMES[spinFrame];
-      spinTimer = setInterval(function () {
-        spinFrame = (spinFrame + 1) % SPIN_FRAMES.length;
-        spinEl.textContent = SPIN_FRAMES[spinFrame];
-      }, 120);
-    } else if (!any && spinTimer) {
-      clearInterval(spinTimer);
-      spinTimer = 0;
-      spinEl.textContent = '';
-    }
-  }
-
-  function spinStart(account) {
-    account = account || '';
-    clearTimeout(spinOn[account]);
-    spinOn[account] = setTimeout(function () { spinStop(account); }, 11 * 60 * 1000);
-    spinDraw();
-  }
-
-  function spinStop(account) {
-    account = account || '';
-    if (!(account in spinOn)) return; // an end whose start predates this page
-    clearTimeout(spinOn[account]);
-    delete spinOn[account];
-    spinDraw();
   }
 
   // ---- accounts -----------------------------------------------------------
@@ -1934,6 +1901,7 @@
     if (!was) acctOrder.push(a.name);
     accounts[a.name] = a;
     renderAccounts();
+    lineNews(a);
     // New mail lands newest first while a pull downloads: show it now and then.
     if (a.state === 'pulling' && a.progress && a.progress.phase === 'content' && Date.now() - pullRefreshAt > PULL_REFRESH) {
       pullRefreshAt = Date.now();
@@ -1943,19 +1911,212 @@
 
   renderAccounts();
 
+  // ---- status line --------------------------------------------------------
+  // The header's far right (SPEC "Sync state"): how current the view is,
+  // from each account's sync state (data-accounts at load, SSE `account`
+  // after). In order: Checking… while any account's sync is queued or
+  // running, or a request (R, focus) has had no answer yet; an account
+  // failing; stale; how long ago the stalest account synced. Only ready
+  // accounts count: one in its first pull or waiting on setup is the
+  // #accounts strip's. Client mode adds link-down and update states here
+  // (docs/client.md). A click, or ?, shows the details.
+
+  // An account is failing at the bar's threshold (BarWidget.qml
+  // accountSick): any failure.
+  var SICK_FAILURES = 1;
+  // A queued or running flag with no news this long lost its end event
+  // across an SSE reconnect; a sync is bounded by gmi's own 10m timeout.
+  var LINE_STUCK = 11 * 60 * 1000;
+  // A request with no answer this long (the server never said queued)
+  // stops showing Checking….
+  var ASK_WAIT = 10000;
+  var AGE_TICK = 30000;
+  var SPIN_FRAMES = '⣾⣽⣻⢿⡿⣟⣯⣷';
+
+  var lineEl = document.getElementById('sync');
+  var lineText = lineEl && lineEl.querySelector('.text');
+  var lineSpin = lineEl && lineEl.querySelector('.spin');
+  var lineLive = document.getElementById('sync-live');
+  var syncEvery = (Number(lineEl && lineEl.dataset.every) || 120) * 1000;
+  var busySince = {}; // account -> when it last said queued or running
+  var askedAt = 0;    // a POST /sync the server hasn't answered with news
+  var askTimer = 0;
+  var spinTimer = 0;
+  var spinFrame = 0;
+  var ageTimer = 0;
+  var lineSaid = null; // the last state announced (#sync-live)
+  var syncInfo = null; // dialog#syncinfo, once opened
+
+  acctOrder.forEach(function (n) { if (accounts[n].queued || accounts[n].running) busySince[n] = Date.now(); });
+
+  function readyAccounts() {
+    return acctOrder.map(function (n) { return accounts[n]; }).filter(function (a) { return a && a.state === 'ready'; });
+  }
+
+  function busy(a) {
+    return !!(a.queued || a.running) && Date.now() - (busySince[a.name] || 0) < LINE_STUCK;
+  }
+
+  // ago words an age as the line shows it.
+  function ago(ms) {
+    var m = Math.floor(ms / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return m + 'm ago';
+    if (m < 48 * 60) return Math.floor(m / 60) + 'h ago';
+    return Math.floor(m / (24 * 60)) + 'd ago';
+  }
+
+  // lineState is the line's state: { state, text }, state one of checking,
+  // error, stale, fresh, or '' (nothing to say: no ready account has synced).
+  function lineState() {
+    var accts = readyAccounts();
+    if (askedAt || accts.some(busy)) return { state: 'checking', text: 'Checking…' };
+    var sick = accts.filter(function (a) { return (a.failures || 0) >= SICK_FAILURES; });
+    if (sick.length) return { state: 'error', text: sick[0].name + ': sync failing' + (sick.length > 1 ? ' +' + (sick.length - 1) : '') };
+    // The view is only as fresh as its stalest account.
+    var oldest = NaN;
+    accts.forEach(function (a) {
+      var t = a.lastSync ? Date.parse(a.lastSync) : NaN;
+      if (!isNaN(t) && !(t >= oldest)) oldest = t;
+    });
+    if (isNaN(oldest)) return { state: '', text: '' };
+    var age = Math.max(0, Date.now() - oldest);
+    return { state: age > 3 * syncEvery ? 'stale' : 'fresh', text: 'Updated ' + ago(age) };
+  }
+
+  function renderLine() {
+    if (!lineEl) return;
+    var st = lineState();
+    lineEl.dataset.state = st.state;
+    lineText.textContent = st.text;
+    lineEl.setAttribute('aria-label', (st.text || 'Sync') + ' · details');
+    if (st.state === 'checking' && !spinTimer) {
+      lineSpin.textContent = SPIN_FRAMES[spinFrame];
+      spinTimer = setInterval(function () {
+        spinFrame = (spinFrame + 1) % SPIN_FRAMES.length;
+        lineSpin.textContent = SPIN_FRAMES[spinFrame];
+      }, 120);
+    } else if (st.state !== 'checking' && spinTimer) {
+      clearInterval(spinTimer);
+      spinTimer = 0;
+      lineSpin.textContent = '';
+    }
+    // The age ticks over only while one shows: no timer runs for nothing.
+    clearTimeout(ageTimer);
+    ageTimer = st.state === 'fresh' || st.state === 'stale' ? setTimeout(renderLine, AGE_TICK) : 0;
+    // Announce a change of state, not the age ticking over.
+    var said = st.state + (st.state === 'error' ? st.text : '');
+    if (lineLive && lineSaid !== null && said !== lineSaid) lineLive.textContent = st.text;
+    lineSaid = said;
+    if (syncInfo && syncInfo.open) syncInfo.replaceChildren(syncDetails());
+    var inHelp = help && help.open && help.querySelector('.syncinfo');
+    if (inHelp) inHelp.replaceWith(syncDetails());
+  }
+
+  // lineAsk: a sync was just asked for; Checking… until lineAsked.
+  function lineAsk() {
+    askedAt = Date.now();
+    clearTimeout(askTimer);
+    askTimer = setTimeout(lineAsked, ASK_WAIT);
+    renderLine();
+  }
+
+  function lineAsked() {
+    if (!askedAt) return;
+    askedAt = 0;
+    clearTimeout(askTimer);
+    renderLine();
+  }
+
+  // lineNews takes an account's new view (SSE `account`) or a sync's start
+  // or end. News of a queued or running sync answers a request.
+  function lineNews(a) {
+    if (a.queued || a.running) {
+      busySince[a.name] = Date.now();
+      askedAt = 0;
+      clearTimeout(askTimer);
+    }
+    renderLine();
+  }
+
+  // syncEvent applies `syncing` (running) or a sync's `sync` end to the
+  // account's copy ahead of the `account` view that follows each.
+  function syncEvent(name, running) {
+    var a = name && accounts[name];
+    if (!a) return;
+    a.running = running;
+    if (running) a.queued = false;
+    lineNews(a);
+  }
+
+  function clock(t) {
+    var d = new Date(t);
+    var today = new Date().toDateString() === d.toDateString();
+    return (today ? '' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' ') +
+      d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+
+  // syncDetails is the details: each account's last sync, what it's doing,
+  // and its failures, for dialog#syncinfo and the top of the ? overlay.
+  function syncDetails() {
+    var box = el('div', 'syncinfo');
+    box.appendChild(el('h2', null, 'Sync'));
+    var dl = el('dl');
+    acctOrder.forEach(function (n) {
+      var a = accounts[n];
+      var dd = el('dd');
+      var t = a.lastSync ? Date.parse(a.lastSync) : NaN;
+      dd.appendChild(document.createTextNode(isNaN(t) ? 'never synced' : 'synced ' + clock(t) + ' '));
+      if (!isNaN(t)) dd.appendChild(el('span', 'when', '(' + ago(Date.now() - t) + ')'));
+      var doing = a.state !== 'ready' ? ({ pulling: 'first download', 'needs-pull': 'waiting to download', reauth: 'needs reconnecting',
+        unconfigured: 'not set up', unauthorized: 'not connected' })[a.state] || a.state
+        : busy(a) ? (a.running ? 'checking now' : 'check queued') : '';
+      if (doing) dd.appendChild(document.createTextNode(' · ' + doing));
+      if (a.failures > 0 || a.error) {
+        dd.appendChild(el('br'));
+        dd.appendChild(el('span', 'bad', (a.failures > 0 ? a.failures + ' failed sync' + (a.failures === 1 ? '' : 's') : 'error') +
+          (a.error ? ': ' + a.error : '')));
+      }
+      dl.appendChild(el('dt', null, n));
+      dl.appendChild(dd);
+    });
+    if (!acctOrder.length) dl.appendChild(el('dd', null, 'no accounts'));
+    box.appendChild(dl);
+    var every = syncEvery < 60000 ? Math.round(syncEvery / 1000) + 's' : Math.round(syncEvery / 60000) + 'm';
+    var foot = el('p', 'foot', 'Checks every ' + every + ' · ');
+    foot.appendChild(el('kbd', null, 'R'));
+    foot.appendChild(document.createTextNode(' checks now'));
+    box.appendChild(foot);
+    return box;
+  }
+
+  function showSyncInfo() {
+    if (!syncInfo) {
+      syncInfo = document.createElement('dialog');
+      syncInfo.id = 'syncinfo';
+      syncInfo.addEventListener('click', function () { syncInfo.close(); });
+      document.body.appendChild(syncInfo);
+    }
+    syncInfo.replaceChildren(syncDetails());
+    syncInfo.showModal();
+  }
+
+  if (lineEl) lineEl.addEventListener('click', showSyncInfo);
+  renderLine();
+
   function openEvents() {
     if (events || !window.EventSource) return;
     events = new EventSource('/events');
     events.addEventListener('syncing', function (e) {
       var d = null;
-      try { d = JSON.parse(e.data); } catch (err) { /* spin unattributed */ }
-      spinStart(d && d.account);
+      try { d = JSON.parse(e.data); } catch (err) { return; }
+      syncEvent(d.account, true);
     });
     events.addEventListener('sync', function (e) {
       var d = null;
       try { d = JSON.parse(e.data); } catch (err) { /* reload anyway */ }
       if (d && d.op === 'push' && !d.changed) return;
-      spinStop(d && d.account);
+      if (d && d.op !== 'push') syncEvent(d.account, false);
       if (d && d.changed === false) return; // ended, but pulled nothing (or failed)
       reloadWhenQuiet();
     });

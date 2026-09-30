@@ -58,25 +58,40 @@ func TestSyncNowWithoutSyncer(t *testing.T) {
 	}
 }
 
-// A launch (/open with the nonce) syncs every account, so mail the phone just
-// announced is on its way as the window opens. The session branch of /open, a
-// GET any localhost page can fire, and a refused nonce queue nothing.
-func TestLaunchSyncsEveryAccount(t *testing.T) {
+// /open queues no sync, nonce or not: `pneu open` sends the launch over the
+// control socket (Server.Launch), which no page can reach. Launch queues
+// every account and tells open pages before it returns, and a page rendered
+// after it says so from its first paint.
+func TestLaunchQueuesEveryAccount(t *testing.T) {
 	f := newTagFixture(t)
 	_, open := startLaunch(t, f.s)
-	if w := do(f.s, "GET", "/open?nonce=spent", withCookie); w.Code != http.StatusFound {
-		t.Fatalf("open with session: %d", w.Code)
-	}
-	if w := do(f.s, "GET", "/open?nonce=wrong", nil); w.Code != http.StatusForbidden {
-		t.Fatalf("bad nonce: %d", w.Code)
+	for _, u := range []string{open, "/open?nonce=spent"} {
+		if w := do(f.s, "GET", u, withCookie); w.Code != http.StatusFound {
+			t.Fatalf("open %s: %d", u, w.Code)
+		}
 	}
 	if f.sync.syncs != 0 {
-		t.Fatalf("non-launch opens queued %d syncs", f.sync.syncs)
+		t.Fatalf("/open queued %d syncs", f.sync.syncs)
 	}
-	if w := do(f.s, "GET", open, nil); w.Code != http.StatusFound {
-		t.Fatalf("launch: %d", w.Code)
-	}
+
+	events := f.s.Hub.subscribe()
+	defer f.s.Hub.unsubscribe(events)
+	f.s.Launch()
 	if f.sync.syncs != len(f.env.Accounts) {
 		t.Fatalf("SyncNow calls = %d, want one per account (%d)", f.sync.syncs, len(f.env.Accounts))
+	}
+	for range f.env.Accounts {
+		select {
+		case msg := <-events:
+			if !strings.HasPrefix(string(msg), "event: account\n") || !strings.Contains(string(msg), `"queued":true`) {
+				t.Fatalf("event %q", msg)
+			}
+		default:
+			t.Fatal("Launch returned before telling the page")
+		}
+	}
+	w := do(f.s, "GET", "/", withCookie)
+	if body := w.Body.String(); !strings.Contains(body, "&#34;queued&#34;:true") {
+		t.Fatalf("page after launch doesn't say queued: %s", body[:min(len(body), 2000)])
 	}
 }

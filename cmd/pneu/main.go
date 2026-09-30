@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/jmckible/pneu/internal/config"
+	"github.com/jmckible/pneu/internal/control"
 	"github.com/jmckible/pneu/internal/gmi"
 	"github.com/jmckible/pneu/internal/notmuch"
 	"github.com/jmckible/pneu/internal/web"
@@ -150,18 +151,20 @@ func serve(args []string) error {
 		gmiAccounts = append(gmiAccounts, gmi.Account{Name: a.Name, GmiDir: a.GmiDir, NotmuchConfig: a.NotmuchConfig})
 	}
 	syncer, err := gmi.New(gmiAccounts, gmi.Options{
-		// The header's sync glyph spins between `syncing` and `sync`. Pushes
-		// (a `gmi sync` after our own writes, see gmi.OpPush) broadcast
-		// neither unless their pull brought more than the labels they pushed:
-		// a keystroke's own push must not reload the list out from under the
-		// row it just removed. Every sync's end is broadcast — the glyph must
-		// stop on a pull that brought nothing, or failed — but only `changed`
-		// makes the client re-render the list.
+		// The header's status line reads each account's queued/running
+		// from SSE `account`, sent as a sync starts and ends; `syncing`
+		// and `sync` bracket it too. Pushes (a `gmi sync` after our own
+		// writes, see gmi.OpPush) broadcast neither unless their pull
+		// brought more than the labels they pushed: a keystroke's own push
+		// must not reload the list out from under the row it just removed.
+		// Every sync's end is broadcast — the line must leave Checking… on
+		// a pull that brought nothing, or failed — but only `changed` makes
+		// the client re-render the list.
 		OnStart: func(account string, op gmi.Op) {
 			if op == gmi.OpSync {
 				srv.Hub.Broadcast("syncing", map[string]any{"account": account})
 			}
-			if op == gmi.OpPull {
+			if op == gmi.OpSync || op == gmi.OpPull {
 				srv.AccountChanged(account)
 			}
 		},
@@ -191,11 +194,17 @@ func serve(args []string) error {
 		return err
 	}
 	srv.Syncer = syncer
+	srv.SyncInterval = syncer.Interval()
 	// Theme switches restyle open pages (SSE `theme`).
 	go srv.WatchTheme(ctx, web.ThemePoll)
 	syncDone := make(chan struct{})
 	go func() { syncer.Run(ctx); close(syncDone) }()
 
+	// Before Serve: `pneu open` sends `launch` once HTTP answers.
+	ctl := listenControl(srv)
+	if ctl != nil {
+		defer ctl.Close() // an early return; Close again is harmless
+	}
 	// Bound, so a launcher that reads the nonce now will find a server.
 	if err := srv.Auth.StartLaunch(launchPath); err != nil {
 		return err
@@ -214,6 +223,9 @@ func serve(args []string) error {
 		stop() // the status file still gets its running:false
 	case <-ctx.Done():
 	}
+	if ctl != nil {
+		ctl.Close() // a stopping server takes no launches
+	}
 	<-statusDone
 	if serveErr != nil {
 		return serveErr
@@ -229,6 +241,27 @@ func serve(args []string) error {
 	<-syncDone
 	return nil
 }
+
+// listenControl starts the control socket (docs/client.md). Without it the
+// server still runs; `pneu open` then opens the window without its sync
+// and says why.
+func listenControl(srv *web.Server) *control.Server {
+	path, err := control.SocketPath()
+	if err != nil {
+		log.Printf("pneu: no control socket: %v; pneu open won't sync on launch", err)
+		return nil
+	}
+	ctl, err := control.Listen(path, control.Handler{Launch: srv.Launch})
+	if err != nil {
+		log.Printf("pneu: no control socket: %v; pneu open won't sync on launch", err)
+		return nil
+	}
+	return ctl
+}
+
+// launchWait bounds `pneu open`'s launch request. The answer comes once
+// every account is queued, which takes no gmi run.
+const launchWait = time.Second
 
 // launcher is Omarchy's launch-or-focus for web apps: it focuses a window
 // whose class or title matches the pattern, else opens the URL as an --app
@@ -246,8 +279,9 @@ const windowPattern = "pneu.localhost__open"
 // the unit may still be starting.
 const openWait = 10 * time.Second
 
-// openWindow focuses the pneu window, or opens one on a fresh launch URL. The URL
-// carries only the single-use nonce, never the install token.
+// openWindow queues a sync, then focuses the pneu window or opens one on a
+// fresh launch URL. The URL carries only the single-use nonce, never the
+// install token.
 func openWindow(args []string) error {
 	cfg, err := loadConfig(flag.NewFlagSet("pneu open", flag.ContinueOnError), args)
 	if err != nil {
@@ -268,6 +302,14 @@ func openWindow(args []string) error {
 			exec.Command(n, "-u", "critical", "pneu", "Server not running: systemctl --user status pneu").Run()
 		}
 		return err
+	}
+	// The one launch signal: whatever the window does next (a new window, a
+	// restored one with its cookie, a focus), mail is on its way. A failure
+	// costs only that sync; the window still opens.
+	if path, err := control.SocketPath(); err != nil {
+		fmt.Fprintf(os.Stderr, "pneu open: no launch sync: %v\n", err)
+	} else if _, err := control.Send(path, control.Launch, launchWait); err != nil {
+		fmt.Fprintf(os.Stderr, "pneu open: no launch sync: %v\n", err)
 	}
 	// The launcher evals its command line, where the URL's '?' is a glob;
 	// from / nothing can match it.

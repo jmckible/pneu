@@ -45,8 +45,6 @@ type Auth struct {
 	Host   string // e.g. "pneu.localhost:7317"
 	Origin string // e.g. "http://pneu.localhost:7317"
 	token  string
-	// OnLaunch runs after /open accepts a launch nonce: a new window.
-	OnLaunch func()
 
 	mu         sync.Mutex
 	nonce      string // "" until StartLaunch: /open refuses everything
@@ -165,7 +163,9 @@ func (a *Auth) rotateLocked() error {
 }
 
 // Open handles GET /open?nonce=N: check and retire the nonce, plant the
-// cookie, go home.
+// cookie, go home. It starts no sync: `pneu open` queues the launch sync
+// over the control socket first, however the window then opens (a nonce,
+// a cookie already there, a focus), and no page can reach that socket.
 func (a *Auth) Open(w http.ResponseWriter, r *http.Request) {
 	// Chromium restores --app windows after a crash by reloading their URL,
 	// which is a spent nonce. A request that already carries the session is
@@ -201,9 +201,6 @@ func (a *Auth) Open(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	})
-	if a.OnLaunch != nil {
-		a.OnLaunch()
-	}
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 

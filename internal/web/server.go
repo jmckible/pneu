@@ -43,6 +43,9 @@ type Server struct {
 	TagTimeout time.Duration
 	// SendWait bounds a send's wait for the account lock; 0 means SendWait.
 	SendWait time.Duration
+	// SyncInterval is the engine's sync period, for the status line's
+	// staleness threshold; 0 leaves the page its default.
+	SyncInterval time.Duration
 
 	byName map[string]notmuch.Account
 	order  map[string]int
@@ -98,15 +101,6 @@ func New(accounts []notmuch.Account, host, token string) (*Server, error) {
 	for i, a := range accounts {
 		s.byName[a.Name] = a
 		s.order[a.Name] = i
-	}
-
-	// Opening the window is when you want the mail your phone just announced.
-	// Only a nonce launch counts: the session-cookie branch of /open is a GET
-	// any localhost page can fire.
-	s.Auth.OnLaunch = func() {
-		if s.Syncer != nil {
-			s.syncAll()
-		}
 	}
 
 	mux := http.NewServeMux()
@@ -180,8 +174,12 @@ type Page struct {
 	Query  string // echoed into the search box
 	View   string // the index view, for the header nav; "" on thread and compose pages
 	// Accounts is the #accounts strip's data-accounts attribute: every
-	// account's onboarding state, which app.js renders and SSE keeps current.
+	// account's onboarding and sync state, which app.js renders (the strip
+	// and the status line) and SSE keeps current.
 	Accounts template.HTMLAttr
+	// SyncEvery is the sync period in seconds (0: unknown), the status
+	// line's stale threshold.
+	SyncEvery int
 }
 
 // NavLink is one header nav entry.
@@ -212,7 +210,7 @@ func (p Page) Nav() []NavLink {
 }
 
 func (s *Server) page(title, query string) Page {
-	return Page{Origin: s.Auth.Origin, Title: title, Query: query, Accounts: s.accountsJSON()}
+	return Page{Origin: s.Auth.Origin, Title: title, Query: query, Accounts: s.accountsJSON(), SyncEvery: int(s.SyncInterval / time.Second)}
 }
 
 func (s *Server) render(w http.ResponseWriter, status int, page string, data any) {

@@ -120,6 +120,12 @@ type Status struct {
 	State    State
 	Progress *Progress // the first pull's, while State is StatePulling
 	Authing  bool      // a re-auth is waiting on the consent screen
+	// Queued: a sync was asked for (SyncNow, or the engine's own follow-up)
+	// and hasn't started. Syncing: a sync or first pull has started (it may
+	// still wait on the slot or flock); a push, send or check never sets it,
+	// so a keystroke's push doesn't read as checking for mail.
+	Queued  bool
+	Syncing bool
 }
 
 // ErrUnknownAccount is returned for an account name New wasn't given.
@@ -162,7 +168,7 @@ type account struct {
 	Account
 
 	run     chan struct{} // cap 1: serializes gmi invocations; a mutex a waiter can abandon
-	syncReq chan struct{} // cap 1: pending SyncNow requests collapse
+	syncReq chan struct{} // cap 1: pending SyncNow requests collapse; under smu with status.Queued (queueSync)
 	pushDue chan struct{} // cap 1: debounced push ready; pending pushes collapse
 
 	pmu       sync.Mutex
@@ -460,13 +466,42 @@ func (e *Engine) touchLate(ctx context.Context, a *account) {
 
 // SyncNow queues an immediate sync (after any in-flight run). Repeated calls
 // before it starts collapse to one. The periodic timer restarts after it.
+// Status says Queued from the moment it returns.
 func (e *Engine) SyncNow(account string) error {
 	a, ok := e.accts[account]
 	if !ok {
 		return fmt.Errorf("%w %q", ErrUnknownAccount, account)
 	}
-	signal(a.syncReq)
+	a.queueSync()
 	return nil
+}
+
+// Interval is the sync period, for the page's staleness threshold.
+func (e *Engine) Interval() time.Duration { return e.opts.Interval }
+
+// queueSync asks the loop for a sync. Queued and the signal change together
+// under smu, and startSync clears both together, so Queued is true exactly
+// while a request waits: in the channel, or taken by the loop but not yet
+// started.
+func (a *account) queueSync() {
+	a.smu.Lock()
+	a.status.Queued = true
+	signal(a.syncReq)
+	a.smu.Unlock()
+}
+
+// startSync marks a sync begun, answering every request made before it
+// (the timer's or a request's, whichever woke the loop); running false
+// drops the requests without a run (nothing to run yet).
+func (a *account) startSync(running bool) {
+	a.smu.Lock()
+	a.status.Queued = false
+	a.status.Syncing = running
+	select {
+	case <-a.syncReq:
+	default:
+	}
+	a.smu.Unlock()
 }
 
 // Exec runs `gmi args...` in the account's lieer dir with stdin, serialized
@@ -589,6 +624,9 @@ func (e *Engine) do(ctx context.Context, a *account, op Op) {
 	switch st := FileState(a.GmiDir); st {
 	case StateUnconfigured, StateUnauthorized:
 		// Nothing to run until `pneu account add` / `pneu account auth`.
+		if op == OpSync {
+			a.startSync(false)
+		}
 		err := ErrNotConfigured
 		if st == StateUnauthorized {
 			err = ErrNotAuthorized
@@ -611,6 +649,10 @@ func (e *Engine) do(ctx context.Context, a *account, op Op) {
 		}
 		op = OpPull
 	}
+	// Before OnStart, so a watcher reading Status there sees it syncing.
+	if op == OpSync || op == OpPull {
+		a.startSync(true)
+	}
 	if e.opts.OnStart != nil {
 		e.opts.OnStart(a.Name, op)
 	}
@@ -621,10 +663,12 @@ func (e *Engine) do(ctx context.Context, a *account, op Op) {
 	} else {
 		r, ok = e.invoke(ctx, a, op)
 	}
+	a.smu.Lock()
+	a.status.Syncing = false
 	if !ok {
+		a.smu.Unlock()
 		return // shut down while waiting for the lock or mid-pull; not a failure
 	}
-	a.smu.Lock()
 	if r.Err != nil {
 		a.status.Failures++
 		a.status.LastErr = r.Err
@@ -651,7 +695,7 @@ func (e *Engine) do(ctx context.Context, a *account, op Op) {
 	}
 	if op == OpPull && r.Err == nil {
 		e.opts.Logf("gmi: [%s] first pull complete in %v", a.Name, r.Duration.Round(time.Second))
-		signal(a.syncReq) // mail that arrived during the pull, at once
+		a.queueSync() // mail that arrived during the pull, at once
 	}
 }
 

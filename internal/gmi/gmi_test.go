@@ -581,3 +581,37 @@ func TestSyncCleansTmp(t *testing.T) {
 		t.Fatal("sync ran with an orphan in mail/tmp")
 	}
 }
+
+// Queued holds from SyncNow until a sync starts, which answers every request
+// made before it; Syncing from then until it ends. A push sets neither.
+func TestQueuedAndSyncing(t *testing.T) {
+	f := newFixture(t)
+	t.Setenv("FAKEGMI_SLEEP", "0.3")
+	e := mustNew(t, []Account{f.account("personal")}, f.opts(Options{}))
+	status := func() Status { st, _ := e.Status("personal"); return st }
+
+	e.SyncNow("personal") // before Run: Run's first sync answers it
+	if st := status(); !st.Queued || st.Syncing {
+		t.Fatalf("after SyncNow: %+v", st)
+	}
+	start(t, e)
+	waitFor(t, 2*time.Second, "first sync", func() bool { st := status(); return st.Syncing && !st.Queued })
+	e.SyncNow("personal") // lands during the run: one more after it
+	if st := status(); !st.Queued || !st.Syncing {
+		t.Fatalf("SyncNow during a sync: %+v", st)
+	}
+	waitFor(t, 3*time.Second, "both syncs", func() bool {
+		st := status()
+		return len(f.runs()) == 2 && !f.runs()[1].end.IsZero() && !st.Queued && !st.Syncing
+	})
+	time.Sleep(100 * time.Millisecond)
+	if n := f.count("sync"); n != 2 {
+		t.Fatalf("%d syncs, want 2", n)
+	}
+
+	e.RequestPush("personal")
+	waitFor(t, 2*time.Second, "push", func() bool { return status().Running })
+	if st := status(); st.Syncing || st.Queued {
+		t.Fatalf("a push reads as a sync: %+v", st)
+	}
+}

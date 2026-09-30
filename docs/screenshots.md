@@ -13,8 +13,9 @@ the lieer files so both accounts count as ready, runs a pneu server there on
 port 7318 with `testdata/fakegmi` in place of lieer, and drives headless
 Chromium over the DevTools protocol (`scripts/screenshot.mjs`): it opens a
 session through the launch nonce, loads each path, and captures it at 2× by
-default. Nothing touches your install: token, nonce, config and theme all live
-in the throwaway directory, which is removed afterwards.
+default. Nothing touches your install: token, nonce, config, theme and
+control socket all live in the throwaway directory, which is removed
+afterwards.
 
 - **Paths.** `/` is the inbox. `/t/<account>/<thread>` opens a thread; at a
   width past the split it shows beside the inbox. An empty search

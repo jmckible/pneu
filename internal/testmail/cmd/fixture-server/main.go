@@ -4,11 +4,13 @@
 //
 //	dir=$(mktemp -d)
 //	go run ./internal/testmail/cmd/fixture-server -dir "$dir" -port 7318
-//	PATH=$PWD/testdata/fakegmi:$PATH XDG_STATE_HOME=$dir/state \
+//	mkdir -m 700 "$dir/run"
+//	PATH=$PWD/testdata/fakegmi:$PATH XDG_STATE_HOME=$dir/state XDG_RUNTIME_DIR=$dir/run \
 //	  go run ./cmd/pneu -config "$dir/config.json" -listen 127.0.0.1:7318
 //
-// fakegmi on PATH keeps the server's sync ticker off the network, and
-// XDG_STATE_HOME keeps it off your real install token.
+// fakegmi on PATH keeps the server's sync ticker off the network,
+// XDG_STATE_HOME keeps it off your real install token, and XDG_RUNTIME_DIR
+// off your real control socket (a real `pneu open` would launch it).
 package main
 
 import (

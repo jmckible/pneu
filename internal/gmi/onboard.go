@@ -414,7 +414,7 @@ func (e *Engine) Reauth(ctx context.Context, account string) (string, error) {
 			a.smu.Unlock()
 			release()
 			e.opts.Logf("gmi: [%s] credentials work again; nothing to re-authorize", a.Name)
-			signal(a.syncReq)
+			a.queueSync()
 			return "", ErrAlreadyConnected
 		}
 		if !errors.Is(err, ErrReauth) {
@@ -486,7 +486,7 @@ func (e *Engine) Reauth(ctx context.Context, account string) (string, error) {
 		release() // after the status is right: the next run must see it
 		if err == nil {
 			e.opts.Logf("gmi: [%s] re-authorized", a.Name)
-			signal(a.syncReq)
+			a.queueSync()
 		} else {
 			e.opts.Logf("gmi: [%s] re-auth failed: %v", a.Name, err)
 		}

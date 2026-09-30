@@ -38,6 +38,7 @@ type fakeSyncer struct {
 	// account -> the changes of each NoteWrite call
 	noteChanges map[string][][]string
 	syncs       int                   // SyncNow calls
+	queued      map[string]bool       // accounts SyncNow was called for: Status says Queued
 	sent        []sentMsg             // every Send, failed ones included
 	sendErr     error                 // Send's answer
 	sendOut     string                // Send's Result.Output
@@ -113,25 +114,31 @@ func (f *fakeSyncer) RequestPush(account string) error {
 	return nil
 }
 
-func (f *fakeSyncer) SyncNow(string) error {
+func (f *fakeSyncer) SyncNow(account string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.syncs++
+	if f.queued == nil {
+		f.queued = map[string]bool{}
+	}
+	f.queued[account] = true
 	return nil
 }
 
 func (f *fakeSyncer) Status(account string) (gmi.Status, error) {
 	f.mu.Lock()
 	st, ok := f.states[account]
+	queued := f.queued[account]
 	f.mu.Unlock()
-	if ok {
-		return st, nil
+	if !ok {
+		st = gmi.Status{LastSync: time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC), Pulled: true, State: gmi.StateReady}
+		st.LastPush = st.LastSync.Add(time.Minute)
+		if account == "work" {
+			st = gmi.Status{LastErr: errors.New("gmi exited 1"), Failures: 2, Running: true, Pulled: true, State: gmi.StateReady}
+		}
 	}
-	if account == "work" {
-		return gmi.Status{LastErr: errors.New("gmi exited 1"), Failures: 2, Running: true, Pulled: true, State: gmi.StateReady}, nil
-	}
-	at := time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC)
-	return gmi.Status{LastSync: at, LastPush: at.Add(time.Minute), Pulled: true, State: gmi.StateReady}, nil
+	st.Queued = st.Queued || queued
+	return st, nil
 }
 
 func (f *fakeSyncer) count(account string) int {

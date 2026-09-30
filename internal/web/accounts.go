@@ -20,8 +20,9 @@ import (
 	"github.com/jmckible/pneu/internal/gmi"
 )
 
-// accountView is one account's state, as status.json, GET /status, the SSE
-// `account` event and the page's #accounts strip all carry it.
+// accountView is one account's state, as the SSE `account` event and the
+// page's data-accounts carry it: the #accounts strip and the header's
+// status line both render from it.
 type accountView struct {
 	Name     string        `json:"name"`
 	State    gmi.State     `json:"state"`
@@ -30,6 +31,9 @@ type accountView struct {
 	Error    *string       `json:"error"`    // null after any success
 	Authing  bool          `json:"authing"`  // a re-auth waits on the consent screen
 	Progress *progressView `json:"progress"` // the first pull's, while pulling
+	LastSync *string       `json:"lastSync"` // RFC 3339; null until the first successful sync
+	Queued   bool          `json:"queued"`   // a sync was asked for and hasn't started
+	Running  bool          `json:"running"`  // a sync or first pull runs (never a push)
 }
 
 type progressView struct {
@@ -42,7 +46,12 @@ type progressView struct {
 }
 
 func viewOf(name string, st gmi.Status) accountView {
-	v := accountView{Name: name, State: st.State, Pulled: st.Pulled, Failures: st.Failures, Authing: st.Authing}
+	v := accountView{Name: name, State: st.State, Pulled: st.Pulled, Failures: st.Failures, Authing: st.Authing,
+		Queued: st.Queued, Running: st.Syncing}
+	if !st.LastSync.IsZero() {
+		at := st.LastSync.Format(time.RFC3339)
+		v.LastSync = &at
+	}
 	if st.LastErr != nil {
 		msg := st.LastErr.Error()
 		v.Error = &msg
@@ -115,7 +124,11 @@ type progressMark struct {
 	percent int
 }
 
-// accountMarks remembers progressMark per account for AccountChanged.
+// accountMarks remembers progressMark per account for AccountChanged. mu
+// also spans each read-and-broadcast, so `account` events go out in the
+// order their views were read: the engine's and the handlers' calls race,
+// and a queued view overtaking its sync's end would leave the page
+// checking.
 type accountMarks struct {
 	mu sync.Mutex
 	m  map[string]progressMark
@@ -129,8 +142,10 @@ func (s *Server) AccountChanged(account string) {
 	if s.Syncer == nil {
 		return
 	}
+	s.marks.mu.Lock()
 	st, err := s.Syncer.Status(account)
 	if err != nil {
+		s.marks.mu.Unlock()
 		return
 	}
 	v := viewOf(account, st)
@@ -142,7 +157,6 @@ func (s *Server) AccountChanged(account string) {
 			mark.percent = *v.Progress.Percent
 		}
 	}
-	s.marks.mu.Lock()
 	if s.marks.m == nil {
 		s.marks.m = map[string]progressMark{}
 	}

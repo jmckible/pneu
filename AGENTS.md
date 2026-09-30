@@ -23,8 +23,9 @@ and build order; this file is the working contract. Read PLAN.md before touching
   glyph, like the bar's own icons), so a plugin packaged without `brand/`
   must carry the font. The shell doesn't reload a changed widget; run
   `omarchy-restart-shell`.
-- One binary: `pneu` (or `pneu serve`) is the server; `pneu open` waits for it
-  and launches or focuses the window through `omarchy-launch-or-focus-webapp`
+- One binary: `pneu` (or `pneu serve`) is the server; `pneu open` waits for it,
+  sends `launch` over the control socket (a sync on every account), and
+  launches or focuses the window through `omarchy-launch-or-focus-webapp`
   (pattern `pneu.localhost__open`, the class minus browser prefix and profile);
   `pneu gmi <account> <args>` is the manual lieer run (below);
   `pneu account add|auth|status` sets an account up (INSTALL.md step 5). All
@@ -100,6 +101,14 @@ and build order; this file is the working contract. Read PLAN.md before touching
   install token stays in the token file and the cookie; never log or print it.
   `pneu open` reads the nonce only after the server answers HTTP, which starts
   after the nonce is written, so it never reads a previous run's file.
+- The control socket, `$XDG_RUNTIME_DIR/pneu/control` (`internal/control`,
+  docs/client.md), is the only way a process outside the browser talks to
+  the server, and no page can reach it: one command line per connection
+  from a fixed set (`launch`, `status`), both ends checking `SO_PEERCRED`
+  for our uid, the directory 0700 and ours (`Lstat`, no symlink) or the
+  server runs without it. `/open` starts no sync. A throwaway server
+  (screenshots, the fixture server) sets its own `XDG_RUNTIME_DIR`, or a
+  real `pneu open` could launch it.
 - `~/.local/state/pneu/status.json` (0600, tmp+rename) is the bar widget's
   only input: unread inbox threads, five sender first names, per-account sync
   health, onboarding `state` and first-pull `progress`, `running`, `updated`. The server rewrites it at startup, after every

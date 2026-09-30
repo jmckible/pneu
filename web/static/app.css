@@ -103,9 +103,39 @@ body > header nav kbd {
   margin-right: 1px;
   color: var(--accent);
 }
-/* Sync glyph (SPEC "Sync state"): app.js spins it between the SSE `syncing`
-   and `sync` events, empty when idle. Fixed width so appearing shifts nothing. */
-body > header #sync { flex: none; width: 1ch; text-align: center; color: var(--accent); }
+/* The status line (SPEC "Sync state"): app.js renders it from each
+   account's sync state. Fixed width so a change of state shifts nothing;
+   muted when fresh, accent while checking, hot when stale or failing. A
+   click opens the details (dialog#syncinfo). */
+body > header #sync {
+  flex: none;
+  width: 28ch;
+  padding: 0;
+  font: inherit;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+body > header #sync:hover { color: var(--fg); }
+body > header #sync:focus-visible { outline: 1px dashed var(--accent); }
+body > header #sync[data-state=checking] { color: var(--accent); }
+body > header #sync[data-state=stale], body > header #sync[data-state=error] { color: var(--accent-hot); }
+body > header #sync .spin:not(:empty) { margin-right: 1ch; }
+/* Read to a screen reader, never drawn: #sync-live announces changes of
+   state, not the ticking age. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 /* Accounts that aren't simply working: first download, re-auth, setup
    (app.js renders it from data-accounts and SSE `account`). */
@@ -561,7 +591,9 @@ body[data-keys=compose] #keybar .keys[data-for=compose] { display: block; }
 #status.hint .redirect { color: var(--muted); }
 #status.error { color: color-mix(in srgb, #e06c75 70%, var(--fg)); }
 
-dialog#keys {
+/* The ? overlay, and the status line's details (#syncinfo), which the
+   overlay also opens with. */
+dialog#keys, dialog#syncinfo {
   padding: 12px 2ch 14px;
   color: var(--fg);
   background: var(--bg);
@@ -570,13 +602,17 @@ dialog#keys {
   font: inherit;
   max-width: calc(100vw - 2ch);
 }
-dialog#keys::backdrop { background: rgb(0 0 0 / 0.45); }
-dialog#keys h2 { margin: 0 0 8px; font-size: inherit; color: var(--muted); font-weight: normal; }
-dialog#keys dl + h2 { margin-top: 12px; }
-dialog#keys dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 3ch; margin: 0; }
-dialog#keys dt { text-align: right; }
-dialog#keys dd { margin: 0; }
-dialog#keys kbd { font: inherit; color: var(--accent); }
+dialog#keys::backdrop, dialog#syncinfo::backdrop { background: rgb(0 0 0 / 0.45); }
+:is(dialog#keys, dialog#syncinfo) h2 { margin: 0 0 8px; font-size: inherit; color: var(--muted); font-weight: normal; }
+:is(dialog#keys, dialog#syncinfo) dl + h2 { margin-top: 12px; }
+:is(dialog#keys, dialog#syncinfo) dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 3ch; margin: 0; }
+:is(dialog#keys, dialog#syncinfo) dt { text-align: right; }
+:is(dialog#keys, dialog#syncinfo) dd { margin: 0; }
+:is(dialog#keys, dialog#syncinfo) kbd { font: inherit; color: var(--accent); }
+.syncinfo .when { color: var(--muted); }
+.syncinfo .bad { color: var(--accent-hot); overflow-wrap: anywhere; }
+.syncinfo .foot { margin: 10px 0 0; color: var(--muted); }
+dialog#keys .syncinfo + h2 { margin-top: 12px; }
 
 /* The unsubscribe confirmation (actions.js, docs/actions.md), dressed as the
    help overlay. Sender strings are isolated <bdi>s with their controls drawn

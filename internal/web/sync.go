@@ -27,8 +27,18 @@ func (s *Server) syncNow(w http.ResponseWriter, r *http.Request) {
 	}{true, queued})
 }
 
-// syncAll queues an immediate sync on every account and says how many took
-// the request.
+// Launch is the control socket's `launch`, sent by `pneu open`: opening or
+// focusing the window is when you want the mail your phone just announced.
+// Every account is queued before it returns, so a page rendered after it
+// already says Checking….
+func (s *Server) Launch() {
+	if s.Syncer != nil {
+		s.syncAll()
+	}
+}
+
+// syncAll queues an immediate sync on every account, tells open pages
+// (SSE `account`, queued), and says how many took the request.
 func (s *Server) syncAll() int {
 	queued := 0
 	for _, a := range s.Accounts {
@@ -37,6 +47,7 @@ func (s *Server) syncAll() int {
 			continue
 		}
 		queued++
+		s.AccountChanged(a.Name)
 	}
 	return queued
 }

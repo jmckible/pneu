@@ -14,7 +14,7 @@ them here if they're wrong.
   Arial/Helvetica/`sans-serif` (Liberation Sans here, soft at a fractional
   device scale). Serif and mono stacks are left as sent.
 - **Layout.** Header: view nav on the left (Inbox · Starred · Sent · Spam · Trash ·
-  All, each with its key number), search on the right, sync glyph far right.
+  All, each with its key number), search on the right, the sync status line far right.
   Two named panes, the list and the thread, and exactly one is active: it
   gets the keys, its title row is accent-colored, and the footer lists its
   keys. At `140ch` and above, with a thread open, they sit side by side:
@@ -48,7 +48,7 @@ them here if they're wrong.
   those two ends, so a theme with a dim comment color can't dim the app:
   `--muted` is fg 65%, `--border` is fg 12%, `--unread` is fg pushed toward
   white 40%, `--accent-hot` is the accent with chroma pushed up 35% (for the
-  active pane's title only). Body text is `--fg` at 14px; only dates, counts,
+  active pane's title and a stale or failing sync status line only). Body text is `--fg` at 14px; only dates, counts,
   and to/cc lines are muted. Authors are never muted. *default*
 - **Separation.** Rows are divided by a 1px `--border` line, not zebra
   stripes. Message cards are bordered with a 3px left rail. Section headers
@@ -78,22 +78,48 @@ them here if they're wrong.
   until the debounced push fires. *default*
 - **Key footer.** A bar across the bottom lists the keys for the pane that
   has them (list, thread, or compose) on the left and holds the status line
-  (flashes, undo hint, sync) on the right. It swaps with focus in the split.
+  (flashes, undo hint) on the right. It swaps with focus in the split.
   It lists only the everyday keys (the rest are in `?`); the thread's adds
   `o link`, `f files` and `X unsubscribe` only while each has something to
   act on: a chip on the cursor message, a viewable attachment in the
   thread, a `List-Unsubscribe` header on the cursor message.
-- **Sync state.** One glyph at the header's far right: an accent braille
-  spinner while any account's sync runs, empty when idle (a locked state
-  isn't distinguished yet). Never a progress bar. The server broadcasts
-  `syncing` when a sync starts and `sync` when it ends, failures included;
-  only an end that pulled something re-renders the list, without moving the
-  cursor. `R` asks for a sync on every account now (`POST /sync`, coalesced
-  with one already running) and flashes "Syncing…" in the footer. Launching
-  the window (`/open` with the nonce) and coming back to it (focus or shown
-  again, not a click into a mail frame; at most every 20s) ask the same,
-  quietly: the phone buzzes on Gmail's push, and an idle sync is about a
-  second, so the mail is there by the time you look. *default*
+- **Sync state.** A short status line at the header's far right says how
+  current the view is. In priority order: `Checking…` with an accent
+  braille spinner while any account's sync is queued or running, or an
+  `R`/focus request hasn't been answered yet (the server says queued at
+  once; the line gives up waiting after 10s); `<account>: sync failing`
+  (`+N` for more) in `--accent-hot` once an account has failed as many
+  times as the bar widget calls sick (one); `Updated 14m ago` in
+  `--accent-hot` when idle and older than three sync periods; otherwise
+  `Updated just now` / `Updated 3m ago`, muted. The age is the oldest
+  account's last successful sync: the view is only as fresh as its
+  stalest account. Only ready accounts count; one in its first pull or
+  waiting on setup or reconnection is the `#accounts` strip's, and with
+  no ready account synced yet the line is empty. A push (after a
+  keystroke) never shows as checking. The age refreshes every 30s while
+  shown and on focus; a screen reader hears changes of state (a live
+  region), not the age ticking. Never a progress bar.
+  `data-accounts` carries each account's `lastSync`, `queued`, `running`,
+  `failures` and `error`, and the line reads its stale threshold from the
+  sync period (`data-every`), so the first paint is right; SSE `account`
+  keeps them current: sent when a sync is queued, starts and ends.
+  `syncing`/`sync` still bracket each sync, and only an end that pulled
+  something re-renders the list, without moving the cursor. A queued or
+  running flag with no news for 11 minutes (its end lost across an SSE
+  reconnect; a sync is bounded at 10) is ignored.
+  Clicking the line opens its details (Esc or a click closes it), and the
+  `?` overlay leads with the same: per account, the last sync as a time
+  and an age, whether it's checking now or queued, failures and the last
+  error, and the sync period.
+  `R` asks for a sync on every account now (`POST /sync`, coalesced with
+  one already waiting). Opening the window asks too: `pneu open` sends
+  `launch` over the control socket (docs/client.md) before it opens or
+  focuses the window, so every path in (a new window, a restored one, a
+  focus) syncs and a page rendered then already says `Checking…`; `/open`
+  itself starts nothing. Coming back to the window (focus or shown again,
+  not a click into a mail frame; at most every 20s) asks the same. The
+  phone buzzes on Gmail's push, and an idle sync is about a second, so
+  the mail is there by the time you look. *default*
 - **Theme.** Everything references a CSS variable; nothing hardcodes a color.
   Verify against three Omarchy themes (one light) before merge. *default*
 

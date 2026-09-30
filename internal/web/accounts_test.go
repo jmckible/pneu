@@ -208,3 +208,49 @@ func TestAccountChangedThrottlesStatus(t *testing.T) {
 		t.Fatal("a new percent didn't rewrite")
 	}
 }
+
+// The status line's first paint: each account's last sync, queued and
+// running (a sync, not a push) in data-accounts, and the sync period.
+func TestAccountSyncStateSurfaces(t *testing.T) {
+	f := newTagFixture(t)
+	f.s.SyncInterval = 2 * time.Minute
+	at := time.Date(2026, 9, 30, 9, 15, 0, 0, time.UTC)
+	f.sync.setStatus("personal", gmi.Status{State: gmi.StateReady, Pulled: true, LastSync: at, Queued: true})
+	f.sync.setStatus("work", gmi.Status{State: gmi.StateReady, Pulled: true, Running: true, Syncing: true, Failures: 1,
+		LastErr: errors.New("gmi sync [work]: exit 1: timeout")})
+
+	_, body := get(t, f.s, "/")
+	if !strings.Contains(body, `id="sync"`) || !strings.Contains(body, `data-every="120"`) {
+		t.Fatalf("status line without its period:\n%s", body)
+	}
+	m := regexp.MustCompile(`<div id="accounts" data-accounts="([^"]*)"`).FindStringSubmatch(body)
+	if m == nil {
+		t.Fatalf("no data-accounts:\n%s", body)
+	}
+	var views []accountView
+	if err := json.Unmarshal([]byte(html.UnescapeString(m[1])), &views); err != nil {
+		t.Fatal(err)
+	}
+	p, w := views[0], views[1]
+	if p.LastSync == nil || *p.LastSync != "2026-09-30T09:15:00Z" || !p.Queued || p.Running {
+		t.Errorf("personal: %+v", p)
+	}
+	if w.LastSync != nil || w.Queued || !w.Running || w.Failures != 1 || w.Error == nil {
+		t.Errorf("work: %+v", w)
+	}
+
+	// A push is Running but not Syncing: not checking.
+	f.sync.setStatus("work", gmi.Status{State: gmi.StateReady, Pulled: true, Running: true})
+	if v := viewOf("work", mustStatus(t, f.sync, "work")); v.Running {
+		t.Errorf("a push reads as running: %+v", v)
+	}
+}
+
+func mustStatus(t *testing.T, s Syncer, account string) gmi.Status {
+	t.Helper()
+	st, err := s.Status(account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
