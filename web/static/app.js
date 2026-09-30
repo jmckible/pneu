@@ -46,7 +46,7 @@
     c.sel = i;
     var el = c.items[i];
     el.classList.add('selected');
-    if (c === T) { syncMark(was); syncMark(el); } // the highlight shows on the cursor only
+    if (c === T) { syncMark(was); syncMark(el); syncKeybar(); } // the highlight shows on the cursor only
     if (c === L) storage(function (s) {
       s.setItem(selKey(), el.dataset.thread || '');
       s.setItem(selKey() + ':i', String(i));
@@ -301,6 +301,26 @@
     if (m && m.mark) m.mark.sync();
   }
 
+  // syncKeybar shows the thread bar's contextual keys, each only when its
+  // key has something to act on: o while the cursor message is expanded
+  // with a chip, f while the thread has an attachment the viewer opens (f
+  // falls back to the thread's first), X while the cursor message has a
+  // List-Unsubscribe header (the server's data-unsub).
+  function syncKeybar() {
+    var bar = document.getElementById('keybar');
+    if (!bar) return;
+    var a = T.items && T.items[T.sel];
+    var show = {
+      o: !!(a && !a.classList.contains('collapsed') && a.querySelector(':scope > header > .cta')),
+      f: !!(T.root && T.root.querySelector('.attachments a[data-view]')),
+      X: !!(a && a.hasAttribute('data-unsub')),
+    };
+    Object.keys(show).forEach(function (k) {
+      var el = bar.querySelector('[data-ctx="' + k + '"]');
+      if (el) el.hidden = !show[k];
+    });
+  }
+
   // setChip puts the message's action in its header as the o chip, or
   // takes an old one away: the declared one (mailframe.js, from its
   // JSON-LD), or a guess (guessLink).
@@ -311,6 +331,7 @@
     if (old) old.remove();
     var c = action ? Pneu.actions.chip(action, function () { openChip(article, null); }) : null;
     if (c) header.appendChild(c);
+    syncKeybar();
   }
 
   // rethemeFrames repaints every loaded body in the new theme's colors. A
@@ -407,6 +428,7 @@
   function toggle(article) {
     article.classList.toggle('collapsed');
     syncMark(article);
+    syncKeybar();
     if (article.classList.contains('collapsed')) return;
     renderBody(article);
     var div = article.querySelector('.body[data-kind=html]'), m = div && div.__mail;
@@ -627,6 +649,7 @@
     T.items = [];
     T.sel = -1;
     T.url = null;
+    syncKeybar();
     setFocus('list');
     setURL(L.url, false);
     document.title = L.title || 'pneu';

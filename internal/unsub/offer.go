@@ -200,3 +200,20 @@ func contextOf(h *Header) string {
 	}
 	return s
 }
+
+// HasList reports whether the message (the first of files that opens, inside
+// maildir) carries exactly one List-Unsubscribe header: the thread page's
+// cue that X has something to offer. Headers only; no DKIM, no parse of the
+// list itself, so a message it marks may still turn out to offer nothing.
+func HasList(maildir string, files []string) bool {
+	for _, name := range files {
+		f, err := Open(maildir, name)
+		if err != nil {
+			continue
+		}
+		h, err := ReadHeader(bufio.NewReader(f))
+		f.Close()
+		return err == nil && h.Count("List-Unsubscribe") == 1
+	}
+	return false
+}

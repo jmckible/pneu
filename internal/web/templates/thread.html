@@ -1,7 +1,7 @@
 {{define "content"}}<main class="thread" data-account="{{.Account}}" data-thread="{{.Thread}}" data-msgids="{{.MsgIDs}}" data-unread-ids="{{.UnreadIDs}}"{{if .In}} data-in="{{.In}}"{{end}} tabindex="-1">
 <h1>{{.Subject}}</h1>
 {{- range .Messages}}
-<article class="{{.Class}}" data-account="{{$.Account}}" data-msgid="{{.MsgID}}" data-depth="{{.Depth}}"{{if .Gmail}} data-gmail="{{.Gmail}}"{{end}}>
+<article class="{{.Class}}" data-account="{{$.Account}}" data-msgid="{{.MsgID}}" data-depth="{{.Depth}}"{{if .Gmail}} data-gmail="{{.Gmail}}"{{end}}{{if .Unsub}} data-unsub{{end}}>
 <header>
 <div class="from"><span class="name">{{.FromName}}</span>{{if .FromAddr}} <span class="addr">&lt;{{.FromAddr}}&gt;</span>{{end}}</div>
 {{- if .To}}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jmckible/pneu/internal/unsub"
 	"html/template"
 	"log"
 	"maps"
@@ -461,9 +462,12 @@ type messageView struct {
 	// HoldImages keeps remote images behind a click: spam and trash, where
 	// an open confirms the address. Everywhere else they load (app.js).
 	HoldImages bool
-	Text       template.HTML
-	Attach     []attachView
-	Drive      []driveView // the thread's Drive files, on its newest message (thread sets it)
+	// Unsub: the message has a List-Unsubscribe header, so the key bar
+	// shows X for it.
+	Unsub  bool
+	Text   template.HTML
+	Attach []attachView
+	Drive  []driveView // the thread's Drive files, on its newest message (thread sets it)
 }
 
 type attachView struct {
@@ -592,6 +596,7 @@ func (s *Server) messageView(acct notmuch.Account, m *notmuch.Message) messageVi
 		Gmail:    gmailURL(acct.Email, m.Filename),
 		Kind:     an.Kind,
 		Text:     an.Text,
+		Unsub:    unsub.HasList(acct.Maildir, m.Filename),
 	}
 	if an.Kind == "html" {
 		v.BodyURL = "/body/" + url.PathEscape(acct.Name) + "/" + esc

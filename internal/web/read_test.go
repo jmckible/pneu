@@ -83,6 +83,7 @@ func find(t *testing.T, rs []listRow, subject string) listRow {
 }
 
 var inboxOrder = []string{
+	"personal: Your Quillmate sign-in link",
 	"work: [northwind/app] SSO: SAML metadata upload (PR #4821)",
 	"work: New logo lockup for review",
 	"personal: Action required: verify your mailbox",
@@ -114,7 +115,7 @@ func TestInbox(t *testing.T) {
 		`<script src="/static/purify.min.js"></script>`,
 		`<script src="/static/app.js" defer></script>`,
 		`<main class="list" data-view="inbox">`,
-		`<div class="pane-title">Inbox · <span class="n" data-start="0" data-rows="19" data-total="19">19</span></div>`, // the split's title row: view · count; one page, so no range
+		`<div class="pane-title">Inbox · <span class="n" data-start="0" data-rows="20" data-total="20">20</span></div>`, // the split's title row: view · count; one page, so no range
 		`<form class="search" action="/search" method="get"><input name="q"`,
 		`<a href="/" class="active" aria-current="page"><kbd>1</kbd>Inbox</a>`,
 		`<a href="/starred"><kbd>2</kbd>Starred</a>`, `<a href="/sent"><kbd>3</kbd>Sent</a>`,
@@ -193,7 +194,7 @@ func TestPagination(t *testing.T) {
 		got := keys(rows(t, s, target))
 		all = append(all, got...)
 		hasNext := strings.Contains(body, `rel="next"`)
-		if page < 3 && (len(got) != 5 || !hasNext) || page == 3 && (len(got) != 4 || hasNext) {
+		if page < 3 && (len(got) != 5 || !hasNext) || page == 3 && (len(got) != 5 || hasNext) {
 			t.Fatalf("page %d: %d rows, next=%v", page, len(got), hasNext)
 		}
 		if (page > 0) != strings.Contains(body, `rel="prev"`) {
@@ -212,11 +213,11 @@ func TestPagination(t *testing.T) {
 		t.Errorf("uncounted position: %s", body)
 	}
 	w := do(s, "GET", "/?page=1&total=1", withCookie)
-	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"total":19}` {
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"total":20}` {
 		t.Fatalf("?total=1: %d %s", w.Code, w.Body)
 	}
 	// Counted once, cached at the databases' revisions: the next render has it.
-	if body := getOK(t, s, "/?page=3"); !strings.Contains(body, `data-total="19"`) || !strings.Contains(body, `>16–19 of 19</span>`) {
+	if body := getOK(t, s, "/?page=3"); !strings.Contains(body, `data-total="20"`) || !strings.Contains(body, `>16–20 of 20</span>`) {
 		t.Errorf("cached position: %s", body)
 	}
 	// A tag write moves the revision; the stale count is not shown.
@@ -225,7 +226,7 @@ func TestPagination(t *testing.T) {
 	if body := getOK(t, s, "/?page=1"); !strings.Contains(body, `data-total="-1"`) {
 		t.Error("stale total survived a tag write")
 	}
-	if w := do(s, "GET", "/?total=1", withCookie); strings.TrimSpace(w.Body.String()) != `{"total":18}` {
+	if w := do(s, "GET", "/?total=1", withCookie); strings.TrimSpace(w.Body.String()) != `{"total":19}` {
 		t.Errorf("recount after archive: %s", w.Body)
 	}
 	// Search pages keep the query.
@@ -682,5 +683,17 @@ func TestAuthorsAndRecipients(t *testing.T) {
 		if got := recipients(in, me); got != want {
 			t.Errorf("recipients(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// data-unsub marks a message with a List-Unsubscribe header, the key bar's
+// cue for X; mail without one has no mark.
+func TestThreadUnsubMark(t *testing.T) {
+	s := newServer(t)
+	if body := getOK(t, s, threadURL(t, s, "/", "The Weekend Reader")); !strings.Contains(body, ` data-unsub>`) {
+		t.Errorf("newsletter thread: no data-unsub")
+	}
+	if body := getOK(t, s, threadURL(t, s, "/", "Cabin weekend")); strings.Contains(body, "data-unsub") {
+		t.Errorf("cabin thread marked data-unsub")
 	}
 }

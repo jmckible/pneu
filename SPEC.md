@@ -79,6 +79,10 @@ them here if they're wrong.
 - **Key footer.** A bar across the bottom lists the keys for the pane that
   has them (list, thread, or compose) on the left and holds the status line
   (flashes, undo hint, sync) on the right. It swaps with focus in the split.
+  It lists only the everyday keys (the rest are in `?`); the thread's adds
+  `o link`, `f files` and `X unsubscribe` only while each has something to
+  act on: a chip on the cursor message, a viewable attachment in the
+  thread, a `List-Unsubscribe` header on the cursor message.
 - **Sync state.** One glyph at the header's far right: an accent braille
   spinner while any account's sync runs, empty when idle (a locked state
   isn't distinguished yet). Never a progress bar. The server broadcasts
