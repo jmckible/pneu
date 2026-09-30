@@ -40,6 +40,7 @@
   function select(c, i, scroll) {
     if (!c.items.length) return;
     i = Math.max(0, Math.min(c.items.length - 1, i));
+    if (c === T && i !== c.sel) cancelActions(); // the cursor moved
     if (c.items[c.sel]) c.items[c.sel].classList.remove('selected');
     c.sel = i;
     var el = c.items[i];
@@ -238,10 +239,16 @@
   }
 
   // paintMail renders mail (renderBody's stash) into its frame, creating it
-  // the first time, with the current theme.
+  // the first time, with the current theme. The frame's keys carry its
+  // message's identity (docs/actions.md "Which message"): an action typed
+  // inside it acts on this message, whatever the cursor says. Replacing the
+  // frame's document cancels an action bound to it.
   function paintMail(article, mail) {
+    if (mail.frame && Pneu.actions) Pneu.actions.cancelFor(article);
+    var ident = identity(article);
     var built = Pneu.renderMailFrame(mail.html, mail.cids, origin, {
-      frame: mail.frame || undefined, onKeydown: onKey, partBase: mail.partBase,
+      frame: mail.frame || undefined, partBase: mail.partBase,
+      onKeydown: function (e) { onKey(e, ident); }, onKeyup: actionKeyup,
       remoteImages: mail.remoteImages, theme: frameTheme(article),
     });
     mail.frame = built.frame;
@@ -349,6 +356,7 @@
   // right pane. The previous instance's body loads are aborted; its
   // listeners went with its element.
   function initThread(root) {
+    cancelActions(); // the thread re-renders
     if (T.abort) T.abort.abort();
     T.abort = window.AbortController ? new AbortController() : null;
     T.root = root;
@@ -542,6 +550,7 @@
 
   // clearThread empties the right pane: the URL goes back to the list's.
   function clearThread() {
+    cancelActions();
     showSeq++;
     T.pending = null;
     leaving = false;
@@ -1201,6 +1210,7 @@
       ['a', 'Reply all (thread)'],
       ['w, c', 'Write'],
       ['v', 'Open in Gmail (new tab)'],
+      ['X', 'Unsubscribe (headers only) · y confirms'],
       ['f', 'View attachments (thread) · n/p step, d download, o open in tab, Esc closes'],
       ['/', 'Search'],
       ['?', 'This help · Esc closes'],
@@ -1267,6 +1277,54 @@
     var link = (a && a.querySelector('.attachments a[data-view]')) || T.root.querySelector('.attachments a[data-view]');
     if (!link) { flash('Nothing here to view'); return; }
     openViewer(link);
+  }
+
+  // ---- message actions (docs/actions.md) ---------------------------------
+  // X (and later o, L) binds to one message when the key is pressed and
+  // keeps it: a key from inside a mail frame is that frame's message (its
+  // listener carries the identity, paintMail); from the thread pane, the
+  // cursor message, which must be expanded. actions.js does the rest.
+
+  // identity is article's message: account, msgid (url.PathEscape'd, as
+  // data-msgid carries it), and the elements it lives in, for cancelling.
+  function identity(article) {
+    var root = article.closest('main.thread');
+    return {
+      account: article.dataset.account || (root && root.dataset.account),
+      msgid: article.dataset.msgid, article: article, root: root,
+    };
+  }
+
+  // actionTarget is the message a key acts on: the frame's (ident), else the
+  // cursor message if expanded; null (with a word why) otherwise.
+  function actionTarget(ident) {
+    if (ident) return ident.article && ident.article.isConnected && ident.root === T.root ? ident : null;
+    var a = cur(T);
+    if (!a || !a.dataset.msgid) return null;
+    if (a.classList.contains('collapsed')) { flash('Expand the message first (Enter)'); return null; }
+    return identity(a);
+  }
+  Pneu.actionTarget = actionTarget;
+
+  function cancelActions() { if (Pneu.actions) Pneu.actions.cancel(); }
+  function actionKeyup(e) { if (Pneu.actions) Pneu.actions.keyup(e); }
+
+  function unsubscribe(e, ident) {
+    if (e.repeat || !Pneu.actions || paneBusy()) return;
+    var target = actionTarget(ident);
+    if (!target) return;
+    Pneu.actions.unsubscribe(target, e, {
+      flash: flash,
+      archive: function (id) {
+        if (!id.root || id.root !== T.root || !id.root.isConnected) { flash('That thread is no longer open'); return; }
+        whenReady(function () { threadRemove('archive'); })();
+      },
+      onClose: function () {
+        if (!T.root || !T.root.isConnected) return;
+        T.root.focus({ preventScroll: true });
+        setFocus('thread');
+      },
+    });
   }
 
   // ---- reply / compose ----------------------------------------------------
@@ -1407,6 +1465,7 @@
       a: reply(true),
       v: openGmail,
       f: viewAttachments,
+      X: unsubscribe,
     },
     // Consulted after the active pane's map. On a page with no pane
     // (compose) only ANYWHERE applies: its fields and buttons own the rest.
@@ -1433,8 +1492,12 @@
     return k === 'list' ? cur(L) : k === 'thread' ? cur(T) : null;
   };
 
-  function onKey(e) {
+  // ident: the message whose mail frame the key was typed in (paintMail).
+  function onKey(e, ident) {
     lastKey = Date.now();
+    // While an X preview loads, the session takes every key (Esc cancels),
+    // so nothing falls through to archive or reply (docs/actions.md).
+    if (Pneu.actions && Pneu.actions.pendingKey(e)) return;
     if (help && help.open) {
       // The modal owns the keyboard; Esc closes it natively.
       if (e.key === '?') { e.preventDefault(); help.close(); }
@@ -1462,10 +1525,11 @@
     // Enter on a focused link or button keeps its native meaning.
     if (e.key === 'Enter' && t && t.nodeType === 1 && t.closest('a, button')) return;
     e.preventDefault();
-    fn(e);
+    fn(e, ident);
   }
 
-  document.addEventListener('keydown', onKey);
+  document.addEventListener('keydown', function (e) { onKey(e); });
+  document.addEventListener('keyup', actionKeyup);
 
   // ---- sync ---------------------------------------------------------------
   // A list page reloads when a sync lands, unless you were typing or a tag

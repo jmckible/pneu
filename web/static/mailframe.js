@@ -720,6 +720,7 @@
       // The listener lives in the parent's realm, so the sandbox's disabled
       // scripting doesn't apply to it.
       if (frame.__pneuKeys) doc.addEventListener('keydown', frame.__pneuKeys);
+      if (frame.__pneuKeyup) doc.addEventListener('keyup', frame.__pneuKeyup);
     });
   }
 
@@ -735,6 +736,7 @@
   //                      img-src and the same-origin filter; default /part/.
   //   opts.frame         re-render into this existing iframe
   //   opts.onKeydown     receives keydown events from inside the frame
+  //   opts.onKeyup       receives keyup events from inside the frame
   //   opts.base          base URL relative URLs resolve against (default: document.baseURI)
   //   opts.theme         { bg, fg, accent: '#rrggbb', scheme: 'light'|'dark' }:
   //                      the app's colors, for a mail that declares none.
@@ -754,6 +756,7 @@
       attach(frame);
     }
     if (opts.onKeydown) frame.__pneuKeys = opts.onKeydown;
+    if (opts.onKeyup) frame.__pneuKeyup = opts.onKeyup;
     // Attributes before srcdoc: sandbox flags are captured at navigation.
     frame.setAttribute('sandbox', SANDBOX);
     frame.setAttribute('referrerpolicy', 'no-referrer');

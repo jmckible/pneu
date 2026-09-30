@@ -28,6 +28,10 @@ type Account struct {
 	Name       string
 	Email      string
 	ConfigPath string
+	// Maildir is lieer's mail directory (<gmiDir>/mail): every file this
+	// database indexes lives under it. notmuch itself never uses it; the
+	// unsubscribe reader opens message files only inside it.
+	Maildir string
 }
 
 // Error is a failed notmuch invocation. Stderr is the tool's own diagnosis.

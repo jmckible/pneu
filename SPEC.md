@@ -179,6 +179,12 @@ uncached, the page shows the range first and the total follows.
   `color-scheme` accordingly; the theme's `--bg`/`--fg` are passed in as the
   frame's colors. This touches the sanitizer's prepended style, so it runs
   against the hostile corpus before merge.
+- **Unsubscribe** (`X`) acts on the cursor message (or the one whose frame
+  has the keys), from its `List-Unsubscribe` header only, never a body
+  link: one-click (RFC 8058, DKIM-verified by pneu, posted by the server),
+  else the sender's first mailto or web option. A confirmation shows the
+  exact destination, or the whole message for a mailto, and `y` confirms.
+  Design and security contract: docs/actions.md.
 - **Actions** (`e` `#` `!` `s`) apply to the whole thread and return to the
   list at the same cursor position.
 - **Reply** is an inline box under the last message: `r` opens it with the

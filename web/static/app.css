@@ -458,6 +458,85 @@ dialog#keys dt { text-align: right; }
 dialog#keys dd { margin: 0; }
 dialog#keys kbd { font: inherit; color: var(--accent); }
 
+/* The unsubscribe confirmation (actions.js, docs/actions.md), dressed as the
+   help overlay. Sender strings are isolated <bdi>s with their controls drawn
+   as escapes; the destination has its own line, first, that nothing else
+   can push out; the long parts scroll inside the dialog. */
+dialog#unsub {
+  width: min(84ch, calc(100vw - 2ch));
+  max-height: calc(100vh - 32px);
+  padding: 12px 2ch 14px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font: inherit;
+  overflow: auto;
+}
+dialog#unsub[open] { display: flex; flex-direction: column; gap: 8px; }
+dialog#unsub::backdrop { background: rgb(0 0 0 / 0.45); }
+dialog#unsub:focus { outline: none; }
+/* Once armed, Tab reaches the disclosure and the scrollable fields. */
+dialog#unsub [tabindex="0"]:focus-visible, dialog#unsub summary:focus-visible {
+  outline: 1px dashed var(--accent);
+  outline-offset: 1px;
+}
+dialog#unsub h2 { margin: 0; font-size: inherit; color: var(--muted); font-weight: normal; }
+/* break-spaces: runs and edge spaces show as sent (a subject is sent verbatim). */
+dialog#unsub bdi.untrusted { unicode-bidi: isolate; overflow-wrap: anywhere; white-space: break-spaces; }
+dialog#unsub .ctl {
+  color: var(--accent);
+  border: 1px dashed color-mix(in oklab, var(--accent) 50%, var(--bg));
+  border-radius: 2px;
+  padding: 0 1px;
+}
+dialog#unsub p { margin: 0; }
+dialog#unsub .dest {
+  flex: none;
+  display: grid;
+  grid-template-columns: 8ch minmax(0, 1fr);
+  gap: 1ch;
+  min-height: 1.4em;
+  padding: 4px 1ch;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in oklab, var(--accent) 8%, var(--bg));
+}
+dialog#unsub .dest bdi { display: block; min-width: 0; color: var(--fg); }
+dialog#unsub .dest.url bdi, dialog#unsub .dest bdi.url { max-height: 8em; overflow: auto; }
+dialog#unsub .label, dialog#unsub dt { color: var(--muted); }
+dialog#unsub dl { display: grid; grid-template-columns: 8ch minmax(0, 1fr); gap: 3px 1ch; margin: 0; }
+dialog#unsub dd { margin: 0; min-width: 0; max-height: 6em; overflow: auto; }
+dialog#unsub details summary { color: var(--muted); cursor: pointer; }
+dialog#unsub details bdi { display: block; margin-top: 4px; max-height: 8em; overflow: auto; }
+dialog#unsub pre.mailbody {
+  margin: 0;
+  padding: 6px 1ch;
+  max-height: 16em;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font: inherit;
+}
+dialog#unsub pre .empty { color: var(--muted); }
+dialog#unsub .note { color: var(--muted); }
+dialog#unsub .note.bad { color: var(--fg); border-left: 3px solid var(--accent); padding-left: 1ch; }
+dialog#unsub .actions { display: flex; gap: 1ch; justify-content: flex-end; margin-top: 4px; }
+dialog#unsub .actions:empty { display: none; }
+dialog#unsub button {
+  padding: 1px 8px;
+  font: inherit;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+dialog#unsub button:hover { border-color: var(--muted); }
+dialog#unsub kbd { font: inherit; color: var(--accent); }
+
 /* The attachment viewer (viewer.js): near-fullscreen, dressed as the help
    overlay. Its header is a title row; the stage scrolls. */
 dialog#viewer {
