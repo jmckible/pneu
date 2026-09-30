@@ -102,7 +102,7 @@ func TestMatchedIDs(t *testing.T) {
 
 func TestGmailURL(t *testing.T) {
 	got := gmailURL("robin@hale.example", []string{"/mail/personal/gmail/mail/cur/19c8698f3401dced:2,S"})
-	if got != "https://mail.google.com/mail/u/robin@hale.example/#all/19c8698f3401dced" {
+	if got != "https://mail.google.com/mail/?authuser=robin%40hale.example#all/19c8698f3401dced" {
 		t.Error(got)
 	}
 	// Not a lieer filename: no link rather than a wrong one.

@@ -363,7 +363,7 @@ func TestThread(t *testing.T) {
 	for _, s := range []string{
 		`<span class="name">Priya Natarajan</span> <span class="addr">&lt;priya.n@fastmail.example&gt;</span>`,
 		`<div class="cc">Cc: Priya Natarajan &lt;priya.n@fastmail.example&gt;</div>`,
-		`data-gmail="https://mail.google.com/mail/u/robin@hale.example/#all/19c8698f3401dced"`,
+		`data-gmail="https://mail.google.com/mail/?authuser=robin%40hale.example#all/19c8698f3401dced"`,
 		// format=flowed joined, quote wrapped, both server-side.
 		`<div class="body" data-kind="text"><pre>Yes please on the ride. I&#39;ll bring the board games and the good coffee. If we&#39;re doing`,
 		"wrote:\n<blockquote class=\"q\">I&#39;m in. Book it",
@@ -381,7 +381,7 @@ func TestThread(t *testing.T) {
 	// Message-IDs with '/' are one path segment.
 	body = getOK(t, s, threadURL(t, s, "/", "[northwind/app]"))
 	if !strings.Contains(body, `data-msgid="northwind%2Fapp%2Fpull%2F4821@codehost.example"`) ||
-		!strings.Contains(body, `data-gmail="https://mail.google.com/mail/u/robin@northwind.example/#all/190c275d554c8086"`) {
+		!strings.Contains(body, `data-gmail="https://mail.google.com/mail/?authuser=robin%40northwind.example#all/190c275d554c8086"`) {
 		t.Errorf("pr thread: %s", body)
 	}
 
@@ -545,7 +545,7 @@ func TestGmailRedirect(t *testing.T) {
 		t.Fatalf("data-gmail %q", r.Gmail)
 	}
 	w := do(s, "GET", r.Gmail, withCookie)
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "https://mail.google.com/mail/u/robin@hale.example/#all/1902ba559a010deb" {
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "https://mail.google.com/mail/?authuser=robin%40hale.example#all/1902ba559a010deb" {
 		t.Fatalf("%d %q", w.Code, w.Header().Get("Location"))
 	}
 	// Newest message of a multi-message thread.

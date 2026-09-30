@@ -272,7 +272,7 @@ func gmailURL(email string, filenames []string) string {
 	for _, f := range filenames {
 		id, _, _ := strings.Cut(filepath.Base(f), ":")
 		if gmailIDRE.MatchString(id) {
-			return "https://mail.google.com/mail/u/" + url.PathEscape(email) + "/#all/" + id
+			return "https://mail.google.com/mail/?authuser=" + url.QueryEscape(email) + "#all/" + id
 		}
 	}
 	return ""
