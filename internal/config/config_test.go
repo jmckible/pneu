@@ -40,13 +40,18 @@ func TestPeerAndServer(t *testing.T) {
 	p := filepath.Join(dir, "c.json")
 	acct := `"accounts":[{"name":"a","email":"a@x","notmuchConfig":"/n","gmiDir":"/g"}]`
 	cases := map[string]string{
-		`{` + acct + `}`:                                    "",
-		`{` + acct + `,"peer":{"port":7320}}`:               "",
-		`{` + acct + `,"peer":{"port":0}}`:                  "bad peer port",
-		`{` + acct + `,"peer":{"port":70000}}`:              "bad peer port",
-		`{` + acct + `,"peer":{"port":7317}}`:               "bad peer port",
-		`{` + acct + `,"server":{"ssh":"dell"}}`:            "both accounts and server",
-		`{"server":{"ssh":"dell","node":"n1","port":7320}}`: "isn't built yet",
+		`{` + acct + `}`:                                                         "",
+		`{` + acct + `,"peer":{"port":7320}}`:                                    "",
+		`{` + acct + `,"peer":{"port":0}}`:                                       "bad peer port",
+		`{` + acct + `,"peer":{"port":70000}}`:                                   "bad peer port",
+		`{` + acct + `,"peer":{"port":7317}}`:                                    "bad peer port",
+		`{` + acct + `,"server":{"ssh":"dell"}}`:                                 "both accounts and server",
+		`{"server":{"ssh":"dell","node":"n1","port":7320}}`:                      "",
+		`{"server":{"ssh":"dell","node":"n1","port":7320},"peer":{"port":7321}}`: "both peer and server",
+		`{"server":{"ssh":"-oProxyCommand=x","node":"n1","port":7320}}`:          "bad ssh target",
+		`{"server":{"ssh":"a b","node":"n1","port":7320}}`:                       "bad ssh target",
+		`{"server":{"ssh":"dell","node":"n-1","port":7320}}`:                     "bad node",
+		`{"server":{"ssh":"dell","node":"n1","port":0}}`:                         "bad port",
 	}
 	for body, want := range cases {
 		os.WriteFile(p, []byte(body), 0o600)
@@ -56,6 +61,8 @@ func TestPeerAndServer(t *testing.T) {
 			t.Errorf("%s: %v", body, err)
 		case want != "" && (err == nil || !strings.Contains(err.Error(), want)):
 			t.Errorf("%s: %v, want %q", body, err, want)
+		case want == "" && strings.Contains(body, "server") && (c.Server == nil || c.Server.Node != "n1" || c.Server.Port != 7320 || len(c.Accounts) != 0):
+			t.Errorf("%s: server %+v", body, c.Server)
 		case want == "" && strings.Contains(body, "peer") && (c.Peer == nil || c.Peer.Port != 7320):
 			t.Errorf("%s: peer %+v", body, c.Peer)
 		case want == "" && !strings.Contains(body, "peer") && c.Peer != nil:

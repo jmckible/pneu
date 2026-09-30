@@ -60,6 +60,14 @@ func checkResponses(t *testing.T, s *Server) {
 				pattern = rt.Pattern
 			}
 			t.Errorf("%s %s → %d on %s: %v", r.Method, r.URL, status, pattern, err)
+			return
+		}
+		// What the client would proxy it must also admit: the server's
+		// own answers pass the proxy's boundary whole.
+		if rt != nil && !rt.Local && !rt.PeerOnly && status >= 200 {
+			if _, err := c.Admit(rt, status, h, r); err != nil {
+				t.Errorf("%s %s → %d on %s: the proxy wouldn't admit it: %v", r.Method, r.URL, status, rt.Pattern, err)
+			}
 		}
 	}
 }

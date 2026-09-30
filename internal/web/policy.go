@@ -109,6 +109,9 @@ type policyWriter struct {
 	route  *Route // nil until the table's handler runs (middleware refusals, mux 404s)
 	policy Policy // "" until usePolicy
 	wrote  bool
+	// untyped: the header went without a Content-Type (Untyped), so no
+	// body may follow: net/http would sniff one.
+	untyped bool
 	// check sees every response once its headers are final; tests only.
 	check func(rt *Route, status int, h http.Header, r *http.Request)
 }
@@ -140,6 +143,14 @@ func (w *policyWriter) WriteHeader(code int) {
 		h.Del("Content-Disposition")
 		h.Set("Content-Type", "text/plain; charset=utf-8") // a 412 has no body, and kept the file's type
 	}
+	if h.Get("Content-Type") == "" {
+		if Untyped(code) {
+			w.untyped = true
+		} else {
+			// Never left to net/http's sniffing, which ignores nosniff.
+			h.Set("Content-Type", "text/plain; charset=utf-8")
+		}
+	}
 	if code == http.StatusNotModified || code == http.StatusNoContent {
 		// No representation, so nothing to dispose of (ServeContent's 304
 		// drops the part's type and keeps its disposition).
@@ -165,8 +176,15 @@ func (w *policyWriter) Write(b []byte) (int, error) {
 		}
 		w.WriteHeader(http.StatusOK)
 	}
+	if w.untyped && len(b) > 0 {
+		return 0, ErrUntypedBody
+	}
 	return w.ResponseWriter.Write(b)
 }
+
+// ErrUntypedBody: a body after a header write without a Content-Type
+// (Untyped). It's refused rather than left to net/http to sniff.
+var ErrUntypedBody = errors.New("web: a body on an untyped response")
 
 func (w *policyWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 

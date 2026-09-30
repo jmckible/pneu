@@ -6,6 +6,7 @@
 //	pneu gmi [-config path] <account> <gmi args...>
 //	pneu account add|auth|status ...
 //	pneu peer add --stdin | list | remove <name>
+//	pneu client pair [-name <name>] <ssh-target> | unpair
 package main
 
 import (
@@ -59,8 +60,10 @@ func main() {
 		err = account(args)
 	case "peer":
 		err = peerCmd(args)
+	case "client":
+		err = clientCmd(args)
 	default:
-		err = usageError{fmt.Sprintf("unknown command %q; usage: pneu [serve|open|gmi|account|peer] ...", cmd)}
+		err = usageError{fmt.Sprintf("unknown command %q; usage: pneu [serve|open|gmi|account|peer|client] ...", cmd)}
 	}
 	if err != nil {
 		log.Print("pneu: ", err)
@@ -95,6 +98,9 @@ func serve(args []string) error {
 	cfg, err := loadConfig(fs, args)
 	if err != nil {
 		return err
+	}
+	if cfg.Server != nil {
+		return serveClient(cfg, *listen)
 	}
 
 	host := hostFor(cfg)
@@ -133,20 +139,9 @@ func serve(args []string) error {
 		return err
 	}
 
-	// pneu.localhost resolves to both loopbacks and clients try ::1 first, so
-	// bind both or another local process on [::1]:port would receive the traffic.
-	addrs := []string{*listen}
-	if *listen == "" {
-		port := strconv.Itoa(cfg.Port)
-		addrs = []string{net.JoinHostPort("127.0.0.1", port), net.JoinHostPort("::1", port)}
-	}
-	var lns []net.Listener
-	for _, addr := range addrs {
-		ln, err := net.Listen("tcp", addr)
-		if err != nil {
-			return err
-		}
-		lns = append(lns, ln)
+	lns, err := listenLoopbacks(cfg.Port, *listen)
+	if err != nil {
+		return err
 	}
 	hs := &http.Server{
 		Handler:           srv,
@@ -274,6 +269,29 @@ func serve(args []string) error {
 	// first pull is interrupted instead (SIGINT, then SIGKILL after 30s).
 	<-syncDone
 	return nil
+}
+
+// listenLoopbacks binds listen, or both loopbacks on port: pneu.localhost
+// resolves to both and clients try ::1 first, so an unbound one would let
+// another local process receive the traffic.
+func listenLoopbacks(port int, listen string) ([]net.Listener, error) {
+	addrs := []string{listen}
+	if listen == "" {
+		p := strconv.Itoa(port)
+		addrs = []string{net.JoinHostPort("127.0.0.1", p), net.JoinHostPort("::1", p)}
+	}
+	var lns []net.Listener
+	for _, addr := range addrs {
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			for _, l := range lns {
+				l.Close()
+			}
+			return nil, err
+		}
+		lns = append(lns, ln)
+	}
+	return lns, nil
 }
 
 // newPeerServer is the peer listener when the config has a peer block

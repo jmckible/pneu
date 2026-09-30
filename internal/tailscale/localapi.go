@@ -28,8 +28,12 @@ const SocketPath = "/var/run/tailscale/tailscaled.sock"
 // CallTimeout bounds each LocalAPI call.
 const CallTimeout = 2 * time.Second
 
-// maxBody bounds a LocalAPI answer. status?peers=false is a few KiB.
-const maxBody = 1 << 20
+// maxBody bounds a LocalAPI answer. status?peers=false is a few KiB;
+// maxPeersBody, status with every peer (about 1.5 KiB each).
+const (
+	maxBody      = 1 << 20
+	maxPeersBody = 8 << 20
+)
 
 // Running is the BackendState of a connected node.
 const Running = "Running"
@@ -38,6 +42,18 @@ const Running = "Running"
 type Status struct {
 	BackendState string
 	Self         Self
+	// Peer is every other node, keyed by node key; only from StatusPeers.
+	Peer map[string]PeerStatus
+}
+
+// PeerStatus is another node as this one sees it (ipnstate.PeerStatus).
+// Only what the client's pre-dial check reads: which node, whether it's
+// connected to the control plane, and its own addresses.
+type PeerStatus struct {
+	StableID     string       `json:"ID"`
+	Online       bool         // false: control says it's offline
+	TailscaleIPs []netip.Addr // its own addresses, v4 and v6
+	LastSeen     time.Time    // zero when online or never seen
 }
 
 // Self is this node.
@@ -134,6 +150,14 @@ func (l *Local) Status(ctx context.Context) (Status, error) {
 	return st, err
 }
 
+// StatusPeers is Status with every peer (the client resolves its server's
+// current address from it, by StableID: never MagicDNS).
+func (l *Local) StatusPeers(ctx context.Context) (Status, error) {
+	var st Status
+	err := l.getMax(ctx, "/localapi/v0/status?peers=true", &st, maxPeersBody)
+	return st, err
+}
+
 // WhoIs asks who is behind addr.
 func (l *Local) WhoIs(ctx context.Context, addr netip.AddrPort) (WhoIs, error) {
 	var w WhoIs
@@ -142,6 +166,10 @@ func (l *Local) WhoIs(ctx context.Context, addr netip.AddrPort) (WhoIs, error) {
 }
 
 func (l *Local) get(ctx context.Context, path string, v any) error {
+	return l.getMax(ctx, path, v, maxBody)
+}
+
+func (l *Local) getMax(ctx context.Context, path string, v any, maxBody int) error {
 	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
 	defer cancel()
 	// tailscaled refuses any other Host (DNS rebinding of its HTTP side).
@@ -155,7 +183,7 @@ func (l *Local) get(ctx context.Context, path string, v any) error {
 		return fmt.Errorf("tailscale: %w", err)
 	}
 	defer resp.Body.Close()
-	body := io.LimitReader(resp.Body, maxBody+1)
+	body := io.LimitReader(resp.Body, int64(maxBody)+1)
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
 		return ErrNoMatch

@@ -29,10 +29,12 @@ and build order; this file is the working contract. Read PLAN.md before touching
   (pattern `pneu.localhost__open`, the class minus browser prefix and profile);
   `pneu gmi <account> <args>` is the manual lieer run (below);
   `pneu account add|auth|status` sets an account up (INSTALL.md step 5);
-  `pneu peer add --stdin|list|remove` pairs other machines' clients (below). All
+  `pneu peer add --stdin|list|remove` pairs other machines' clients (below);
+  `pneu client pair <ssh-target>|unpair` makes this machine one (below). All
   read `~/.config/pneu/config.json`; there are no built-in accounts, and
-  `pneu account add` is what writes it. A config with both `accounts` and
-  `server` (a client's, docs/client.md) is refused.
+  `pneu account add` is what writes it. A config with `server` (a client's,
+  docs/client.md) makes `pneu serve` the client daemon; with `accounts` or
+  `peer` as well it is refused.
 
 ## Code rules
 
@@ -71,7 +73,10 @@ and build order; this file is the working contract. Read PLAN.md before touching
   new route is an entry with its classes and their media types, its
   disposition, Sec-Fetch-Dest, redirect and cache rules, or it doesn't
   exist. `Checker.Check` is the contract; every response in the web tests
-  goes through it, and the client proxy (docs/client.md) will enforce it.
+  goes through it and through `Checker.Admit`, which the client proxy runs
+  on every upstream answer. A route's `Wait` is the client's
+  response-header timeout on it (10s unless the handler is slow on
+  purpose, as `/send` is).
 - Mutations are POST with Host and Origin checks. localhost is not a boundary:
   the default browser is also the daily browser, so every open tab can reach
   this port.
@@ -126,7 +131,10 @@ and build order; this file is the working contract. Read PLAN.md before touching
 - The control socket, `$XDG_RUNTIME_DIR/pneu/control` (`internal/control`,
   docs/client.md), is the only way a process outside the browser talks to
   the server, and no page can reach it: one command line per connection
-  from a fixed set (`launch`, `status`, `peers-reload <gen> <hash>`, whose
+  from a fixed set (`launch`, `status`, `unlink` (a client's daemon only:
+  it drops the link and acks once its connections are closed; `pneu client
+  unpair` sends it before deleting anything), `peers-reload <gen> <hash>`
+  (a client's daemon refuses it), whose
   only arguments are a decimal generation and 64 hex digits, validated
   before any handler runs), both ends checking `SO_PEERCRED`
   for our uid, the directory 0700 and ours (`Lstat`, no symlink) or the
@@ -152,6 +160,40 @@ and build order; this file is the working contract. Read PLAN.md before touching
   table: `Local` ones aren't served there unless `Upstream` (`/events`);
   `PeerOnly` (`/peer/hello`) exists only there. Logs name peers and nodes,
   never certificates or pins.
+- The client daemon (`internal/client`, `internal/link`; docs/client.md "As
+  built: step 5a") serves pneu.localhost behind the same `Auth`, answers
+  `/open`, `/theme.css` and `/events` itself, and proxies only routes in
+  the table (`web.ClientRoutes`; anything else is a local 404, and a
+  `Service-Worker` request a 404). Up go no cookie, Origin, Referer,
+  Authorization, forwarding or hop-by-hop headers, and no validators on
+  `/static/`. Down comes only what `Admit` rebuilds after Check (one
+  Content-Type, Content-Length, part ranges, a rebuilt disposition, a
+  checked Location), installed on the policy writer at the first final
+  status: 1xx swallowed, trailers dropped, never Set-Cookie, ETag or the
+  server's cache or security headers. No body ever goes out without a
+  Content-Type (net/http would sniff one, nosniff or not): only 204, 304
+  and 301/302/303/307/308 may be untyped, and they carry no body, on both
+  the server's writer and the proxy's. A local failure says `Pneu-Link:
+  not-sent` only when no connection was ever handed to the request
+  (GotConn), else `unknown`. The link dials only the address its own
+  tailscaled gives for the pinned StableID after a whois passes, over one
+  transport per up period whose connections all close when it goes down or
+  its 60s whois lease lapses; `link.PinnedTLS` is the only place
+  `InsecureSkipVerify` may appear. Its state is a local reason code, never
+  server text. Credentials: `peer/client.pem` and `peer/pin.json` in the
+  state dir (0700 dir, 0600 files, checked on every load), never
+  config.json. The client daemon holds an flock on `peer/daemon.lock`
+  (never replaced) for its life and won't run without it or without its
+  control socket, both taken before it loads credentials; `pneu client
+  unpair` sends `unlink` and, with no daemon answering, deletes only under
+  that lock. `peer/pair.lock` makes pair (read, then write), unpair (read,
+  ask, then delete) and a daemon's start (lock, then load credentials) one
+  transaction each, so none interleaves with another. A tracked
+  connection's close and its removal are one `once.Do`. A session's close waits for dials
+  in flight as well as closing its connections. `Link.Unpair` returns only once every session the link owns
+  (pending, live, going down) has finished closing. Pairing runs one fixed `ssh -T -o … -- <target> 'pneu peer
+  add --stdin'`, the request on stdin and the answer parsed strictly
+  (`peer.ParseAddResult`).
 - `peers.json` (`$XDG_STATE_HOME/pneu`, 0600, O_NOFOLLOW, a generation and
   a hash over its content) is written only by `pneu peer add|remove` under
   an flock on `peers.lock`, a file never replaced (N8), with temp + fsync +

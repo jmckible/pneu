@@ -1052,6 +1052,198 @@ Where the code differs from the plan above, or settles what it left open:
   add` round-trips it) and refused: with `accounts`, as both; alone, as
   not built yet (step 5).
 
+## As built: step 5a
+
+The client daemon's link, pairing and proxy. Events fan-out, status.json
+v2, the theme watcher, the error page and `/client/*` are step 5b.
+
+- **Packages.** `internal/link` is the client's side of the link:
+  credentials, the pre-dial checks, the pinned transport, the lease, hello
+  and the state. `internal/client` is the daemon's HTTP side: Auth, local
+  routes, the proxy and the response boundary. The boundary's header work
+  is `web.Checker.Admit` and `web.Admitted.Install` (`internal/web/proxy.go`),
+  shared code next to Check and the policy writer, so the class and cache
+  rule are applied by the same writer the server's handlers use.
+  `cmd/pneu/client.go` has `pneu client pair|unpair` and `serveClient`;
+  `pneu serve` runs it when the config has `server`.
+- **Credentials.** `$XDG_STATE_HOME/pneu/peer/client.pem` (key and
+  certificate, one file, as the server's `server.pem`) and `pin.json`
+  (`name, ssh, node, port, spki, cert, protocol, paired`; unknown fields
+  refused; the SPKI must be the certificate's, and not our own key). The
+  directory is `PrepareDir`'s 0700, both files exactly 0600 and ours,
+  `O_NOFOLLOW`, checked on every load. The daemon refuses to start when
+  the config's `server.node` isn't the pin's. `config.json`'s `server` is
+  `{ssh, node, port}`, validated on load; `server` with `peer` is refused
+  too, and `pneu account add` refuses on a client.
+- **Pairing.** The request's `name` is `-name` or the hostname's first
+  label, lowercased, and must pass `peer.ValidName`. The answer is read
+  through a 16 KiB cap (the write past it fails, ending ssh's output) and
+  parsed by `peer.ParseAddResult`, the token walker `ParseAddRequest` uses:
+  exactly its six keys, once each, spelled exactly, `port` and `protocol`
+  integers. A protocol mismatch pins nothing and prints the `peer remove`
+  that undoes the server's record. `unpair` deletes the pin and the key (a
+  re-pair makes a fresh key) and prints `ssh <target> pneu peer remove
+  <name>`; it doesn't run it. The ssh binary is a seam; the tests run a
+  stand-in that exits 99 unless argv is exactly pairing's.
+- **LocalAPI.** `GET /localapi/v0/status?peers=true` (8 MiB cap) adds
+  `Peer`, a map keyed by node key whose values' `ID` is the StableID, with
+  `Online` (a bool, present when false), `TailscaleIPs` and `LastSeen`;
+  `Tags` is absent when empty. Checked against tailscale 1.102.4 through
+  the socket and `tailscale status --json`. The server's address is its
+  first IPv4 one, else IPv6.
+- **One more reason.** `node-mismatch`: whois at the server's address fails
+  the predicate. Folding it into `refused` would tell the user pneu isn't
+  answering when the tailnet says the address is someone else. `starting`
+  is the state before the first attempt ends. A whois that doesn't answer
+  is `tailscale-down`; a node missing from the map is `node-offline`.
+- **Lease (N9).** A session is one up period: its own `http.Transport`
+  whose `DialTLSContext` dials only the checked address, and the set of TCP
+  connections it made. The lease runs from the pre-dial whois; every 10s
+  the link renews it with under 20s left, and a timer closes it at 60s.
+  Going down, for any reason, closes every connection in the set, not just
+  idle ones: a busy HTTP/2 connection (a download, the future SSE stream)
+  would otherwise keep running under the authorization it was checked
+  with, and `CloseIdleConnections` doesn't touch it. A renewal whois that
+  refuses closes at once (`node-mismatch`); one that doesn't answer leaves
+  it to the timer (`tailscale-down`). A new dial inside a session doesn't
+  rerun the pre-dial check: the session's lease covers it.
+- **Transport.** `link.PinnedTLS` is the one place `InsecureSkipVerify`
+  is set, with `VerifyConnection` requiring one certificate with the
+  pinned SPKI (an empty pin refuses all). HTTP/2 only (`Protocols`, and the
+  dial refuses a connection that didn't negotiate `h2`), `Proxy: nil`, no
+  `ClientSessionCache`, one idle connection, identity encoding
+  (`DisableCompression`, and `Accept-Encoding` never goes up), 64 KiB of
+  response headers (past it the HTTP/2 client drops the connection:
+  a server's own link to kill), and HTTP/2 pings after 30s idle.
+- **Header timeouts are per route** (`web.Route.Wait`, default
+  `DefaultWait` = 10s): `/send` and `POST /unsubscribe` 5 minutes, `/tag`
+  and the unsubscribe preview 30s, a part zip a minute. A flat 10s would
+  make every slow send's outcome unknown. The transport's own
+  `ResponseHeaderTimeout` is the 5-minute backstop.
+- **Hello** answers `accounts: [{name, email}]` too. That's where the
+  client gets the address a `/gmail` redirect's `authuser` must be: the
+  server is the only one that knows it, it's in the handshake before any
+  page is proxied, and trusting it costs nothing, since a server that lies
+  about its own accounts can only point a redirect at
+  `mail.google.com` under the fixed shape. Hello is bounded (64 KiB, 16
+  accounts, names by `config.ValidName`, emails printable with one `@`,
+  revision kept only as 40 hex); a protocol mismatch is judged before the
+  rest is parsed. `web.Protocol` stays 1: no client was ever released.
+- **Routing.** `web.ClientRoutes` builds the mux from the table without
+  `PeerOnly` routes. Local: `/open` (Auth.Open), `/theme.css` (this desk's
+  theme, `web.ServeTheme`), `/events` (503 until 5b). Before the mux, a
+  request with any `Service-Worker` header gets a 404, and `CONNECT` and
+  upgrades are refused.
+- **Requests up.** A placeholder authority that `Link.RoundTrip` replaces
+  with the checked address (so the Host the peer listener checks and the
+  address dialed can't disagree); the path and query as the browser sent
+  them; minus hop-by-hop, anything `Connection` names, `Cookie`,
+  `Authorization`, `Origin`, `Referer`, `Forwarded`, `X-Forwarded-*`,
+  `X-Real-Ip`, `Upgrade`, `TE`, `Trailer`, `Accept-Encoding` and any
+  `Pneu-*`; on `/static/` also the five validators (S8).
+- **Answers down.** `ModifyResponse` runs `Admit`, which runs Check, then
+  keeps: one `Content-Type` re-emitted with at most a token `charset`;
+  one all-digit `Content-Length`; on part routes a well-formed
+  `Content-Range` and `Accept-Ranges: bytes|none`; `Content-Disposition`
+  rebuilt from its parsed type and filename (valid UTF-8, `cleanFilename`,
+  255 bytes, `rfc5987`); `Location` as Check resolved it (local ones
+  become absolute on the client's origin). Any `Content-Encoding` but
+  identity is refused, as is a 304 on `/static/` (asked without
+  validators, a 304 would keep what the browser has). The response's own
+  header map is then emptied. The final writer swallows 1xx (and resets
+  its scratch map), installs the admitted set on the Auth middleware's
+  policy writer at the first final status, and after that hands out a
+  map nothing reads, so trailers go nowhere.
+- **Idle.** Each proxied body's `Read` arms a 60s timer that cancels that
+  request's context (an HTTP/2 stream reset); the timer runs only while
+  waiting on the server, so a slow browser doesn't count.
+- **Not sent or unknown (R10, N6).** A local answer carries `Pneu-Link`:
+  `not-sent` (502) when no connection was ever handed to the request
+  (`httptrace.GotConn` never fired: the link was down, or the dial or TLS
+  handshake failed), `unknown` (504, or 502 for a refused answer) otherwise.
+  GotConn fires only after the pinned handshake, so it's the line between
+  "nothing could have left" and "bytes may have". One conservative edge:
+  an HTTP/2 request retried onto a new connection after its first one died
+  unused has already seen GotConn, so it reads as unknown. Mutations get
+  `{"ok": false, "error": …, "link": …}` (tagFail's shape), GETs
+  text/plain. The page's rendering of it is 5b.
+- **Launch.** `launch` retries the link now (a probe when up) and, in the
+  background, once the link is up within 15s, `POST /sync?reason=launch`
+  upstream. Launches while one waits collapse. A `POST /sync` from the page
+  while the link is down retries it too (R and focus). The control socket
+  in client mode answers `launch` and `status`; `peers-reload` answers
+  `error client mode…`.
+
+- **Review fixes (Codex C1–C3).**
+  - *Untyped answers (C1).* net/http sniffs a type into any body that
+    has none, nosniff or not, after the proxy has admitted it. So only
+    301/302/303/307/308 are redirects, and only on routes whose `Location`
+    rule allows one; any other 3xx but 304 fails Check. Only 204, 304 and
+    those redirects may be untyped (`web.Untyped`). An untyped answer is
+    `Admitted.Bodiless`: the proxy closes the upstream body, forwards
+    none, and a redirect says `Content-Length: 0`. The final writer
+    refuses a typed-less answer that isn't bodiless (502), and a body
+    write without a type. The server's policy writer mirrors it: a
+    non-untyped status with no type gets `text/plain; charset=utf-8` at the
+    header write, and a body after an untyped header is refused
+    (`ErrUntypedBody`).
+  - *Lease from the whois (C2).* The lease runs from before the pre-dial
+    whois; the close timer is armed for what's left of it after hello, a
+    session whose lease ran out during hello is never published
+    (`tailscale-down`), and `RoundTrip` refuses once it has lapsed.
+  - *Unlink (C3).* The control socket's `unlink` (client daemon only, no
+    arguments): the link drops its identity and pin, closes every
+    connection of its session and of an attempt in flight, reports
+    `not-paired`, and never reconnects, not even on demand; the ack comes
+    after the connections are closed. `pneu client unpair` sends it
+    first: no daemon, it goes on; no ack (or no `XDG_RUNTIME_DIR` to ask
+    with), it removes nothing and says to stop the service and retry.
+
+- **Review fixes, round 3 (D1–D2).**
+  - *Lifecycle lock and required socket (D1).* The client daemon takes an
+    exclusive, non-blocking flock on `peer/daemon.lock` (a file never
+    replaced or removed), then its control socket, both before it loads
+    any credentials; without either it exits ("another pneu client is
+    running", "client mode needs its control socket"). An `unlink` that
+    arrives before the link exists stops it from starting. `pneu client
+    unpair` sends `unlink`; on an ack it deletes (the daemon has already
+    dropped the pairing from memory). If nothing answers (or there's no
+    `XDG_RUNTIME_DIR` to ask with) it takes the same lock: held means a
+    daemon runs without a reachable socket, so it removes nothing and
+    says to stop the service; free, it holds the lock across deleting the
+    credentials and rewriting the config, so no daemon starts mid-delete.
+  - *Unpair owns every session to the end (D2).* The link keeps every
+    session in a set from creation until its close has returned: an
+    attempt's before it's published, the live one, and ones going down
+    (`setDown` stops it being live but not owned). Pending to live is one
+    step under the lock, refused once unpaired. A session's close runs
+    once and a second caller waits for it, so `Unpair` (and a concurrent
+    second `Unpair`) returns only when the set is empty: every
+    connection closed.
+
+- **Review fixes, round 4 (E1–E2).**
+  - *The unpair transaction (E1).* A second stable lock, `peer/pair.lock`,
+    spans `pneu client unpair` from before it sends `unlink` until the
+    credentials and config are gone (10s wait, then it refuses), and spans
+    a starting daemon from taking `daemon.lock` until its credentials are
+    loaded and its link started. A daemon restarted after the old one
+    acked waits for the unpair and then finds nothing to load.
+  - *Dials in flight (E2).* A session counts each dial from its closed
+    check until the socket is registered or closed. Close cancels dials
+    in progress (the session's own context), closes the registered
+    connections, and waits for the count to reach zero, so a socket
+    established while it closes is gone before Unpair returns.
+- **Review fixes, round 5 (F1–F2).** Codex closed E1 and E2 and found two
+  more, fixed directly with mutation-checked tests.
+  - *Close waits for close (F1).* A tracked connection's socket close and
+    its removal from the set are one `once.Do`, so a second Close (Unpair
+    racing a failed handshake's close) waits for the first to finish. Go's
+    own second Close returns before the descriptor is gone.
+  - *Pair is a transaction too (F2).* `pneu client pair` holds `pair.lock`
+    from reading the config to writing it, and `unpair` reads the config
+    only after taking the lock, so neither acts on the other's half-written
+    state.
+
 ## Review status
 
 Round 2 (Codex, 2026-09-30) found R1, R2, R7, R13, R14, R16 and R17 closed

@@ -688,6 +688,17 @@ func (s *Server) HostOK(host string) bool {
 	return false
 }
 
+// Addrs are the host:port each listener is on, as HostOK accepts them.
+func (s *Server) Addrs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for _, bl := range s.lns {
+		out = append(out, bl.host)
+	}
+	return out
+}
+
 // track admits each request against its connection, so a reload can wait
 // for the last one to return. net/http's HTTP/2 serve loop doesn't wait for
 // its handler goroutines, so one can start after the connection is

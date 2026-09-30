@@ -112,6 +112,9 @@ func accountAdd(args []string) error {
 	if err != nil {
 		return err
 	}
+	if raw.Server != nil {
+		return fmt.Errorf("this machine is a client of %s: accounts live on the server (run pneu account add there)", raw.Server.SSH)
+	}
 	existing := -1
 	for i, a := range raw.Accounts {
 		switch {

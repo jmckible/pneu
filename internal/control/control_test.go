@@ -354,3 +354,35 @@ func TestPeersReloadAck(t *testing.T) {
 		t.Fatalf("foreign uid: %v", err)
 	}
 }
+
+// A client's daemon launches and answers status, but has no peers to
+// reload: an error naming why, never an ack.
+func TestClientMode(t *testing.T) {
+	var launches atomic.Int32
+	_, path := startServer(t, Handler{Launch: func() { launches.Add(1) }, Client: true})
+	if r, err := Send(path, Launch, time.Second); err != nil || r != "ok" || launches.Load() != 1 {
+		t.Fatalf("launch: %q %v", r, err)
+	}
+	if _, err := Send(path, Status, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	var unlinked atomic.Int32
+	_, path2 := startServer(t, Handler{Client: true, Unlink: func() error { unlinked.Add(1); return nil }})
+	if err := SendUnlink(path2); err != nil || unlinked.Load() != 1 {
+		t.Fatalf("unlink: %v", err)
+	}
+	if _, err := Send(path, Unlink, time.Second); err == nil {
+		t.Fatal("unlink without a handler acked")
+	}
+	_, srvPath := startServer(t, Handler{Unlink: func() error { return nil }})
+	if _, err := Send(srvPath, Unlink, time.Second); err == nil || !strings.Contains(err.Error(), "not a client") {
+		t.Fatalf("unlink on a server: %v", err)
+	}
+	if err := SendUnlink(filepath.Join(sockDir(t), "none")); !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("no daemon: %v", err)
+	}
+	err := ReloadPeers(path, 1, strings.Repeat("a", 64))
+	if err == nil || errors.Is(err, ErrPeersOff) || !strings.Contains(err.Error(), "client mode") {
+		t.Fatalf("peers-reload on a client: %v", err)
+	}
+}

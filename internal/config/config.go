@@ -8,7 +8,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Account is one Gmail account: its own lieer dir and its own notmuch database.
@@ -26,11 +29,23 @@ type Config struct {
 	// other machines' pneu clients reach this archive over the tailnet.
 	// Absent, nothing listens beyond loopback.
 	Peer *Peer `json:"peer,omitempty"`
-	// Server is a client's link to its server (build step 5). Kept as
-	// written so `pneu account add` round-trips it; Load refuses it for now,
-	// and always alongside accounts: a machine holds an archive or is a
-	// window onto one, never both.
-	Server json.RawMessage `json:"server,omitempty"`
+	// Server makes this machine a client of the server it names
+	// (docs/client.md): no mail here, the daemon proxies to that archive.
+	// Load refuses it alongside accounts or peer: a machine holds an
+	// archive or is a window onto one, never both. `pneu client pair`
+	// writes it; the credentials live in the state dir, not here.
+	Server *Server `json:"server,omitempty"`
+}
+
+// Server is a client's link to its server.
+type Server struct {
+	// SSH is the target the user typed at pairing: for `ssh -- <SSH>`
+	// only, never a display name.
+	SSH string `json:"ssh"`
+	// Node is the server's Tailscale StableID; its address is resolved
+	// from tailscaled by this, never by name.
+	Node string `json:"node"`
+	Port int    `json:"port"` // its peer port
 }
 
 // Peer is the peer listener's block.
@@ -133,11 +148,20 @@ func (c Config) normalize() (Config, error) {
 	if c.Port == 0 {
 		c.Port = DefaultPort
 	}
-	if len(c.Server) > 0 {
-		if len(c.Accounts) > 0 {
+	if c.Server != nil {
+		switch {
+		case len(c.Accounts) > 0:
 			return Config{}, errors.New("config: both accounts and server; a machine is a server (accounts) or a client (server), not both")
+		case c.Peer != nil:
+			return Config{}, errors.New("config: both peer and server; only a server (with accounts) runs a peer listener")
+		case !ValidSSHTarget(c.Server.SSH):
+			return Config{}, fmt.Errorf("config: server: bad ssh target %q", c.Server.SSH)
+		case !nodeRE.MatchString(c.Server.Node):
+			return Config{}, fmt.Errorf("config: server: bad node %q", c.Server.Node)
+		case c.Server.Port < 1 || c.Server.Port > 65535:
+			return Config{}, fmt.Errorf("config: server: bad port %d", c.Server.Port)
 		}
-		return Config{}, errors.New("config: client mode (server) isn't built yet")
+		return c, nil
 	}
 	if c.Peer != nil {
 		if c.Peer.Port < 1 || c.Peer.Port > 65535 || c.Peer.Port == c.Port {
@@ -166,6 +190,24 @@ func (c Config) normalize() (Config, error) {
 		}
 	}
 	return c, nil
+}
+
+// nodeRE is a Tailscale StableID, as peer.ValidNode has it.
+var nodeRE = regexp.MustCompile(`^[A-Za-z0-9]{1,64}$`)
+
+// ValidSSHTarget reports whether t can be handed to ssh after "--": not
+// empty, at most 255 bytes, no leading '-' (never an option, whatever ssh
+// does with "--"), and no whitespace or control characters.
+func ValidSSHTarget(t string) bool {
+	if t == "" || len(t) > 255 || t[0] == '-' || !utf8.ValidString(t) {
+		return false
+	}
+	for _, r := range t {
+		if unicode.IsSpace(r) || unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return false
+		}
+	}
+	return true
 }
 
 // ExpandHome expands a leading "~" or "~/".

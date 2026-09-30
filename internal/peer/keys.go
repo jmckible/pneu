@@ -64,28 +64,38 @@ func PrepareDir(dir string) error {
 	return nil
 }
 
-// keyFile holds the private key and certificate together, so one rename
-// makes both at once.
-const keyFile = "server.pem"
+// keyFile holds the server's private key and certificate together, so one
+// link makes both at once; ClientKeyFile, a client's.
+const (
+	keyFile       = "server.pem"
+	ClientKeyFile = "client.pem"
+)
 
 // LoadOrCreateServer is the server's identity in dir
 // ($XDG_STATE_HOME/pneu/peer), made on first need. The directory and the
 // file are checked on every load.
 func LoadOrCreateServer(dir, host string) (Identity, error) {
+	return LoadOrCreateIdentity(dir, keyFile, "pneu "+host)
+}
+
+// LoadOrCreateIdentity is the key pair in dir/file, made on first need
+// with cn in its certificate: the server's, or a client's (pneu client
+// pair). The directory and the file are checked on every load.
+func LoadOrCreateIdentity(dir, file, cn string) (Identity, error) {
 	if err := PrepareDir(dir); err != nil {
 		return Identity{}, err
 	}
-	path := filepath.Join(dir, keyFile)
+	path := filepath.Join(dir, file)
 	id, err := loadIdentity(path)
 	if !errors.Is(err, fs.ErrNotExist) {
 		return id, err
 	}
-	b, err := newIdentityPEM("pneu " + host)
+	b, err := newIdentityPEM(cn)
 	if err != nil {
 		return Identity{}, err
 	}
 	// Link, not rename: a racing first run keeps whichever landed first.
-	tmp, err := os.CreateTemp(dir, ".server-*")
+	tmp, err := os.CreateTemp(dir, ".key-*")
 	if err != nil {
 		return Identity{}, fmt.Errorf("peer: %w", err)
 	}
@@ -114,6 +124,40 @@ func LoadOrCreateServer(dir, host string) (Identity, error) {
 	}
 	return loadIdentity(path)
 }
+
+// LoadIdentity is the key pair in dir/file, which must exist; dir and file
+// are checked as LoadOrCreateIdentity checks them.
+func LoadIdentity(dir, file string) (Identity, error) {
+	if err := PrepareDir(dir); err != nil {
+		return Identity{}, err
+	}
+	return loadIdentity(filepath.Join(dir, file))
+}
+
+// ReadPrivate reads path, which must be a regular file of ours, exactly
+// 0600, not a symlink, and at most max bytes.
+func ReadPrivate(path string, max int64) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if err := checkPrivate(f, path); err != nil {
+		return nil, err
+	}
+	b, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > max {
+		return nil, fmt.Errorf("peer: %s is over %d bytes", path, max)
+	}
+	return b, nil
+}
+
+// WritePrivate replaces path with b, 0600, atomically (temp, fsync,
+// rename, fsync the directory).
+func WritePrivate(path string, b []byte) error { return writeAtomic(path, b) }
 
 func loadIdentity(path string) (Identity, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)

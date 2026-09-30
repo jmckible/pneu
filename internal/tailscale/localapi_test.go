@@ -157,3 +157,36 @@ func TestLocalOversize(t *testing.T) {
 		t.Fatal("oversize answer accepted")
 	}
 }
+
+// status?peers=true as 1.102.4 answers it (trimmed): the peer map is keyed
+// by node key, "ID" is the StableID, Tags is absent when empty.
+const peersJSON = `{
+	"BackendState": "Running",
+	"Self": {"ID": "nMAC1CNTRL", "NodeID": 7, "UserID": 131792011117475, "TailscaleIPs": ["100.91.195.0"]},
+	"Peer": {
+		"nodekey:0378": {"ID": "nxzXSZ2TfK11CNTRL", "NodeID": 2390029678764129, "HostName": "dell", "DNSName": "dell.x.ts.net.",
+			"UserID": 131792011117475, "TailscaleIPs": ["100.121.74.67", "fd7a:115c:a1e0::2a01:4a5c"],
+			"Online": true, "LastSeen": "0001-01-01T00:00:00Z", "Active": true},
+		"nodekey:a1b2": {"ID": "nTHnBkfDVn11CNTRL", "UserID": 7909936612895534, "Tags": ["tag:ingress"], "ShareeNode": true,
+			"TailscaleIPs": ["fd7a:115c:a1e0::3901:8ebc"], "Online": false, "LastSeen": "2026-09-29T19:26:43.1Z"}
+	}
+}`
+
+func TestLocalStatusPeers(t *testing.T) {
+	path := fakeTailscaled(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/localapi/v0/status" || r.URL.Query().Get("peers") != "true" {
+			t.Errorf("request %s", r.URL)
+		}
+		w.Write([]byte(peersJSON))
+	})
+	st, err := newLocal(path, os.Getuid()).StatusPeers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dell, off := st.Peer["nodekey:0378"], st.Peer["nodekey:a1b2"]
+	if st.Self.StableID != "nMAC1CNTRL" || len(st.Peer) != 2 || dell.StableID != "nxzXSZ2TfK11CNTRL" || !dell.Online ||
+		len(dell.TailscaleIPs) != 2 || dell.TailscaleIPs[0] != netip.MustParseAddr("100.121.74.67") ||
+		off.Online || off.LastSeen.IsZero() {
+		t.Fatalf("status %+v", st)
+	}
+}

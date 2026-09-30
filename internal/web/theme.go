@@ -36,9 +36,12 @@ func configDir() (string, error) {
 // theme serves the override sheet, or an empty sheet when there is none, so
 // base.html can always link it. Never cached (CacheNoStore): theme-set
 // rewrites it in place.
-func (s *Server) theme(w http.ResponseWriter, r *http.Request) {
+func (s *Server) theme(w http.ResponseWriter, r *http.Request) { ServeTheme(w, s.ThemePath) }
+
+// ServeTheme answers /theme.css from path ("": ThemePath()): the server's
+// handler, and the client daemon's, which serves its own desk's theme.
+func ServeTheme(w http.ResponseWriter, p string) {
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	p := s.ThemePath
 	if p == "" {
 		var err error
 		if p, err = ThemePath(); err != nil {

@@ -83,6 +83,15 @@ type helloDoc struct {
 	Modified bool   `json:"modified"`
 	Epoch    string `json:"epoch"`
 	Gen      uint64 `json:"gen"`
+	// Accounts are the archive's accounts: the client checks a /gmail
+	// redirect's authuser against these addresses (validGmailURL).
+	Accounts []HelloAccount `json:"accounts"`
+}
+
+// HelloAccount is one account in hello.
+type HelloAccount struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
 func (s *Server) peerHello(w http.ResponseWriter, r *http.Request) {
@@ -92,5 +101,9 @@ func (s *Server) peerHello(w http.ResponseWriter, r *http.Request) {
 	}
 	in := control.Self()
 	l := s.viewLabel()
-	tagJSON(w, http.StatusOK, helloDoc{Protocol: Protocol, Name: name, Revision: in.Revision, Modified: in.Modified, Epoch: l.Epoch, Gen: l.Gen})
+	accts := make([]HelloAccount, 0, len(s.Accounts))
+	for _, a := range s.Accounts {
+		accts = append(accts, HelloAccount{Name: a.Name, Email: a.Email})
+	}
+	tagJSON(w, http.StatusOK, helloDoc{Protocol: Protocol, Name: name, Revision: in.Revision, Modified: in.Modified, Epoch: l.Epoch, Gen: l.Gen, Accounts: accts})
 }

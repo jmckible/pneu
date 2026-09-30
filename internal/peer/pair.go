@@ -2,10 +2,12 @@ package peer
 
 import (
 	"bytes"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 )
 
 // MaxAddRequest bounds `pneu peer add --stdin`'s input.
@@ -65,49 +67,114 @@ func ParseAddRequest(r io.Reader) (AddRequest, Record, error) {
 	return req, Record{Name: req.Name, Node: req.Node, SPKI: SPKI(c), Origin: req.Origin}, nil
 }
 
-// decodeAddRequest walks the tokens itself: '{', then exactly the keys
-// name, node, origin and cert, once each, each with a string value, then
-// '}' and the end of input.
+// decodeAddRequest reads exactly the keys name, node, origin and cert.
 func decodeAddRequest(b []byte) (AddRequest, error) {
 	var req AddRequest
-	fields := map[string]*string{"name": &req.Name, "node": &req.Node, "origin": &req.Origin, "cert": &req.Cert}
+	err := decodeStrict(b, map[string]any{"name": &req.Name, "node": &req.Node, "origin": &req.Origin, "cert": &req.Cert})
+	if err != nil && errors.Is(err, errMissing) {
+		return req, errors.New("name, node, origin and cert are all required")
+	}
+	return req, err
+}
+
+var errMissing = errors.New("a field is missing")
+
+// decodeStrict walks the tokens itself: '{', then exactly the keys of
+// fields, once each, spelled exactly, each a string (*string) or an
+// integer (*int), then '}' and the end of input. encoding/json would keep
+// the last of a duplicate and match "Name" to name.
+func decodeStrict(b []byte, fields map[string]any) error {
 	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
 	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
-		return req, errors.New("not a JSON object")
+		return errors.New("not a JSON object")
 	}
 	seen := map[string]bool{}
 	for dec.More() {
 		t, err := dec.Token()
 		if err != nil {
-			return req, err
+			return err
 		}
 		k, _ := t.(string)
 		dst, ok := fields[k]
 		switch {
 		case !ok:
-			return req, fmt.Errorf("unknown field %q", k)
+			return fmt.Errorf("unknown field %q", k)
 		case seen[k]:
-			return req, fmt.Errorf("%q twice", k)
+			return fmt.Errorf("%q twice", k)
 		}
 		seen[k] = true
 		v, err := dec.Token()
 		if err != nil {
-			return req, err
+			return err
 		}
-		str, ok := v.(string)
-		if !ok {
-			return req, fmt.Errorf("%q isn't a string", k)
+		switch d := dst.(type) {
+		case *string:
+			str, ok := v.(string)
+			if !ok {
+				return fmt.Errorf("%q isn't a string", k)
+			}
+			*d = str
+		case *int:
+			n, ok := v.(json.Number)
+			if !ok {
+				return fmt.Errorf("%q isn't a number", k)
+			}
+			i, err := strconv.Atoi(n.String())
+			if err != nil {
+				return fmt.Errorf("%q isn't an integer", k)
+			}
+			*d = i
 		}
-		*dst = str
 	}
 	if t, err := dec.Token(); err != nil || t != json.Delim('}') {
-		return req, errors.New("unterminated object")
+		return errors.New("unterminated object")
 	}
 	if _, err := dec.Token(); err != io.EOF {
-		return req, errors.New("trailing data after the object")
+		return errors.New("trailing data after the object")
 	}
 	if len(seen) != len(fields) {
-		return req, errors.New("name, node, origin and cert are all required")
+		return errMissing
 	}
-	return req, nil
+	return nil
+}
+
+// MaxAddResult bounds what the client reads of `pneu peer add`'s stdout.
+const MaxAddResult = 16 << 10
+
+// ParseAddResult is the client's strict reading of `pneu peer add`'s
+// stdout (docs/client.md, "Pairing", step 4): at most MaxAddResult bytes,
+// one JSON object of exactly AddResult's fields, a certificate that is one
+// ECDSA P-256 certificate (ParseCertPEM), a StableID, a port, and an
+// applied state it knows. The protocol is returned for the caller to
+// compare: a mismatch has its own message.
+func ParseAddResult(b []byte) (AddResult, *x509.Certificate, error) {
+	var res AddResult
+	if len(b) > MaxAddResult {
+		return res, nil, fmt.Errorf("answer over %d bytes", MaxAddResult)
+	}
+	b = bytes.TrimSuffix(b, []byte("\n"))
+	err := decodeStrict(b, map[string]any{
+		"cert": &res.Cert, "node": &res.Node, "port": &res.Port, "protocol": &res.Protocol, "name": &res.Name, "applied": &res.Applied,
+	})
+	if errors.Is(err, errMissing) {
+		return res, nil, errors.New("answer: cert, node, port, protocol, name and applied are all required")
+	}
+	if err != nil {
+		return res, nil, fmt.Errorf("answer: %w", err)
+	}
+	c, err := ParseCertPEM(res.Cert)
+	switch {
+	case err != nil:
+		return res, nil, fmt.Errorf("answer: %w", err)
+	case !ValidNode(res.Node):
+		return res, nil, errors.New("answer: node isn't a Tailscale stable ID")
+	case res.Port < 1 || res.Port > 65535:
+		return res, nil, fmt.Errorf("answer: bad port %d", res.Port)
+	case !ValidName(res.Name):
+		return res, nil, errors.New("answer: bad name")
+	case res.Applied != "live" && res.Applied != "next-start" && res.Applied != "pending":
+		return res, nil, errors.New("answer: unknown applied state")
+	}
+	return res, c, nil
 }

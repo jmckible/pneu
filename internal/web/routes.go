@@ -12,6 +12,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Route is one entry of the route table: a method and ServeMux pattern and
@@ -41,7 +42,14 @@ type Route struct {
 	Dest        DestRule
 	Location    LocRule
 	Cache       CacheRule
+	// Wait is how long the client proxy waits for the answer's headers
+	// (0: DefaultWait). Longer only where the server does slow work before
+	// answering: a timeout there would make a send's outcome unknown.
+	Wait time.Duration
 }
+
+// DefaultWait is the client proxy's response-header timeout (R14).
+const DefaultWait = 10 * time.Second
 
 // DispRule says whether a response may carry Content-Disposition.
 type DispRule int
@@ -134,19 +142,21 @@ var Routes = []Route{
 	// {msgid} is one path segment: callers url.PathEscape it ('/' is legal in a Message-ID).
 	{Method: "GET", Pattern: "/body/{account}/{msgid}", Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).body)},
 	{Method: "GET", Pattern: "/part/{account}/{msgid}/{n}", Types: partTypes, Disposition: DispPart, Dest: DestSVGImage, Cache: CacheNoStore, Handler: handler((*Server).part)},
-	{Method: "GET", Pattern: "/part/{account}/{msgid}/{n}/zip", Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).partZip)},
-	{Method: "POST", Pattern: "/tag", Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).tag)},
+	{Method: "GET", Pattern: "/part/{account}/{msgid}/{n}/zip", Types: jsonTypes, Cache: CacheNoStore, Wait: time.Minute, Handler: handler((*Server).partZip)},
+	// Waits on the Xapian lock up to notmuch.TagTimeout.
+	{Method: "POST", Pattern: "/tag", Types: jsonTypes, Cache: CacheNoStore, Wait: 30 * time.Second, Handler: handler((*Server).tag)},
 	{Method: "POST", Pattern: "/sync", Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).syncNow)},
 	{Method: "GET", Pattern: "/status", Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).status)},
 	{Method: "GET", Pattern: "/reply/{account}/{msgid}", Types: composeTypes, Cache: CacheNoStore, Handler: handler((*Server).reply)},
 	{Method: "GET", Pattern: "/compose", Types: composeTypes, Cache: CacheNoStore, Handler: handler((*Server).compose)},
 	// Answers with the re-rendered form, or a bodiless redirect to the sent message.
-	{Method: "POST", Pattern: "/send", Types: composeTypes, Location: LocLocal, Cache: CacheNoStore, Handler: handler((*Server).send)},
+	// SendWait for the account lock, then gmi's own PushTimeout.
+	{Method: "POST", Pattern: "/send", Types: composeTypes, Location: LocLocal, Cache: CacheNoStore, Wait: 5 * time.Minute, Handler: handler((*Server).send)},
 	{Method: "GET", Pattern: "/addresses", Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).addresses)},
 	// {msgid} as for /body. The literal "result" segment wins over {account}.
-	{Method: "GET", Pattern: "/unsubscribe/{account}/{msgid}", Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).unsubPreview)},
+	{Method: "GET", Pattern: "/unsubscribe/{account}/{msgid}", Types: jsonTypes, Cache: CacheNoStore, Wait: 30 * time.Second, Handler: handler((*Server).unsubPreview)},
 	{Method: "GET", Pattern: "/unsubscribe-result/{token}", Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).unsubResultGet)},
-	{Method: "POST", Pattern: "/unsubscribe", Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).unsubExecute)},
+	{Method: "POST", Pattern: "/unsubscribe", Types: jsonTypes, Cache: CacheNoStore, Wait: 5 * time.Minute, Handler: handler((*Server).unsubExecute)},
 	{Method: "POST", Pattern: "/accounts/{account}/pull", Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).retryPull)},
 	{Method: "POST", Pattern: "/accounts/{account}/reauth", Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).reauth)},
 	{Method: "POST", Pattern: "/accounts/{account}/reauth/cancel", Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).reauthCancel)},
@@ -178,14 +188,25 @@ func (s *Server) serveRoutes() *http.ServeMux { return s.routesFor(onLoopback) }
 func (s *Server) peerRoutes() *http.ServeMux  { return s.routesFor(onPeer) }
 
 func (s *Server) routesFor(keep func(*Route) bool) *http.ServeMux {
-	return routeMux(Routes, keep, func(rt *Route) http.Handler {
-		next := rt.Handler(s)
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if pw := findPolicyWriter(w); pw != nil {
-				pw.route = rt
-			}
-			next.ServeHTTP(w, r)
-		})
+	return routeMux(Routes, keep, func(rt *Route) http.Handler { return routed(rt, rt.Handler(s)) })
+}
+
+// ClientRoutes is the client daemon's mux (docs/client.md, "Routing"):
+// every route a browser may ask for, all but PeerOnly, each served by
+// h(route) and told its route as the server's handlers are. Anything else
+// is the mux's own 404, answered locally.
+func ClientRoutes(h func(rt *Route) http.Handler) *http.ServeMux {
+	return routeMux(Routes, onLoopback, func(rt *Route) http.Handler { return routed(rt, h(rt)) })
+}
+
+// routed tells the middleware's writer which route answers, for its cache
+// rule and the check.
+func routed(rt *Route, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if pw := findPolicyWriter(w); pw != nil {
+			pw.route = rt
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -254,14 +275,36 @@ var (
 	unroutedRedirect = Route{Types: redirectTypes, Location: LocLocal, Cache: CacheNoStore}
 )
 
+// RedirectStatus: the statuses Fetch follows. Any other 3xx but 304 is
+// refused: a browser renders its body.
+func RedirectStatus(status int) bool {
+	switch status {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		return true
+	}
+	return false
+}
+
+// Untyped reports whether a response with status may go without a
+// Content-Type: 204, 304 and redirects, and then only without a body, so
+// nothing is left for net/http to sniff (it sniffs even under nosniff).
+func Untyped(status int) bool {
+	return status == http.StatusNoContent || status == http.StatusNotModified || RedirectStatus(status)
+}
+
 // Check reports why a response with status and headers h, answering r on
 // route rt (nil: unrouted), breaks the route's contract.
 func (c Checker) Check(rt *Route, status int, h http.Header, r *http.Request) error {
 	if rt == nil {
 		rt = &unrouted
-		if status >= 300 && status < 400 {
+		if RedirectStatus(status) {
 			rt = &unroutedRedirect
 		}
+	}
+	if status >= 300 && status < 400 && status != http.StatusNotModified && !RedirectStatus(status) {
+		// 300 and the rest aren't redirects to Fetch: their body would
+		// render as the document.
+		return fmt.Errorf("status %d", status)
 	}
 	pv := h.Values(PolicyHeader)
 	if len(pv) != 1 {
@@ -276,8 +319,9 @@ func (c Checker) Check(rt *Route, status int, h http.Header, r *http.Request) er
 	mt := ""
 	switch len(cts) {
 	case 0:
-		// A redirect, a 304, or a 204 may have no body to type.
-		if !(status >= 300 && status < 400 || status == http.StatusNoContent) {
+		// A redirect, a 304, or a 204 may have no body to type; they
+		// then carry none (Untyped).
+		if !Untyped(status) {
 			return fmt.Errorf("no Content-Type on a %d", status)
 		}
 	case 1:
@@ -304,7 +348,8 @@ func (c Checker) Check(rt *Route, status int, h http.Header, r *http.Request) er
 	if err := checkDisposition(rt, p, status, mt, h); err != nil {
 		return err
 	}
-	return c.checkLocation(rt, status, h, r)
+	_, err := c.location(rt, status, h, r)
+	return err
 }
 
 func typeAllowed(allowed []string, mt string) bool {
@@ -347,20 +392,23 @@ func checkDisposition(rt *Route, p Policy, status int, mt string, h http.Header)
 	return nil
 }
 
-func (c Checker) checkLocation(rt *Route, status int, h http.Header, r *http.Request) error {
+// location checks a response's Location against the route's rule and
+// returns what may be sent on: "" when there is none, the local target
+// resolved against the origin, or the account's Gmail URL as validated.
+func (c Checker) location(rt *Route, status int, h http.Header, r *http.Request) (string, error) {
 	ls := h.Values("Location")
-	redirect := status >= 300 && status < 400 && status != http.StatusNotModified
+	redirect := RedirectStatus(status)
 	if !redirect || rt.Location == LocNone {
 		if len(ls) > 0 {
-			return errors.New("unexpected Location")
+			return "", errors.New("unexpected Location")
 		}
 		if redirect {
-			return fmt.Errorf("%d on a route that doesn't redirect", status)
+			return "", fmt.Errorf("%d on a route that doesn't redirect", status)
 		}
-		return nil
+		return "", nil
 	}
 	if len(ls) != 1 {
-		return fmt.Errorf("%d Location values", len(ls))
+		return "", fmt.Errorf("%d Location values", len(ls))
 	}
 	switch rt.Location {
 	case LocGmail:
@@ -369,19 +417,17 @@ func (c Checker) checkLocation(rt *Route, status int, h http.Header, r *http.Req
 			email, ok = c.Email(r.PathValue("account"))
 		}
 		if !ok || !validGmailURL(ls[0], email) {
-			return fmt.Errorf("Location %q isn't the account's Gmail", ls[0])
+			return "", fmt.Errorf("Location %q isn't the account's Gmail", ls[0])
 		}
+		return ls[0], nil
 	default:
 		base, err := url.Parse(c.Origin)
 		if err != nil {
-			return err
+			return "", err
 		}
 		base = base.ResolveReference(&url.URL{Path: r.URL.Path, RawPath: r.URL.RawPath})
-		if _, err := localLocation(ls[0], base); err != nil {
-			return err
-		}
+		return localLocation(ls[0], base)
 	}
-	return nil
 }
 
 // gmailPrefix is gmailURL's fixed part for an account.

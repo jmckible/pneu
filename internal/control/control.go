@@ -39,6 +39,9 @@ const (
 	Launch Command = "launch"
 	// Status answers the daemon's build and instance (Info).
 	Status Command = "status"
+	// Unlink, to a client's daemon only (pneu client unpair): forget the
+	// pairing and close the link's connections; ok once they're closed.
+	Unlink Command = "unlink"
 	// PeersReload, as "peers-reload <generation> <hash>", asks the daemon to
 	// make that generation of peers.json live (ReloadPeers).
 	PeersReload Command = "peers-reload"
@@ -102,6 +105,10 @@ func Self() Info {
 type Handler struct {
 	Launch      func()
 	PeersReload func(gen uint64, hash string) error
+	// Client: the daemon is a client's, which has no peers to reload.
+	Client bool
+	// Unlink (client only) returns once the link's connections are closed.
+	Unlink func() error
 }
 
 // Server accepts commands on the socket until Close.
@@ -242,6 +249,8 @@ func (s *Server) answer(cmd Command) string {
 		switch {
 		case !ok:
 			return "error bad peers-reload"
+		case s.h.Client:
+			return "error " + clientMode
 		case s.h.PeersReload == nil:
 			return "error " + peersOff
 		}
@@ -256,6 +265,14 @@ func (s *Server) answer(cmd Command) string {
 			s.h.Launch()
 		}
 		return "ok"
+	case Unlink:
+		if !s.h.Client || s.h.Unlink == nil {
+			return "error not a client"
+		}
+		if err := s.h.Unlink(); err != nil {
+			return "error " + oneLine(err.Error())
+		}
+		return "ok"
 	case Status:
 		b, err := json.Marshal(Self())
 		if err != nil {
@@ -267,8 +284,12 @@ func (s *Server) answer(cmd Command) string {
 	}
 }
 
-// peersOff is the reply when the daemon runs no peer listener.
-const peersOff = "peers off"
+// peersOff is the reply when the daemon runs no peer listener; clientMode,
+// when it's a client's.
+const (
+	peersOff   = "peers off"
+	clientMode = "client mode: peers are paired on the server"
+)
 
 var (
 	// ErrNotRunning: nothing answers on the socket, so no daemon has a peer
@@ -416,6 +437,17 @@ func peerUID(c *net.UnixConn) (int, error) {
 		return -1, cerr
 	}
 	return int(cred.Uid), nil
+}
+
+// SendUnlink asks a client's daemon to forget its pairing, and returns
+// once it has closed the link's connections. ErrNotRunning when nothing
+// answers; any other error means it may still hold them.
+func SendUnlink(path string) error {
+	_, err := Send(path, Unlink, Timeout)
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) {
+		return fmt.Errorf("%w (%v)", ErrNotRunning, err)
+	}
+	return err
 }
 
 // Send sends cmd to the daemon at path and returns its reply. It refuses a
