@@ -246,6 +246,90 @@ article.message > header .cc { flex-basis: 100%; order: 3; overflow-wrap: anywhe
 article.message > header .pos { font-size: 12px; }
 article.message.flagged > header .from::after { content: " ★"; color: var(--accent); }
 
+/* The o chip (actions.js chip): the message's declared link, `o name →
+   destination`. The fixed columns (o, the arrow, the gaps) never shrink, so
+   they are reserved first; the name gives way next (its shrink factor
+   dwarfs the destination's, so it goes to nothing before the destination
+   gives a pixel, with an ellipsis on the way); the destination is never
+   clipped and wraps anywhere in what is left. Sender strings are isolated
+   <bdi>s with their controls drawn as escapes. Only on an expanded
+   message. */
+article.message > header > .cta {
+  order: 4;
+  display: flex;
+  align-items: baseline;
+  gap: 1ch;
+  max-width: 100%;
+  margin: 2px 0 0;
+  padding: 0 0.75ch;
+  font: inherit;
+  color: var(--fg);
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+article.message > header > .cta:hover { border-color: var(--accent); }
+article.message > header > .cta:focus { outline: none; }
+.cta kbd { flex: none; font: inherit; color: var(--accent); }
+.cta .arrow { flex: none; color: var(--muted); }
+.cta bdi.name { flex: 0 100000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cta .dest { flex: 0 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+/* o with the chip out of view scrolls it in and marks it (actions.js
+   primary); the next o opens. */
+article.message > header > .cta.reveal { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.cta .redirect { margin-left: 1ch; color: var(--muted); }
+.cta bdi.untrusted, #status bdi.untrusted { unicode-bidi: isolate; }
+.cta .ctl, #status .ctl {
+  color: var(--accent);
+  border: 1px dashed color-mix(in oklab, var(--accent) 50%, var(--bg));
+  border-radius: 2px;
+  padding: 0 1px;
+}
+article.message.collapsed > header > .cta { display: none; }
+/* A guess (actions.js guess, the button heuristic): the same chip, dashed,
+   with a tag saying so. Its link is marked over the frame by a layer in
+   this document the size of the frame's viewport (the frame's box clips
+   it; the pane's scroll carries it; the sticky titles, the key bar and
+   dialogs stack above it), on the cursor message only. */
+article.message > header > .cta.guess { border-style: dashed; border-color: color-mix(in oklab, var(--accent) 45%, var(--bg)); }
+.cta .tag { flex: none; font-size: 12px; color: var(--muted); }
+.body[data-kind=html] { position: relative; }
+.cta-mark { position: absolute; overflow: hidden; pointer-events: none; }
+.cta-mark[hidden], article.message:not(.selected) .cta-mark { display: none; }
+.cta-mark > span {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px dashed var(--accent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* Link hints (actions.js hints): labels in this document over the frame,
+   in a layer clipped to the thread pane and the viewport. Dialogs are in
+   the top layer, above it; so is the key bar (z-index 2) and the status
+   line inside it, which shows the selected destination: no label may
+   paint over it. The labels take no clicks. */
+#hints {
+  position: fixed;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+#hints .hint {
+  position: absolute;
+  padding: 0 3px;
+  font: bold 12px/1.3 monospace;
+  color: var(--bg);
+  background: var(--accent);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px var(--bg);
+  text-transform: uppercase;
+}
+#hints .hint.off, #hints .hint.under { display: none; }
+#hints .hint.on { color: var(--accent); background: var(--bg); box-shadow: 0 0 0 2px var(--accent); }
+
 article.message.collapsed > .body,
 article.message.collapsed > .attachments,
 article.message.collapsed > header .to,
@@ -452,6 +536,29 @@ body[data-keys=compose] #keybar .keys[data-for=compose] { display: block; }
   cursor: pointer;
 }
 #status button.undo:hover, #status button.undo:focus-visible { color: var(--bg); background: var(--accent); outline: none; }
+/* Link hints' line: a selection's destination is shown in full, so the
+   line lifts off the key bar and wraps, scrolling past a few lines. */
+#status.hint {
+  position: fixed;
+  right: 1ch;
+  bottom: calc(var(--keybar-h) + 4px);
+  z-index: 3;
+  max-width: min(100ch, calc(100vw - 2ch));
+  max-height: 8em;
+  overflow: auto;
+  padding: 3px 1ch;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  transition: none;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 2px;
+}
+#status.hint kbd { font: inherit; color: var(--accent); }
+#status.hint .bad { color: color-mix(in srgb, #e06c75 70%, var(--fg)); }
+#status.hint .redirect { color: var(--muted); }
 #status.error { color: color-mix(in srgb, #e06c75 70%, var(--fg)); }
 
 dialog#keys {
@@ -470,6 +577,85 @@ dialog#keys dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 3ch; m
 dialog#keys dt { text-align: right; }
 dialog#keys dd { margin: 0; }
 dialog#keys kbd { font: inherit; color: var(--accent); }
+
+/* The unsubscribe confirmation (actions.js, docs/actions.md), dressed as the
+   help overlay. Sender strings are isolated <bdi>s with their controls drawn
+   as escapes; the destination has its own line, first, that nothing else
+   can push out; the long parts scroll inside the dialog. */
+dialog#unsub {
+  width: min(84ch, calc(100vw - 2ch));
+  max-height: calc(100vh - 32px);
+  padding: 12px 2ch 14px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font: inherit;
+  overflow: auto;
+}
+dialog#unsub[open] { display: flex; flex-direction: column; gap: 8px; }
+dialog#unsub::backdrop { background: rgb(0 0 0 / 0.45); }
+dialog#unsub:focus { outline: none; }
+/* Once armed, Tab reaches the disclosure and the scrollable fields. */
+dialog#unsub [tabindex="0"]:focus-visible, dialog#unsub summary:focus-visible {
+  outline: 1px dashed var(--accent);
+  outline-offset: 1px;
+}
+dialog#unsub h2 { margin: 0; font-size: inherit; color: var(--muted); font-weight: normal; }
+/* break-spaces: runs and edge spaces show as sent (a subject is sent verbatim). */
+dialog#unsub bdi.untrusted { unicode-bidi: isolate; overflow-wrap: anywhere; white-space: break-spaces; }
+dialog#unsub .ctl {
+  color: var(--accent);
+  border: 1px dashed color-mix(in oklab, var(--accent) 50%, var(--bg));
+  border-radius: 2px;
+  padding: 0 1px;
+}
+dialog#unsub p { margin: 0; }
+dialog#unsub .dest {
+  flex: none;
+  display: grid;
+  grid-template-columns: 8ch minmax(0, 1fr);
+  gap: 1ch;
+  min-height: 1.4em;
+  padding: 4px 1ch;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in oklab, var(--accent) 8%, var(--bg));
+}
+dialog#unsub .dest bdi { display: block; min-width: 0; color: var(--fg); }
+dialog#unsub .dest.url bdi, dialog#unsub .dest bdi.url { max-height: 8em; overflow: auto; }
+dialog#unsub .label, dialog#unsub dt { color: var(--muted); }
+dialog#unsub dl { display: grid; grid-template-columns: 8ch minmax(0, 1fr); gap: 3px 1ch; margin: 0; }
+dialog#unsub dd { margin: 0; min-width: 0; max-height: 6em; overflow: auto; }
+dialog#unsub details summary { color: var(--muted); cursor: pointer; }
+dialog#unsub details bdi { display: block; margin-top: 4px; max-height: 8em; overflow: auto; }
+dialog#unsub pre.mailbody {
+  margin: 0;
+  padding: 6px 1ch;
+  max-height: 16em;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font: inherit;
+}
+dialog#unsub pre .empty { color: var(--muted); }
+dialog#unsub .note { color: var(--muted); }
+dialog#unsub .note.bad { color: var(--fg); border-left: 3px solid var(--accent); padding-left: 1ch; }
+dialog#unsub .actions { display: flex; gap: 1ch; justify-content: flex-end; margin-top: 4px; }
+dialog#unsub .actions:empty { display: none; }
+dialog#unsub button {
+  padding: 1px 8px;
+  font: inherit;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+dialog#unsub button:hover { border-color: var(--muted); }
+dialog#unsub kbd { font: inherit; color: var(--accent); }
 
 /* The attachment viewer (viewer.js): near-fullscreen, dressed as the help
    overlay. Its header is a title row; the stage scrolls. */

@@ -16,6 +16,9 @@
 //   DOMPurify — depth: drops script/handlers/javascript: (01–04, 18–23, 31, 32),
 //             and the elements that would act before or around CSP (06, 07,
 //             08, 09).
+//   JSON-LD — an uponSanitizeElement hook, live for the one sanitize call,
+//             copies the text of ld+json scripts in the document tree for
+//             the o action (46–53); nothing it reads goes back in.
 //   post-processing — link targets (17), cid rewrite (15), srcset (24),
 //             same-origin GETs (30), sizing (27, 28, 33), srcdoc as a DOM
 //             property only (34), loopback/LAN/app-path image and CSS URLs
@@ -478,6 +481,40 @@
 
   var LINK_OK = /^(?:https?:\/\/|mailto:)/i;
 
+  // captureLd is the uponSanitizeElement hook assemble() holds for the one
+  // sanitize call: it copies the text of an HTML <script> whose type,
+  // trimmed and lowercased, is exactly application/ld+json, and nothing
+  // else, into out; the element itself goes as DOMPurify always removes it,
+  // and the text is only ever handed to JSON.parse (actions.js). Only a
+  // script in the document tree counts: every ancestor an HTML element up
+  // to <html>, none of them <noscript> (whose parse depends on scripting,
+  // 21) or <template> (whose content isn't in the tree). DOMPurify drops
+  // both whole without visiting their content anyway. Comments and raw
+  // text never make an element. At most LD_BLOCKS + 1 are kept, the extra
+  // one saying there were too many; a text past LD_BYTES UTF-16 units (so
+  // past that many bytes) is kept as false.
+  var HTML_NS = 'http://www.w3.org/1999/xhtml';
+  var LD_BLOCKS = 4, LD_BYTES = 65536;
+  var textOf = getter(Node.prototype, 'textContent');
+  var nsOf = getter(Element.prototype, 'namespaceURI');
+  var localOf = getter(Element.prototype, 'localName');
+  var ownerOf = getter(Node.prototype, 'ownerDocument');
+  function captureLd(node, out) {
+    if (out.length > LD_BLOCKS || node.nodeType !== 1) return;
+    if (localOf.call(node) !== 'script' || nsOf.call(node) !== HTML_NS) return;
+    var type = getAttr.call(node, 'type');
+    if (type === null || type.replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, '').toLowerCase() !== 'application/ld+json') return;
+    var last = null;
+    for (var p = parentEl.call(node); p; p = parentEl.call(p)) {
+      var name = localOf.call(p);
+      if (nsOf.call(p) !== HTML_NS || name === 'noscript' || name === 'template') return;
+      last = p;
+    }
+    if (!last || last !== docElement.call(ownerOf.call(node))) return;
+    var text = textOf.call(node);
+    out.push(text.length > LD_BYTES ? false : text);
+  }
+
   function postProcess(root, ctx) {
     var remote = false;
 
@@ -632,8 +669,21 @@
       colors: false, // set by postProcess: the mail declares its own colors
     };
 
-    var root = DOMPurify.sanitize(String(html), PURIFY_CONFIG);
+    // JSON-LD (docs/actions.md, Primary link): read out of the very document
+    // DOMPurify parses, as it walks it, before the script goes. Hooks are
+    // global, so this one lives only for this call.
+    var ld = [];
+    var capture = function (node) { captureLd(node, ld); };
+    DOMPurify.addHook('uponSanitizeElement', capture);
+    var root;
+    try {
+      root = DOMPurify.sanitize(String(html), PURIFY_CONFIG);
+    } finally {
+      DOMPurify.removeHook('uponSanitizeElement', capture);
+    }
     var doc = root.ownerDocument;
+    var A = Pneu.actions;
+    var action = A && A.declaredAction ? A.declaredAction(ld, [origin, location.origin]) : null;
     var remote = postProcess(root, ctx);
     var themed = ctx.colors ? null : themedRule(opts.theme);
 
@@ -665,7 +715,7 @@
 
     return {
       srcdoc: '<!DOCTYPE html>' + root.outerHTML, csp: csp, remote: remote,
-      colors: ctx.colors, sheet: !themed,
+      colors: ctx.colors, sheet: !themed, action: action, ldBlocks: ld.length,
     };
   }
 
@@ -720,10 +770,11 @@
       // The listener lives in the parent's realm, so the sandbox's disabled
       // scripting doesn't apply to it.
       if (frame.__pneuKeys) doc.addEventListener('keydown', frame.__pneuKeys);
+      if (frame.__pneuKeyup) doc.addEventListener('keyup', frame.__pneuKeyup);
     });
   }
 
-  // renderMailFrame(html, cids, origin, opts) → { frame, remote }
+  // renderMailFrame(html, cids, origin, opts) → { frame, remote, colors, sheet, action }
   //   html    raw message HTML (untrusted)
   //   cids    { "<content-id without brackets>": "/part/…/n" }
   //   origin  the app origin, for img-src and the same-origin checks
@@ -735,6 +786,7 @@
   //                      img-src and the same-origin filter; default /part/.
   //   opts.frame         re-render into this existing iframe
   //   opts.onKeydown     receives keydown events from inside the frame
+  //   opts.onKeyup       receives keyup events from inside the frame
   //   opts.base          base URL relative URLs resolve against (default: document.baseURI)
   //   opts.theme         { bg, fg, accent: '#rrggbb', scheme: 'light'|'dark' }:
   //                      the app's colors, for a mail that declares none.
@@ -742,7 +794,9 @@
   // remote is true when the message references remote images or CSS; colors
   // when it declares its own background or text color; sheet when the frame
   // renders as the light sheet (colors, or no usable theme), which is also
-  // the frame's class.
+  // the frame's class. action is the message's declared JSON-LD action,
+  // {url, name} (actions.js declaredAction; null without actions.js loaded),
+  // for the o chip; ldBlocks how many blocks were captured (the harness).
   Pneu.renderMailFrame = function (html, cids, origin, opts) {
     opts = opts || {};
     var built = assemble(html, cids, origin, opts);
@@ -754,13 +808,17 @@
       attach(frame);
     }
     if (opts.onKeydown) frame.__pneuKeys = opts.onKeydown;
+    if (opts.onKeyup) frame.__pneuKeyup = opts.onKeyup;
     // Attributes before srcdoc: sandbox flags are captured at navigation.
     frame.setAttribute('sandbox', SANDBOX);
     frame.setAttribute('referrerpolicy', 'no-referrer');
     frame.classList.toggle('sheet', built.sheet);
     // The only unsafe sink: a DOM property, never string-built markup (34).
     frame.srcdoc = built.srcdoc;
-    return { frame: frame, remote: built.remote, colors: built.colors, sheet: built.sheet };
+    return {
+      frame: frame, remote: built.remote, colors: built.colors, sheet: built.sheet,
+      action: built.action, ldBlocks: built.ldBlocks,
+    };
   };
 
   Pneu.assembleMailDocument = assemble;

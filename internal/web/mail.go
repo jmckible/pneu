@@ -173,6 +173,17 @@ func analyze(m *notmuch.Message) analysis {
 	return a
 }
 
+// HTMLBody is the HTML body the thread view renders for m (analyze's
+// choice, what /body serves), or false when it renders none. For tools
+// that must see exactly what the app shows (internal/testmail/cmd/ctaeval).
+func HTMLBody(m *notmuch.Message) (string, bool) {
+	a := analyze(m)
+	if a.Kind != "html" {
+		return "", false
+	}
+	return a.Body.Content, true
+}
+
 func forwardHeader(h map[string]string) string {
 	var b strings.Builder
 	b.WriteString("\n---------- Forwarded message ----------\n")

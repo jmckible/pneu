@@ -1,0 +1,81 @@
+#!/bin/bash
+# Evaluate the button heuristic (o's guess) on your own recent mail, privately
+# (docs/actions.md, "Evaluating it").
+#
+#   scripts/ctaeval <account> [N=300] > results.jsonl
+#
+# Takes the account's N most recent HTML bodies (as the thread view renders
+# them), renders each through the shipping mailframe.js and actions.js in
+# headless Chromium at 900px with remote images off and all network
+# blocked, and prints one JSON line per message: sender domain, whether it
+# declares an action, the pick {text, host} or null, the runner-up {text,
+# host, score} or null, the score (the pick's, else the best candidate's),
+# the best candidate {text, host} when nothing is picked, the number of
+# candidates; then a summary line. Never message content beyond link labels
+# and hosts; bodies reach the browser over the DevTools pipe, never HTTP.
+#
+# Reads the account's notmuch database only (NOTMUCH_CONFIG from
+# ~/.config/pneu/config.json, or CTAEVAL_CONFIG): nothing is tagged, synced
+# or written to the maildir. Bodies go to a 0700 temp dir in $TMPDIR that
+# is removed on exit, interrupt and SIGTERM included: each step runs in its
+# own process group, which this script signals and waits for, and the
+# browser half kills Chromium's process group and waits for it. A SIGKILL to this
+# script can't be caught, so it can leave the dir (ctaeval.*, 0700) behind.
+# CHROMIUM=/path overrides the browser.
+set -euo pipefail
+
+usage() { sed -n '5p' "$0" | sed 's/^# *//' >&2; exit 2; }
+(($# >= 1 && $# <= 2)) || usage
+account=$1 n=${2:-300}
+[[ $n =~ ^[1-9][0-9]*$ ]] || usage
+config=${CTAEVAL_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/pneu/config.json}
+
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+dir=$(mktemp -d "${TMPDIR:-/tmp}/ctaeval.XXXXXX") # 0700
+# Chromium's helpers may outlive the browser by a moment, still writing to
+# the profile: retry until the directory is gone.
+cleanup() {
+	for _ in $(seq 50); do
+		rm -rf "$dir" 2>/dev/null
+		[[ -e $dir ]] || return 0
+		sleep 0.1
+	done
+	echo "ctaeval: could not remove $dir" >&2
+}
+trap cleanup EXIT
+
+# run starts a step as a background job in its own process group (job
+# control, set -m) and waits for it, so a signal reaches the trap at once
+# (bash defers traps while a foreground child runs) and is forwarded to
+# the whole group: the step and whatever it started (notmuch, the
+# compiler), which are waited for before exit; SIGKILL after ten seconds.
+set -m
+child=
+run() {
+	"$@" &
+	child=$!
+	wait "$child"
+	child=
+}
+forward() {
+	if [[ -n $child ]]; then
+		kill -TERM -- "-$child" 2>/dev/null || true
+		# The step gets ten seconds to go; then the group is killed.
+		{ sleep 10; kill -KILL -- "-$child" 2>/dev/null; } &
+		local dog=$!
+		wait "$child" 2>/dev/null || true
+		kill -- "-$dog" 2>/dev/null || true
+		# Whatever else was in the group (reparented once the step went).
+		for _ in $(seq 50); do
+			kill -0 -- "-$child" 2>/dev/null || break
+			sleep 0.1
+		done
+		kill -KILL -- "-$child" 2>/dev/null || true
+	fi
+	exit 130
+}
+trap forward INT TERM HUP
+
+run go -C "$REPO" build -o "$dir/ctaeval" ./internal/testmail/cmd/ctaeval
+run "$dir/ctaeval" -config "$config" -account "$account" -n "$n" -out "$dir/bodies"
+run node "$REPO/scripts/ctaeval.mjs" "$dir"

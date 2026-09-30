@@ -14,6 +14,7 @@ import (
 
 	"github.com/jmckible/pneu/internal/gmi"
 	"github.com/jmckible/pneu/internal/notmuch"
+	"github.com/jmckible/pneu/internal/unsub"
 	assets "github.com/jmckible/pneu/web"
 )
 
@@ -58,6 +59,13 @@ type Server struct {
 	// RunStatus's wakeups, cap 1 so pending requests collapse.
 	statusNow, statusTags chan struct{}
 	marks                 accountMarks
+	// Unsubscribe: preview tokens and the network side. Tests replace
+	// unsubDKIM's resolver and unsubHTTP's resolver, dialer and policy.
+	unsubTokens unsub.Store[unsubAction, unsubResult]
+	unsubDKIM   *unsub.Verifier
+	unsubHTTP   *unsub.Client
+	// unsubSlots bounds concurrent previews (DKIM is CPU work) server-wide.
+	unsubSlots chan struct{}
 }
 
 // New wires routes. host is the exact Host header to accept
@@ -83,6 +91,9 @@ func New(accounts []notmuch.Account, host, token string) (*Server, error) {
 
 		statusNow:  make(chan struct{}, 1),
 		statusTags: make(chan struct{}, 1),
+		unsubDKIM:  unsub.NewVerifier(),
+		unsubHTTP:  unsub.NewClient(),
+		unsubSlots: make(chan struct{}, unsubPreviews),
 	}
 	for i, a := range accounts {
 		s.byName[a.Name] = a
@@ -125,6 +136,10 @@ func New(accounts []notmuch.Account, host, token string) (*Server, error) {
 	mux.HandleFunc("GET /compose", s.compose)
 	mux.HandleFunc("POST /send", s.send)
 	mux.HandleFunc("GET /addresses", s.addresses)
+	// {msgid} as for /body. The literal "result" segment wins over {account}.
+	mux.HandleFunc("GET /unsubscribe/{account}/{msgid}", s.unsubPreview)
+	mux.HandleFunc("GET /unsubscribe-result/{token}", s.unsubResultGet)
+	mux.HandleFunc("POST /unsubscribe", s.unsubExecute)
 	mux.HandleFunc("POST /accounts/{account}/pull", s.retryPull)
 	mux.HandleFunc("POST /accounts/{account}/reauth", s.reauth)
 	mux.HandleFunc("POST /accounts/{account}/reauth/cancel", s.reauthCancel)

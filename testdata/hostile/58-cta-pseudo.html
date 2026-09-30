@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>cta pseudo-element cover</title>
+<style>
+.btn { display: inline-block; background: #1a73e8; color: #ffffff; padding: 12px 24px; border-radius: 4px; font: bold 16px sans-serif; text-decoration: none; }
+.pv { position: relative; }
+.pv::after { content: ""; position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: #1a73e8; }
+</style>
+</head>
+<body>
+<p class="canary">58 cta pseudo: an empty ::after that paints over a button's text; being positioned, it has no rect to read, so it counts as covering the whole document and the real button is refused too.</p>
+<p><a class="btn pv" href="https://h-pseudo-cover.example/">Verify account</a></p>
+<p>Thanks for your order. Please confirm it below.</p>
+<p><a class="btn" href="https://real.example/confirm">Confirm your order</a></p>
+<p>Filler so nothing above is in the last quarter.</p>
+<p>Filler.</p><p>Filler.</p><p>Filler.</p><p>Filler.</p><p>Filler.</p><p>Filler.</p><p>Filler.</p>
+<p>Filler.</p><p>Filler.</p><p>Filler.</p><p>Filler.</p><p>Filler.</p><p>Filler.</p><p>Filler.</p>
+</body>
+</html>

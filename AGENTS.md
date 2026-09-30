@@ -77,6 +77,12 @@ and build order; this file is the working contract. Read PLAN.md before touching
   sandbox (docs/rehearsal.md); keep it passing when INSTALL.md changes.
   `scripts/screenshot` captures the app on the fixture mail for the README
   and marketing (docs/screenshots.md); never screenshot a real inbox.
+  `scripts/ctaeval <account> [N]` is the one tool that reads real mail on
+  purpose: it runs o's button heuristic over the account's recent HTML
+  bodies read-only, in Chromium with all network blocked, bodies handed over
+  the DevTools pipe (never HTTP), and never prints message content beyond
+  link labels and hosts, nor an error's own words (docs/actions.md,
+  "Evaluating it"). Keep it that way; test it on the fixture only.
 - The Arch notmuch is built with `retry_lock`, so a contended `notmuch tag`
   blocks rather than failing; `Tag()` bounds the wait with a deadline and
   returns `ErrLocked`. A long `gmi pull` stalls triage on that account for the

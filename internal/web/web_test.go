@@ -32,7 +32,7 @@ func serverFor(t *testing.T, fixture []testmail.Account) *Server {
 	t.Helper()
 	var accounts []notmuch.Account
 	for _, a := range fixture {
-		accounts = append(accounts, notmuch.Account{Name: a.Name, Email: a.Email, ConfigPath: a.NotmuchConfig})
+		accounts = append(accounts, notmuch.Account{Name: a.Name, Email: a.Email, ConfigPath: a.NotmuchConfig, Maildir: filepath.Join(a.Root, "gmail", "mail")})
 	}
 	s, err := New(accounts, host, token)
 	if err != nil {

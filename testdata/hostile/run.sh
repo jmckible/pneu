@@ -18,7 +18,8 @@
 #   - the page requested any host:port other than the two servers (loopback
 #     and LAN cases, 36–37),
 #   - the harness origin served anything but the harness's own files,
-#     /web/static/ and /part/ (app-path cases, 30 and 35: /status, /events),
+#     /web/static/, /part/, and the thread page's /static/ and /theme.css
+#     (app-path cases, 30 and 35: /status, /events),
 #     or the https server anything but the pixel.
 #
 # RUN_SH_KEEP=1 keeps the temp dir (net.json, dom.html, http.log, chromium.log).
@@ -47,6 +48,10 @@ trap cleanup EXIT
 mkdir -p "$tmp/site/part/personal/m@hostile.test"
 ln -s "$root/testdata" "$tmp/site/testdata"
 ln -s "$root/web" "$tmp/site/web"
+# The thread page the app-document checks run app.js on (app-thread.html)
+# loads the app's own paths: /static/ and a fixed /theme.css.
+ln -s "$root/web/static" "$tmp/site/static"
+printf ':root { --bg: #1e1e2e; --fg: #cdd6f4; --accent: #89b4fa; --selection: #45475a; color-scheme: dark; }\n' >"$tmp/site/theme.css"
 ln -s "$here/harness-pixel.svg" "$tmp/site/part/harness-pixel.svg"
 ln -s "$here/harness-pixel.svg" "$tmp/site/part/personal/m@hostile.test/harness-pixel.svg"
 
@@ -84,6 +89,9 @@ port=$(port_of "$tmp/http.log")
 sport=$(port_of "$tmp/https.log")
 
 url="http://127.0.0.1:$port/testdata/hostile/harness.html?https=$sport"
+# The time budget is virtual (it passes only while the page is idle, so it
+# costs no wall time): the app-document checks after the cases wait on many
+# timers, and the page is dumped when it runs out.
 # Every other name resolves to nothing: case 38 names real receipt-tracker
 # hosts, and a leak must show up in the net log without reaching them.
 "$chromium" --headless=new --disable-gpu --no-sandbox \
@@ -91,7 +99,7 @@ url="http://127.0.0.1:$port/testdata/hostile/harness.html?https=$sport"
   --disable-component-update --disable-sync --disable-default-apps \
   --host-resolver-rules="MAP remote.test 127.0.0.1, MAP * ~NOTFOUND, EXCLUDE 127.0.0.1" --ignore-certificate-errors \
   --disable-popup-blocking \
-  --virtual-time-budget=8000 --log-net-log="$tmp/net.json" \
+  --virtual-time-budget=300000 --log-net-log="$tmp/net.json" \
   --dump-dom "$url" >"$tmp/dom.html" 2>"$tmp/chromium.log" || {
   echo "run.sh: chromium failed" >&2; tail -n 20 "$tmp/chromium.log" >&2; exit 1; }
 
@@ -170,16 +178,18 @@ if background:
     print("note: chromium background requests:", ", ".join(sorted(background)))
 
 # What the servers actually answered. The harness origin plays the app
-# origin, so anything outside the harness's own files, /web/static/ and
-# /part/ is a message reaching an app endpoint (30, 35).
+# origin, so anything outside the harness's own files, /web/static/,
+# /static/, /theme.css and /part/ is a message reaching an app endpoint (30,
+# 35). The thread page's own network (its body fetch, /events) never leaves
+# it: the harness stands in for it.
 def requested(log):
     return [m.group(1) for m in re.finditer(r'"[A-Z]+ (\S+) HTTP/[\d.]+"', log)]
 harness = {"/testdata/hostile/" + f for f in
-           ("harness.html", "cases.json", "harness-pixel.svg", "opener.html")}
+           ("harness.html", "cases.json", "harness-pixel.svg", "opener.html", "app-thread.html")}
 harness |= {"/testdata/hostile/" + c["file"] for c in cases if "file" in c}
-harness.add("/favicon.ico")
+harness |= {"/favicon.ico", "/theme.css"}
 stray = [p for p in requested(http_log)
-         if p.split("?")[0] not in harness and not p.startswith(("/web/static/", "/part/"))]
+         if p.split("?")[0] not in harness and not p.startswith(("/web/static/", "/static/", "/part/"))]
 stray += ["https " + p for p in requested(https_log) if p != "/testdata/hostile/harness-pixel.svg"]
 if stray:
     ok = False

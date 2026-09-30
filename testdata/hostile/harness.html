@@ -15,6 +15,8 @@ body { margin: 0; font: 13px monospace; }
      shipping assembly, not a copy of it. Served from the repo root by run.sh. -->
 <script src="../../web/static/purify.min.js"></script>
 <script src="../../web/static/mailframe.js"></script>
+<!-- declaredAction, which mailframe.js calls for the o action (46–53). -->
+<script src="../../web/static/actions.js"></script>
 </head>
 <body>
 <pre id="results">pending</pre>
@@ -121,7 +123,10 @@ body { margin: 0; font: 13px monospace; }
         loaded = nextLoad(built.frame);
         watchViolations(built.frame, blocked);
       }
-      runs.push({ c, frame: built.frame, remote: built.remote, colors: built.colors, sheet: built.sheet, keys, blocked, loaded });
+      runs.push({
+        c, html, frame: built.frame, remote: built.remote, colors: built.colors, sheet: built.sheet,
+        action: built.action, ldBlocks: built.ldBlocks, keys, blocked, loaded,
+      });
     }
     for (const r of runs) r.loaded = await r.loaded;
     await sleep(400); // images, ResizeObserver sizing
@@ -133,6 +138,23 @@ body { margin: 0; font: 13px monospace; }
       }
     }
     await sleep(50);
+
+    // The button heuristic (54-61) on each laid-out frame, read-only:
+    // the frame's document is the same before and after.
+    for (const r of runs) {
+      if (!('guess' in r.c) || !r.frame.contentDocument) continue;
+      const root = Object.getOwnPropertyDescriptor(Document.prototype, 'documentElement').get.call(r.frame.contentDocument);
+      const before = root.outerHTML;
+      const g = Pneu.actions.guess(r.frame, [origin]);
+      r.guess = {
+        layout: g.layout,
+        pick: g.pick && { text: g.pick.label, host: new URL(g.pick.url).hostname },
+        runnerUp: g.runnerUp ? new URL(g.runnerUp.url).hostname : null,
+        over: g.over,
+        hosts: g.ranked.map((x) => new URL(x.url).hostname),
+        touched: root.outerHTML !== before,
+      };
+    }
 
     // Link clicks, after every other check has its snapshot of a settled
     // frame. run.sh passes --disable-popup-blocking so a scripted click opens.
@@ -155,6 +177,10 @@ body { margin: 0; font: 13px monospace; }
     const results = runs.map((r) => {
       try { return check(r, appHref); } catch (e) { return { id: r.c.id, pass: false, fails: ['harness error: ' + e] }; }
     });
+    // The trusted document's sinks, after every case has its snapshot.
+    for (const res of await appChecks(runs)) results.push(res);
+    for (const res of await pageChecks()) results.push(res);
+    for (const res of await guessPageChecks()) results.push(res);
     const pwned = window.__pwned;
     const appWide = document.documentElement.scrollWidth > window.innerWidth;
     const summary = {
@@ -168,6 +194,869 @@ body { margin: 0; font: 13px monospace; }
     out.textContent = JSON.stringify({ pass: false, error: String(e && e.stack || e) });
   }
   document.body.dataset.done = '1';
+
+  // ---- the trusted document (docs/actions.md) -------------------------------
+  // The cases above check what the sanitizer lets into the frame. These check
+  // the sinks that put sender data into the app's own document: the o chip,
+  // o itself, and link hints, in an app-shaped document (#app) that loads the
+  // shipping app.css, mailframe.js and actions.js. window.open is intercepted
+  // there; nothing navigates. Each result is reported like a case.
+  async function appChecks(runs) {
+    const results = [];
+    const check = async (id, fn) => {
+      out.textContent = 'pending: ' + id; // where a hang stopped, in run.sh's failure
+      const fails = [];
+      try { await fn(fails); } catch (e) { fails.push('harness error: ' + (e && e.stack || e)); }
+      results.push({ id, pass: fails.length === 0, fails });
+    };
+    out.textContent = 'pending: app document';
+    const app = await appDocument();
+    const W = app.contentWindow, D = app.contentDocument;
+    const A = W.Pneu && W.Pneu.actions;
+    if (!A || !W.Pneu.renderMailFrame) return [{ id: 'app-document', pass: false, fails: ['app scripts did not load'] }];
+    const opens = [];
+    W.open = (url, target, features) => { opens.push([String(url), target, features]); return null; };
+    const pane = D.querySelector('main.thread'), article = D.querySelector('article.message');
+    const header = article.querySelector(':scope > header'), from = header.querySelector('.from');
+    const statusEl = D.getElementById('status');
+    const ident = { account: 'p', msgid: 'm%40hostile.test', article, root: pane };
+    // Rendering steps (scroll events, sizing); under the harness's virtual
+    // time a timer stands in for a frame that never comes.
+    const frames = (n) => new Promise((r) => { const step = () => (n-- > 0 ? Promise.race([new Promise((f) => W.requestAnimationFrame(f)), sleep(40)]).then(step) : r()); step(); });
+    const within = (r, b) => r.left >= b.left - 0.5 && r.top >= b.top - 0.5 && r.right <= b.right + 0.5 && r.bottom <= b.bottom + 0.5;
+    const box = (r) => [r.left, r.top, r.right, r.bottom].map(Math.round).join(',');
+    const key = (k, extra) => Object.assign({ key: k, code: k, preventDefault() { this.prevented = true; }, stopPropagation() {} }, extra);
+    // What of the pane shows, as app.js paneBounds: pane ∩ viewport, above the key bar.
+    const bounds = () => {
+      const p = pane.getBoundingClientRect(), bar = D.getElementById('keybar').getBoundingClientRect();
+      return { left: Math.max(p.left, 0), top: Math.max(p.top, 0), right: Math.min(p.right, W.innerWidth), bottom: Math.min(p.bottom, W.innerHeight, bar.top) };
+    };
+    const flashes = [];
+    const hintCtx = (frame) => ({
+      frame, bounds: bounds(),
+      status: (n) => {
+        if (n) { statusEl.replaceChildren(n); statusEl.className = 'show hint'; return; }
+        if (statusEl.classList.contains('hint')) { statusEl.className = ''; statusEl.replaceChildren(); }
+      },
+      statusBox: () => statusEl,
+      flash: (t) => flashes.push(t),
+      onClose() {},
+    });
+    // Under the harness's virtual time no rendering step runs, so a scroll
+    // event is dispatched by hand where the browser would fire one.
+    const scrolled = (el) => el.dispatchEvent(new W.Event('scroll'));
+    const scrollPane = async (y) => { pane.scrollTop = y; scrolled(pane); await frames(2); };
+    const mail = async (html) => {
+      const built = W.Pneu.renderMailFrame(html, {}, origin, {});
+      const loaded = new Promise((r) => { built.frame.addEventListener('load', r, { once: true }); setTimeout(r, 3000); });
+      article.querySelector('.body').replaceChildren(built.frame);
+      await loaded;
+      await frames(3); // sizing
+      return built.frame;
+    };
+    const labels = () => [...D.querySelectorAll('#hints .hint')];
+    const type = (s) => { for (const ch of s) A.pendingKey(key(ch)); };
+
+    // Every chip the corpus yields, drawn with the shipping CSS: only the
+    // chip's own elements reach this document, the sender's strings as text.
+    await check('app-chip-sinks', async (fails) => {
+      const OWN = { BUTTON: ['class', 'type', 'tabindex'], KBD: [], BDI: ['class'], SPAN: ['class'] };
+      const withAction = runs.filter((r) => r.action);
+      if (!withAction.some((r) => r.c.id.startsWith('46'))) fails.push('case 46 yielded no action to draw');
+      const long = { url: 'https://' + 'sub'.repeat(20) + '.' + 'a'.repeat(40) + '.example/x', name: 'Review the quarterly numbers before Thursday’s meeting' };
+      const actions = withAction.map((r) => [r.c.id, r.action]).concat([['long-destination', long]]);
+      for (const [id, action] of actions) {
+        const c = A.chip(action, () => {});
+        if (!c) { fails.push(id + ': no chip'); continue; }
+        header.replaceChildren(from, c);
+        for (const n of [c, ...c.querySelectorAll('*')]) {
+          const ok = OWN[n.tagName];
+          if (!ok) { fails.push(id + ': element ' + n.localName + ' in the chip'); continue; }
+          for (const a of n.attributes) if (!ok.includes(a.name)) fails.push(id + ': attribute ' + n.localName + '[' + a.name + ']');
+        }
+        if (header.querySelector('img, svg, math, script, iframe, object, embed, style, link')) fails.push(id + ': markup in the header');
+        const name = c.querySelector('bdi.name');
+        if (name && name.textContent !== A.visible(action.name)) fails.push(id + ': name drawn as ' + JSON.stringify(name.textContent));
+        if (id.startsWith('46') && !c.textContent.includes('<img src=x onerror=')) fails.push(id + ': the markup is not shown as text');
+        // The destination never overflows the pane, at a wide and a narrow width.
+        for (const w of [600, 180]) {
+          pane.style.width = w + 'px';
+          await frames(1);
+          const cr = c.getBoundingClientRect(), hr = header.getBoundingClientRect();
+          const dest = c.querySelector('.dest'), dr = dest.getBoundingClientRect();
+          if (cr.right > hr.right + 0.5) fails.push(id + '@' + w + ': chip ' + box(cr) + ' past its header ' + box(hr));
+          if (!within(dr, cr)) fails.push(id + '@' + w + ': destination ' + box(dr) + ' outside the chip ' + box(cr));
+          if (dest.scrollWidth > dest.clientWidth + 1) fails.push(id + '@' + w + ': destination clipped');
+          if (c.scrollWidth > c.clientWidth + 1) fails.push(id + '@' + w + ': chip overflows');
+          if (pane.scrollWidth > pane.clientWidth + 1) fails.push(id + '@' + w + ': pane scrolls sideways');
+          if (id === 'long-destination' && w === 180) {
+            const line = parseFloat(W.getComputedStyle(dest).lineHeight) || 20;
+            if (!(dr.height > line * 1.5)) fails.push('long destination did not wrap: height ' + dr.height);
+            if (!(name.clientWidth < name.scrollWidth || name.clientWidth === 0)) fails.push('long destination: the name did not give way');
+          }
+        }
+        pane.style.width = '';
+      }
+      header.replaceChildren(from);
+      if (W.__pwned !== undefined) fails.push('pwned in the app document: ' + W.__pwned);
+    });
+
+    // o opens only a chip that is in view; scrolled away, the first o
+    // brings it into view and a later, separate o opens.
+    await check('app-o-reveal', async (fails) => {
+      const action = { url: 'https://github.com/northwind/app/pull/4821', name: 'View Pull Request' };
+      const c = A.chip(action, () => {});
+      header.replaceChildren(from, c);
+      await mail('<!DOCTYPE html><html><head></head><body><p class="canary">o</p></body></html>');
+      await scrollPane(0);
+      opens.length = 0;
+      let got = A.primary(c, key('o'), bounds());
+      if (got.act !== 'open' || opens.length !== 1 || opens[0][0] !== action.url) fails.push('in view: ' + got.act + ' ' + JSON.stringify(opens));
+      await scrollPane(400);
+      opens.length = 0;
+      if (within(c.getBoundingClientRect(), bounds())) fails.push('the chip is still in view at scrollTop 400');
+      got = A.primary(c, key('o'), bounds());
+      if (got.act !== 'reveal' || opens.length) fails.push('out of view: ' + got.act + ', opened ' + opens.length);
+      if (!c.classList.contains('reveal')) fails.push('not marked');
+      await frames(2);
+      if (!within(c.getBoundingClientRect(), bounds())) fails.push('not scrolled into view: ' + box(c.getBoundingClientRect()));
+      got = A.primary(c, key('o', { repeat: true }), bounds());
+      if (got.act !== 'none' || opens.length) fails.push('a repeat: ' + got.act);
+      got = A.primary(c, key('o'), bounds());
+      if (got.act !== 'open' || opens.length !== 1 || opens[0][0] !== action.url || opens[0][2] !== 'noopener,noreferrer') {
+        fails.push('second o: ' + got.act + ' ' + JSON.stringify(opens));
+      }
+      header.replaceChildren(from);
+    });
+
+    // Hints over hostile positioning: fixed, absolute, transformed, negative
+    // margins and huge rects place links outside the frame; the pane is
+    // scrolled so rows straddle its top and bottom edges. Every label's
+    // whole box lies inside the clip, and 3-letter labels are in play.
+    await check('app-hints-positioning', async (fails) => {
+      let h = '<!DOCTYPE html><html><head></head><body style="margin:0;font:12px monospace"><p class="canary">hints</p>' +
+        '<a href="https://fixed.example/" style="position:fixed;top:-6px;left:-6px;display:block;width:14px;height:14px">f</a>' +
+        '<a href="https://right.example/" style="position:absolute;right:0;top:40px;display:block;width:2px;height:12px;background:#888"></a>' +
+        '<a href="https://left.example/" style="position:absolute;left:-1000px;top:60px;display:block;width:1002px;height:12px;background:#888">l</a>' +
+        '<a href="https://transform.example/" style="display:inline-block;transform:translate(2000px,-40px)">t</a>' +
+        '<div style="margin-left:-5000px"><a href="https://margin.example/" style="display:block;width:5001px;height:12px;background:#888">m</a></div>' +
+        '<a href="https://huge.example/" style="position:absolute;z-index:-1;left:-50000px;top:-50000px;width:100000px;height:100000px;display:block"></a>';
+      for (let i = 0; i < 300; i++) h += '<a href="https://grid.example/' + i + '" style="display:inline-block;width:52px;height:14px;margin:2px">g' + i + '</a>';
+      const frame = await mail(h + '</body></html>');
+      await scrollPane(100);
+      // Slivers on each edge of what shows: 2px of a link at the pane's top
+      // and bottom, and at the frame's left and right.
+      const fr = frame.getBoundingClientRect(), b = bounds();
+      const vTop = b.top - fr.top, vBottom = b.bottom - fr.top;
+      const fdoc = frame.contentDocument, body = Object.getOwnPropertyDescriptor(Document.prototype, 'body').get.call(fdoc);
+      const slivers = {
+        'https://top.example/': 'left:200px;top:' + (vTop - 10) + 'px;width:60px;height:12px',
+        'https://bottom.example/': 'left:300px;top:' + (vBottom - 2) + 'px;width:60px;height:12px',
+        'https://left.example/edge': 'left:0;top:' + (vTop + 100) + 'px;width:2px;height:12px',
+        'https://right.example/edge': 'right:0;top:' + (vTop + 140) + 'px;width:2px;height:12px',
+      };
+      for (const [href, pos] of Object.entries(slivers)) {
+        const a = fdoc.createElement('a');
+        a.setAttribute('href', href);
+        a.setAttribute('style', 'position:absolute;display:block;z-index:10;background:#888;' + pos);
+        body.appendChild(a);
+      }
+      await frames(2);
+      const ctx = hintCtx(frame);
+      A.hints(ident, key('L'), ctx);
+      if (!A.hintsOpen()) { fails.push('hints did not open: ' + flashes.slice(-1)); return; }
+      const ov = D.getElementById('hints').getBoundingClientRect();
+      if (!within(ov, ctx.bounds)) fails.push('overlay ' + box(ov) + ' outside the bounds ' + box(ctx.bounds));
+      const ls = labels();
+      if (ls.length < 82) fails.push('only ' + ls.length + ' labels');
+      const rects = new Map(ls.map((l) => [l, l.getBoundingClientRect()]));
+      for (const l of ls) {
+        const r = rects.get(l);
+        if (l.textContent.length !== 3) fails.push('label ' + l.textContent);
+        if (!(r.width > 0 && r.height > 0)) fails.push('label ' + l.textContent + ' has no box');
+        if (!within(r, ov) || !within(r, ctx.bounds)) fails.push('label ' + l.textContent + ' ' + box(r) + ' outside ' + box(ov));
+      }
+      // Which link each label stands for: select each, read the status line.
+      const byURL = {};
+      for (const l of ls) {
+        type(l.textContent);
+        const u = statusEl.querySelector('bdi.url');
+        if (u) byURL[u.textContent] = l;
+      }
+      for (const href of Object.keys(slivers)) {
+        const l = byURL[href];
+        if (!l) { fails.push('no label for the sliver ' + href); continue; }
+        const r = rects.get(l);
+        if (!within(r, ov)) fails.push('sliver ' + href + ' label ' + box(r) + ' outside ' + box(ov));
+      }
+      A.pendingKey(key('Escape'));
+      if (A.hintsOpen()) fails.push('Escape did not close');
+    });
+
+    // The label → URL map is frozen when hints open: re-pointing the
+    // anchors afterwards changes nothing that opens.
+    await check('app-hints-frozen-url', async (fails) => {
+      const frame = await mail('<!DOCTYPE html><html><head></head><body><p class="canary">frozen</p>' +
+        '<p><a href="https://one.example/a">one</a> <a href="https://two.example/b">two</a> <a href="mailto:x@y.example">mail</a></p></body></html>');
+      await scrollPane(0);
+      A.hints(ident, key('L'), hintCtx(frame));
+      if (!A.hintsOpen()) { fails.push('hints did not open'); return; }
+      const first = labels()[0].textContent;
+      type(first);
+      const shown = statusEl.querySelector('bdi.url');
+      if (!shown || shown.textContent !== 'https://one.example/a') fails.push('status shows ' + (shown && shown.textContent));
+      const root = Object.getOwnPropertyDescriptor(Document.prototype, 'documentElement').get.call(frame.contentDocument);
+      for (const a of root.querySelectorAll('a')) a.setAttribute('href', 'https://evil.example/');
+      opens.length = 0;
+      A.pendingKey(key('Enter', { shiftKey: true }));
+      if (opens.length || !A.hintsOpen()) fails.push('Shift+Enter acted');
+      A.pendingKey(key('Enter'));
+      if (opens.length !== 1 || opens[0][0] !== 'https://one.example/a') fails.push('opened ' + JSON.stringify(opens));
+      if (A.hintsOpen()) fails.push('still open after Enter');
+    });
+
+    // A long destination scrolls in the status line, by the pane's scroll
+    // (not closing hints) and by the inspection keys (not reaching the app).
+    await check('app-hints-status-scroll', async (fails) => {
+      const url = 'https://long.example/' + 'x'.repeat(3000);
+      const frame = await mail('<!DOCTYPE html><html><head></head><body><p class="canary">long</p><a href="' + url + '">long</a></body></html>');
+      await scrollPane(0);
+      A.hints(ident, key('L'), hintCtx(frame));
+      if (!A.hintsOpen()) { fails.push('hints did not open'); return; }
+      type(labels()[0].textContent);
+      if (!(statusEl.scrollHeight > statusEl.clientHeight)) { fails.push('status line does not scroll'); return; }
+      for (const k of ['ArrowDown', 'PageDown', 'End', 'Home', 'PageUp']) {
+        const e = key(k), before = statusEl.scrollTop;
+        const taken = A.pendingKey(e);
+        if (!taken || !e.prevented) fails.push(k + ' reached the app');
+        scrolled(statusEl);
+        await frames(2);
+        if (!A.hintsOpen()) { fails.push(k + ' closed hints'); return; }
+        const after = statusEl.scrollTop;
+        if ((k === 'Home' || k === 'PageUp') ? !(after < before || before === 0) : !(after > before)) fails.push(k + ' scrolled ' + before + '→' + after);
+      }
+      statusEl.scrollTop = 40; // a wheel or scrollbar
+      scrolled(statusEl);
+      await frames(2);
+      if (!A.hintsOpen()) fails.push('the status line scrolling closed hints');
+      await scrollPane(5);
+      if (A.hintsOpen()) fails.push('the pane scrolling did not close hints');
+      await scrollPane(0);
+    });
+
+    // Another flash while hints are up ends the session (docs/actions.md).
+    await check('app-hints-yield-status', async (fails) => {
+      const frame = await mail('<!DOCTYPE html><html><head></head><body><p class="canary">yield</p><a href="https://one.example/">one</a></body></html>');
+      A.hints(ident, key('L'), hintCtx(frame));
+      if (!A.hintsOpen()) { fails.push('hints did not open'); return; }
+      type(labels()[0].textContent);
+      A.yieldStatus();
+      if (A.hintsOpen()) fails.push('still open');
+      if (statusEl.classList.contains('hint') || statusEl.textContent) fails.push('status line kept the selection');
+      opens.length = 0;
+      A.pendingKey(key('Enter'));
+      if (opens.length) fails.push('Enter opened after the session ended');
+    });
+
+    // Listener hygiene: open and close hints every way, repeatedly; every
+    // listener and observer a session adds is gone when it ends.
+    await check('app-hints-listeners', async (fails) => {
+      const T = { on: false, live: [], obs: [] };
+      const html = '<!DOCTYPE html><html><head></head><body><p class="canary">listeners</p><a href="https://one.example/">one</a> <a href="https://two.example/">two</a></body></html>';
+      instrument(W, T);
+      let frame = await mail(html);
+      const ways = ['escape', 'cancel', 'cancelFor', 'pane-scroll', 'resize', 'frame-replaced', 'enter', 'yield'];
+      for (let round = 0; round < 3; round++) {
+        for (const how of ways) {
+          await scrollPane(0);
+          instrument(frame.contentWindow, T);
+          T.on = true;
+          try { A.hints(ident, key('L'), hintCtx(frame)); } finally { T.on = false; }
+          if (!A.hintsOpen()) { fails.push(how + ': hints did not open'); continue; }
+          if (T.live.length < 4 || T.obs.length !== 1) fails.push(how + ': tracked ' + T.live.length + ' listeners, ' + T.obs.length + ' observers');
+          if (how === 'escape') A.pendingKey(key('Escape'));
+          else if (how === 'cancel') A.cancel();
+          else if (how === 'cancelFor') A.cancelFor(article);
+          else if (how === 'pane-scroll') { pane.scrollTop = 3; scrolled(pane); }
+          else if (how === 'resize') W.dispatchEvent(new W.Event('resize'));
+          else if (how === 'frame-replaced') {
+            // A new document in the same frame, with no cancelFor.
+            const loaded = new Promise((r) => { frame.addEventListener('load', r, { once: true }); setTimeout(r, 3000); });
+            W.Pneu.renderMailFrame(html, {}, origin, { frame });
+            await loaded;
+          } else if (how === 'enter') { type(labels()[0].textContent); A.pendingKey(key('Enter')); }
+          else if (how === 'yield') A.yieldStatus();
+          await frames(2);
+          if (A.hintsOpen()) { fails.push(how + ': still open'); A.closeHints(); }
+          if (T.live.length) fails.push(how + ': left ' + T.live.map((x) => x[1]).join(','));
+          if (T.obs.length) fails.push(how + ': left ' + T.obs.length + ' observers');
+          if (D.getElementById('hints')) fails.push(how + ': overlay left');
+          T.live.length = 0; T.obs.length = 0;
+        }
+      }
+    });
+
+    // The button heuristic's pick (56): o opens it only while it still
+    // stands. Re-pointed, hidden, retexted, removed or redrawn after the
+    // pick, o opens nothing and says why; unchanged, it opens the href.
+    await check('app-guess-repoint', async (fails) => {
+      const r56 = runs.find((r) => r.c.id.startsWith('56'));
+      const want = 'https://reset.example/token/56';
+      let frame = await mail(r56.html);
+      await scrollPane(0);
+      const fresh = () => {
+        const g = A.guess(frame);
+        const c = g.action && A.chip(g.action, () => {});
+        if (c) header.replaceChildren(from, c);
+        return { g, c };
+      };
+      const o = (c) => { opens.length = 0; return A.primary(c, key('o'), bounds()); };
+      let { g, c } = fresh();
+      if (!c) { fails.push('no guess: ' + JSON.stringify(g.ranked.map((x) => [x.url, x.score]))); return; }
+      const anchor = g.action.guess.anchor;
+      let got = o(c);
+      if (got.act !== 'open' || !got.check.ok || opens.length !== 1 || opens[0][0] !== want) fails.push('unchanged: ' + JSON.stringify(got.check) + ' ' + JSON.stringify(opens));
+      const tries = [
+        ['re-pointed', () => anchor.setAttribute('href', 'https://evil.example/'), () => anchor.setAttribute('href', want), /changed/],
+        ['hidden', () => { anchor.style.visibility = 'hidden'; }, () => { anchor.style.visibility = ''; }, /no longer shows/],
+        ['covered', () => { anchor.style.opacity = '0.2'; }, () => { anchor.style.opacity = ''; }, /no longer shows/],
+        ['retexted', () => { anchor.firstChild.data = 'Claim your prize'; }, () => { anchor.firstChild.data = 'Reset your password'; }, /changed/],
+      ];
+      for (const [how, change, undo, why] of tries) {
+        change();
+        got = o(c);
+        if (got.act !== 'open' || got.check.ok || !got.check.stale || !why.test(got.check.reason) || opens.length) fails.push(how + ': ' + JSON.stringify(got.check) + ' opened ' + opens.length);
+        undo();
+        got = o(c);
+        if (!got.check || !got.check.ok || opens.length !== 1) fails.push(how + ', undone: ' + JSON.stringify(got.check));
+      }
+      anchor.remove();
+      got = o(c);
+      if (got.check.ok || !/gone/.test(got.check.reason) || opens.length) fails.push('removed: ' + JSON.stringify(got.check));
+      frame = await mail(r56.html);
+      ({ g, c } = fresh());
+      const again = c;
+      const loaded = new Promise((r) => { frame.addEventListener('load', r, { once: true }); setTimeout(r, 3000); });
+      W.Pneu.renderMailFrame(r56.html, {}, origin, { frame });
+      await loaded;
+      got = o(again);
+      if (got.check.ok || !/redrawn/.test(got.check.reason) || opens.length) fails.push('redrawn: ' + JSON.stringify(got.check));
+      header.replaceChildren(from);
+    });
+
+    // The guess's chip (57): marked as a guess, the text the sender wrote as
+    // the name, the destination the href's host (not the paypal.com the
+    // text names); its highlight is drawn in this document over the link,
+    // inside the frame's box, and the frame's document is untouched.
+    await check('app-guess-chip', async (fails) => {
+      const r57 = runs.find((r) => r.c.id.startsWith('57'));
+      const frame = await mail(r57.html);
+      await scrollPane(0);
+      const froot = Object.getOwnPropertyDescriptor(Document.prototype, 'documentElement').get.call(frame.contentDocument);
+      const before = froot.outerHTML;
+      const g = A.guess(frame);
+      if (!g.action) { fails.push('no guess'); return; }
+      const c = A.chip(g.action, () => {});
+      header.replaceChildren(from, c);
+      const OWN = { BUTTON: ['class', 'type', 'tabindex'], KBD: [], BDI: ['class'], SPAN: ['class'] };
+      for (const n of [c, ...c.querySelectorAll('*')]) {
+        const ok = OWN[n.tagName];
+        if (!ok) { fails.push('element ' + n.localName + ' in the chip'); continue; }
+        for (const a of n.attributes) if (!ok.includes(a.name)) fails.push('attribute ' + n.localName + '[' + a.name + ']');
+      }
+      if (!c.classList.contains('guess') || !c.querySelector('.tag') || c.querySelector('.tag').textContent !== 'guess') fails.push('not marked as a guess: ' + c.outerHTML);
+      if (W.getComputedStyle(c).borderTopStyle !== 'dashed') fails.push('guess chip border ' + W.getComputedStyle(c).borderTopStyle);
+      const name = c.querySelector('bdi.name'), dest = c.querySelector('bdi.destination');
+      if (!name || name.textContent !== 'Log in to paypal.com') fails.push('name ' + (name && name.textContent));
+      if (!dest || dest.textContent !== 'https://login.evil.example') fails.push('destination ' + (dest && dest.textContent));
+      const holder = article.querySelector('.body');
+      // The app realm's 250ms timers (the mark's re-validation), counted.
+      const pending = new Map(), realSet = W.setTimeout, realClear = W.clearTimeout;
+      W.setTimeout = function (f, ms, ...rest) {
+        const id = realSet.call(W, function () { pending.delete(id); return f.apply(this, arguments); }, ms, ...rest);
+        if (ms === 250) pending.set(id, true);
+        return id;
+      };
+      W.clearTimeout = function (id) { pending.delete(id); return realClear.call(W, id); };
+      const m = A.mark(holder, frame, g.action.guess.anchor, g.action.guess);
+      if (pending.size) fails.push('a timer runs for a mark off the cursor message');
+      article.classList.add('selected');
+      m.sync();
+      if (pending.size !== 1 || !m.timing()) fails.push('no re-validation timer on the cursor message: ' + pending.size);
+      await frames(1);
+      if (m.el.ownerDocument !== D || !holder.contains(m.el)) fails.push('the mark is not in the app document');
+      const fr = frame.getBoundingClientRect();
+      const clip = { left: fr.left + frame.clientLeft, top: fr.top + frame.clientTop, right: fr.left + frame.clientLeft + frame.clientWidth, bottom: fr.top + frame.clientTop + frame.clientHeight };
+      const lr = m.el.getBoundingClientRect(), br = m.el.firstChild.getBoundingClientRect();
+      if (W.getComputedStyle(m.el).display === 'none') fails.push('the mark is hidden on the cursor message');
+      if (!within(lr, clip) || !within(clip, lr)) fails.push('mark layer ' + box(lr) + ' is not the frame\'s box ' + box(clip));
+      if (W.getComputedStyle(m.el).overflow !== 'hidden') fails.push('mark layer does not clip');
+      const ar = g.action.guess.anchor.getBoundingClientRect();
+      const want = { left: ar.left + clip.left, top: ar.top + clip.top, right: ar.right + clip.left, bottom: ar.bottom + clip.top };
+      if (['left', 'top', 'right', 'bottom'].some((k) => Math.abs(br[k] - want[k]) > 1)) fails.push('mark ' + box(br) + ' is not over the link ' + box(want));
+      if (froot.outerHTML !== before) fails.push('the frame document changed');
+      // Stale highlights hide: re-validated at most every 250ms while it
+      // shows, it hides when the link moves with nothing to follow, stops
+      // showing, or goes; the next update (a resize) shows it again.
+      const link = g.action.guess.anchor;
+      for (const [how, change, undo] of [
+        ['moved', () => { link.style.marginLeft = '40px'; }, () => { link.style.marginLeft = ''; }],
+        ['hidden', () => { link.style.visibility = 'hidden'; }, () => { link.style.visibility = ''; }],
+      ]) {
+        change();
+        await sleep(400);
+        if (!m.el.hidden) fails.push('the mark stayed on a ' + how + ' link');
+        undo();
+        m.update();
+        if (m.el.hidden) fails.push('the mark did not come back after ' + how);
+      }
+      // A hidden mark schedules nothing.
+      link.style.marginLeft = '40px';
+      await sleep(400);
+      if (pending.size || m.timing()) fails.push('a hidden mark kept its timer');
+      link.style.marginLeft = '';
+      m.update();
+      article.classList.remove('selected');
+      m.sync();
+      if (pending.size || m.timing()) fails.push('the timer outlived the cursor: ' + pending.size);
+      link.style.marginLeft = '40px';
+      await sleep(400);
+      if (m.el.hidden) fails.push('the mark was re-validated off the cursor message');
+      link.style.marginLeft = '';
+      article.classList.add('selected');
+      m.sync();
+      if (m.el.hidden || pending.size !== 1) fails.push('sync did not re-validate and restart on the cursor: ' + pending.size);
+      // Off the cursor with no sync, the timer stops by itself.
+      article.classList.remove('selected');
+      await sleep(400);
+      if (pending.size || m.timing()) fails.push('the timer kept running off the cursor without a sync');
+      article.classList.add('selected');
+      m.sync();
+      // A throw while re-validating hides it and schedules nothing more.
+      const realCS = W.getComputedStyle;
+      W.getComputedStyle = function (el) { if (el && el.ownerDocument !== D) throw new Error('forced'); return realCS.apply(W, arguments); };
+      await sleep(400);
+      W.getComputedStyle = realCS;
+      if (!m.el.hidden || pending.size || m.timing()) fails.push('a throw in re-validation left it ' + (m.el.hidden ? 'hidden' : 'shown') + ' with ' + pending.size + ' timers');
+      m.update();
+      if (m.el.hidden || pending.size !== 1) fails.push('the mark did not come back after the throw');
+      link.remove();
+      await sleep(400);
+      if (!m.el.hidden) fails.push('the mark stayed on a removed link');
+      frame.contentDocument.body.appendChild(link);
+      m.update();
+      article.classList.remove('selected');
+      if (W.getComputedStyle(m.el).display !== 'none') fails.push('the mark shows off the cursor message');
+      m.stop();
+      if (pending.size) fails.push('a timer outlived stop');
+      W.setTimeout = realSet;
+      W.clearTimeout = realClear;
+      if (holder.querySelector('.cta-mark')) fails.push('the mark stayed after stop');
+      header.replaceChildren(from);
+    });
+
+    app.remove();
+
+    // DOMPurify's hooks are global: the capture hook is gone even when the
+    // sanitize call throws.
+    await check('sanitize-throw-hook', async (fails) => {
+      const sanitize = DOMPurify.sanitize;
+      DOMPurify.sanitize = function () { DOMPurify.sanitize = sanitize; throw new Error('forced'); };
+      let threw = false;
+      try { Pneu.assembleMailDocument('<p>x</p>', {}, origin, {}); } catch (e) { threw = String(e).includes('forced'); }
+      DOMPurify.sanitize = sanitize;
+      if (!threw) fails.push('the forced throw did not surface');
+      if (DOMPurify.removeHook('uponSanitizeElement')) fails.push('hook left installed after a throw');
+      const gh = runs.find((r) => r.c.id.startsWith('53'));
+      if (gh && !Pneu.assembleMailDocument(gh.html, {}, origin, {}).action) fails.push('assembly broken after the throw');
+    });
+
+    // The capture hook only reads: with it and without it, the sanitized
+    // document is byte-identical for every case.
+    await check('sanitize-hook-identical', async (fails) => {
+      const addHook = DOMPurify.addHook;
+      for (const r of runs) {
+        const c = r.c;
+        const opts = { remoteImages: !!c.remoteImages, partBase: c.partBase, theme: c.theme };
+        const a = Pneu.assembleMailDocument(r.html, c.cids || {}, origin, opts);
+        const again = Pneu.assembleMailDocument(r.html, c.cids || {}, origin, opts);
+        if (a.srcdoc !== again.srcdoc) { fails.push(c.id + ': assembly is not deterministic'); continue; }
+        let b;
+        DOMPurify.addHook = function () {};
+        try { b = Pneu.assembleMailDocument(r.html, c.cids || {}, origin, opts); } finally { DOMPurify.addHook = addHook; }
+        if (a.srcdoc !== b.srcdoc || a.csp !== b.csp) fails.push(c.id + ': differs with the hook installed');
+        if (b.ldBlocks !== 0) fails.push(c.id + ': captured without the hook');
+      }
+    });
+    return results;
+  }
+
+  // appDocument is an app-shaped document: a thread pane holding one
+  // message, the key bar and its status line, styled by the shipping app.css.
+  async function appDocument() {
+    const f = document.createElement('iframe');
+    f.id = 'app';
+    // Fixed in view: an offscreen frame's rendering (rAF, scroll events) is throttled.
+    f.style.cssText = 'position:fixed;left:0;top:0;z-index:10;display:block;width:640px;height:420px;border:0;background:#fff';
+    f.srcdoc = '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+      '<link rel="stylesheet" href="' + origin + '/web/static/app.css">' +
+      '<style>:root { --bg: #1e1e2e; --fg: #cdd6f4; --accent: #89b4fa; --selection: #45475a; }' +
+      'body { overflow: hidden; } main.thread { position: absolute; left: 0; top: 0; width: 600px; height: 360px;' +
+      ' overflow-y: auto; padding-bottom: 0; box-sizing: border-box; } .filler { height: 900px; }</style>' +
+      '<script src="' + origin + '/web/static/purify.min.js"><\/script>' +
+      '<script src="' + origin + '/web/static/mailframe.js"><\/script>' +
+      '<script src="' + origin + '/web/static/actions.js"><\/script>' +
+      '</head><body><main class="thread"><article class="message"><header><span class="from">Sender</span></header>' +
+      '<div class="body" data-kind="html"></div></article><div class="filler"></div></main>' +
+      '<footer id="keybar"><div id="status"></div></footer></body></html>';
+    const loaded = new Promise((r) => { f.addEventListener('load', r, { once: true }); setTimeout(r, 3000); });
+    document.body.appendChild(f);
+    await loaded;
+    return f;
+  }
+
+  // instrument records, while T.on, each listener and ResizeObserver added
+  // in win's realm, and forgets it when removed or disconnected.
+  function instrument(win, T) {
+    if (win.__pneuTracked) return;
+    win.__pneuTracked = true;
+    const P = win.EventTarget.prototype, add = P.addEventListener, rem = P.removeEventListener;
+    const cap = (o) => typeof o === 'boolean' ? o : !!(o && o.capture);
+    const find = (t, type, f, o) => T.live.findIndex((x) => x[0] === t && x[1] === type && x[2] === f && x[3] === cap(o));
+    P.addEventListener = function (type, f, o) {
+      if (T.on && find(this, type, f, o) < 0) T.live.push([this, type, f, cap(o)]);
+      return add.call(this, type, f, o);
+    };
+    P.removeEventListener = function (type, f, o) {
+      const i = find(this, type, f, o);
+      if (i >= 0) T.live.splice(i, 1);
+      return rem.call(this, type, f, o);
+    };
+    const RP = win.ResizeObserver.prototype, observe = RP.observe, disconnect = RP.disconnect;
+    RP.observe = function () { if (T.on && !T.obs.includes(this)) T.obs.push(this); return observe.apply(this, arguments); };
+    RP.disconnect = function () { const i = T.obs.indexOf(this); if (i >= 0) T.obs.splice(i, 1); return disconnect.apply(this, arguments); };
+  }
+
+  // ---- app.js on the thread page ---------------------------------------------
+  // The shipping app.js on the thread page the server renders
+  // (app-thread.html: base.html and thread.html, kept current by
+  // internal/web's TestHarnessThreadPage), in the narrow layout (the page
+  // header sticky over the scrolling window) and the split (the pane's
+  // sticky title). Only the network is stood in for, by a script ahead of
+  // the page's own: fetch answers the message's body URL with a mail and
+  // everything else 404, EventSource is inert, window.open is recorded.
+  // Keys are dispatched where a keystroke lands: the thread pane, and the
+  // mail frame's document.
+  async function pageChecks() {
+    const results = [];
+    const pageHTML = await (await fetch('app-thread.html')).text();
+    const host = 'notifications.' + 'a'.repeat(60) + '.' + 'b'.repeat(60) + '.example';
+    const actionURL = 'https://' + host + '/pull/1';
+    let mail = '<!DOCTYPE html><html><head><script type="application/ld+json">' +
+      JSON.stringify({ '@context': 'http://schema.org', '@type': 'EmailMessage',
+        potentialAction: { '@type': 'ViewAction', url: actionURL, name: 'View Pull Request' } }) +
+      '<\/script></head><body><p class="canary">thread page</p>';
+    for (let i = 0; i < 400; i++) {
+      mail += '<a href="https://grid.example/' + i + '/' + 'x'.repeat(300) + '" style="display:inline-block;width:64px;margin:3px">link ' + i + '</a>';
+    }
+    mail += '</body></html>';
+    const bodies = { '/body/personal/h2@hostile.test': { html: mail, cids: {} } };
+    for (const layout of ['narrow', 'split']) {
+      const P = await threadPage(pageHTML, layout, bodies);
+      const check = async (id, fn) => {
+        const fails = [];
+        out.textContent = 'pending: page-' + layout + '-' + id;
+        try { if (P.error) throw new Error(P.error); await fn(fails); } catch (e) { fails.push('harness error: ' + (e && e.stack || e)); }
+        results.push({ id: 'page-' + layout + '-' + id, pass: fails.length === 0, fails });
+      };
+      const { W, D } = P;
+      await check('layout', async (fails) => {
+        if (D.body.classList.contains('split') !== (layout === 'split')) fails.push('body.split=' + D.body.classList.contains('split'));
+        if (W.__errors.length) fails.push('page errors: ' + W.__errors.join(' | '));
+      });
+      if (P.error) { P.frame.remove(); continue; }
+      const A = W.Pneu.actions;
+      const calls = [];
+      const primary = A.primary;
+      A.primary = function () { const r = primary.apply(this, arguments); calls.push(r); return r; };
+      const pane = D.querySelector('main.thread');
+      const article = D.querySelector('article.message[data-msgid="h2@hostile.test"]');
+      const chip = () => article.querySelector(':scope > header > .cta');
+      const mframe = article.querySelector('iframe.mail');
+      const scroller = layout === 'split' ? pane : D.scrollingElement;
+      // The chrome a chip can sit half under: the split's sticky title, and
+      // narrow, the fixed key bar (the page header is sticky in app.css but
+      // doesn't stick there: body, overflow-x:hidden, is its scroll
+      // container and never scrolls).
+      const chrome = layout === 'split' ? D.querySelector('main.thread > h1') : D.getElementById('keybar');
+      const statusEl = D.getElementById('status');
+      const press = (target, key, extra) => {
+        const o = Object.assign({ key, code: key.length === 1 ? 'Key' + key.toUpperCase() : key, bubbles: true, cancelable: true }, extra);
+        target.dispatchEvent(new W.KeyboardEvent('keydown', o));
+        target.dispatchEvent(new W.KeyboardEvent('keyup', o));
+      };
+      const frameBody = () => Object.getOwnPropertyDescriptor(Document.prototype, 'body').get.call(mframe.contentDocument);
+      const reset = () => { calls.length = 0; W.__opens.length = 0; };
+
+      // A chip whose top row is behind the sticky chrome and whose centre is
+      // below it: o reveals it (the chrome is out of the bounds), and only
+      // the o after that opens.
+      await check('o-under-chrome', async (fails) => {
+        const c = chip();
+        if (!c) { fails.push('no chip'); return; }
+        const cr0 = c.getBoundingClientRect();
+        if (layout === 'narrow' && !(c.querySelector('.dest').getBoundingClientRect().height > 30)) fails.push('the chip does not wrap: ' + cr0.height);
+        // Split: the top row behind the title, the centre below it. Narrow:
+        // the bottom row behind the key bar, the centre above it; the chip
+        // is near the top of the page, so the window is made short enough.
+        if (layout === 'split') scroller.scrollTop += cr0.top - (chrome.getBoundingClientRect().bottom - 0.35 * cr0.height);
+        else {
+          scroller.scrollTop = 0;
+          const r = c.getBoundingClientRect();
+          P.frame.style.height = Math.round(r.bottom - 0.35 * r.height + chrome.getBoundingClientRect().height) + 'px';
+        }
+        const cr = c.getBoundingClientRect(), mid = (cr.top + cr.bottom) / 2, hr = chrome.getBoundingClientRect();
+        const half = layout === 'split' ? cr.top < hr.bottom && hr.bottom < mid : mid < hr.top && hr.top < cr.bottom;
+        if (!half) { fails.push('geometry: chip ' + [cr.top, cr.bottom] + ' chrome ' + [hr.top, hr.bottom]); return; }
+        reset();
+        press(pane, 'o');
+        if (calls.length !== 1) fails.push('o did not go through primary: ' + calls.length + ' calls');
+        else if (calls[0].act !== 'reveal' || calls[0].why !== 'bounds') fails.push('first o: ' + JSON.stringify(calls[0]));
+        if (W.__opens.length) fails.push('first o opened ' + W.__opens[0][0]);
+        press(pane, 'o');
+        if (W.__opens.length !== 1 || W.__opens[0][0] !== actionURL) fails.push('second o opened ' + JSON.stringify(W.__opens));
+        P.frame.style.height = '560px';
+      });
+
+      // Anything else over part of the chip (here its top row, its centre
+      // clear) keeps o from opening it.
+      await check('o-covered', async (fails) => {
+        const c = chip();
+        c.scrollIntoView({ block: 'center' });
+        const r = c.getBoundingClientRect();
+        const lid = D.createElement('div');
+        lid.style.cssText = 'position:fixed;z-index:5;background:#000;left:' + r.left + 'px;top:' + r.top + 'px;width:' + r.width + 'px;height:' + (r.height * 0.3) + 'px';
+        article.appendChild(lid); // not app chrome (a body child): a stranger over the chip
+        reset();
+        press(pane, 'o');
+        if (calls.length !== 1 || calls[0].act !== 'reveal' || calls[0].why !== 'covered') fails.push('o with the top row covered: ' + JSON.stringify(calls));
+        if (W.__opens.length) fails.push('opened under the cover');
+        lid.remove();
+        c.scrollIntoView({ block: 'center' });
+        press(pane, 'o');
+        if (W.__opens.length !== 1) fails.push('uncovered, o did not open');
+      });
+
+      // The same from inside the mail frame, the chip scrolled away above.
+      await check('o-from-frame', async (fails) => {
+        const c = chip();
+        scroller.scrollTop += c.getBoundingClientRect().bottom + 600;
+        if (c.getBoundingClientRect().bottom > 0) { fails.push('the chip did not scroll away'); return; }
+        reset();
+        press(frameBody(), 'o');
+        if (calls.length !== 1 || calls[0].act !== 'reveal') fails.push('o in the frame: ' + JSON.stringify(calls));
+        if (W.__opens.length) fails.push('o in the frame opened ' + W.__opens[0][0]);
+        press(frameBody(), 'o');
+        if (W.__opens.length !== 1 || W.__opens[0][0] !== actionURL) fails.push('second o in the frame opened ' + JSON.stringify(W.__opens));
+      });
+
+      // Link hints: with a label selected, the status line shows the
+      // destination and nothing paints over it; a flash from elsewhere
+      // ends the session, and Enter then opens nothing.
+      await check('hints-status', async (fails) => {
+        scroller.scrollTop += mframe.getBoundingClientRect().top + 200;
+        reset();
+        press(pane, 'L', { shiftKey: true });
+        if (!A.hintsOpen()) { fails.push('L did not open hints'); return; }
+        // The lowest label: the status line, lifted over the key bar with
+        // the selection, reaches it.
+        const labels = [...D.querySelectorAll('#hints .hint')];
+        // (the status line sits at the right: the rightmost of the lowest row).
+        const bottom = Math.max(...labels.map((l) => l.getBoundingClientRect().bottom));
+        const lowest = labels.filter((l) => l.getBoundingClientRect().bottom > bottom - 20)
+          .reduce((a, b) => (b.getBoundingClientRect().right > a.getBoundingClientRect().right ? b : a));
+        for (const ch of lowest.textContent) press(pane, ch);
+        const url = statusEl.querySelector('bdi.url');
+        if (!url || !url.textContent.startsWith('https://grid.example/')) { fails.push('no destination on the status line'); return; }
+        const sr = statusEl.getBoundingClientRect();
+        const meets = (r) => r.right > sr.left && r.left < sr.right && r.bottom > sr.top && r.top < sr.bottom;
+        if (!lowest.classList.contains('under')) fails.push('the selected label ' + lowest.textContent + ' was not hidden under the status line');
+        for (const l of labels) {
+          if (W.getComputedStyle(l).display !== 'none' && meets(l.getBoundingClientRect())) fails.push('label ' + l.textContent + ' over the status line');
+        }
+        // Stacking: every label shown and hit-testable, those that meet the
+        // status line still lie under it.
+        const ov = D.getElementById('hints');
+        const classes = labels.map((l) => l.className);
+        ov.style.pointerEvents = 'auto';
+        labels.forEach((l) => { l.className = 'hint'; });
+        const met = labels.filter((l) => meets(l.getBoundingClientRect()));
+        if (!met.length) fails.push('no label meets the status line: the stacking check tests nothing');
+        for (const l of met) {
+          const r = l.getBoundingClientRect();
+          const x = (Math.max(r.left, sr.left) + Math.min(r.right, sr.right)) / 2;
+          const y = (Math.max(r.top, sr.top) + Math.min(r.bottom, sr.bottom)) / 2;
+          const hit = D.elementFromPoint(x, y);
+          if (!hit || !statusEl.contains(hit)) { fails.push('label ' + l.textContent + ' paints over the status line'); break; }
+        }
+        labels.forEach((l, i) => { l.className = classes[i]; });
+        ov.style.pointerEvents = '';
+        W.Pneu.flash('Sync failed: harness', 'error');
+        if (A.hintsOpen()) fails.push('a flash left hints up');
+        if (statusEl.textContent !== 'Sync failed: harness') fails.push('status line: ' + statusEl.textContent.slice(0, 80));
+        if (D.getElementById('hints')) fails.push('overlay left');
+        press(pane, 'Enter');
+        if (W.__opens.length) fails.push('Enter opened ' + W.__opens[0][0]);
+      });
+      if (W.__pwned !== undefined || window.__pwned !== undefined) results.push({ id: 'page-' + layout + '-pwned', pass: false, fails: ['pwned'] });
+      P.frame.remove();
+    }
+    return results;
+  }
+
+  // The button heuristic through app.js on the thread page (narrow): a
+  // body with no JSON-LD gets a guess chip once its frame has laid out, the
+  // link is highlighted on the cursor message only, o opens it, and after
+  // its href changes o opens nothing and the chip is guessed afresh, now
+  // showing where the link goes.
+  async function guessPageChecks() {
+    const results = [];
+    const pageHTML = await (await fetch('app-thread.html')).text();
+    const html = await (await fetch('56-cta-repoint.html')).text();
+    const P = await threadPage(pageHTML, 'narrow', { '/body/personal/h2@hostile.test': { html, cids: {} } });
+    const fails = [];
+    out.textContent = 'pending: page-guess';
+    try {
+      if (P.error) throw new Error(P.error);
+      const { W, D } = P;
+      const article = D.querySelector('article.message[data-msgid="h2@hostile.test"]');
+      const pane = D.querySelector('main.thread');
+      const chip = () => article.querySelector(':scope > header > .cta');
+      const mframe = article.querySelector('iframe.mail');
+      const statusEl = D.getElementById('status');
+      const press = (target, k) => {
+        const o = { key: k, code: 'Key' + k.toUpperCase(), bubbles: true, cancelable: true };
+        target.dispatchEvent(new W.KeyboardEvent('keydown', o));
+        target.dispatchEvent(new W.KeyboardEvent('keyup', o));
+      };
+      const want = 'https://reset.example/token/56';
+      if (!chip().classList.contains('guess')) fails.push('the chip is not a guess');
+      if (!article.classList.contains('selected')) fails.push('the message is not the cursor');
+      const mk = article.querySelector('.body .cta-mark');
+      if (!mk || mk.hidden || W.getComputedStyle(mk).display === 'none') fails.push('no highlight on the cursor message');
+      else {
+        const fr = mframe.getBoundingClientRect(), br = mk.firstChild.getBoundingClientRect();
+        const ar = mframe.contentDocument.querySelector('a[href="' + want + '"]').getBoundingClientRect();
+        if (Math.abs(br.left - (fr.left + mframe.clientLeft + ar.left)) > 1 || Math.abs(br.top - (fr.top + mframe.clientTop + ar.top)) > 1) fails.push('highlight not over the link');
+      }
+      chip().scrollIntoView({ block: 'center' });
+      W.__opens.length = 0;
+      press(pane, 'o');
+      if (W.__opens.length !== 1 || W.__opens[0][0] !== want) fails.push('o opened ' + JSON.stringify(W.__opens));
+      const a = mframe.contentDocument.querySelector('a[href="' + want + '"]');
+      a.setAttribute('href', 'https://evil.example/56');
+      W.__opens.length = 0;
+      press(pane, 'o');
+      if (W.__opens.length) fails.push('o opened the re-pointed link: ' + W.__opens[0][0]);
+      if (!/^Not opened: the link changed/.test(statusEl.textContent)) fails.push('status: ' + statusEl.textContent);
+      const d = chip() && chip().querySelector('bdi.destination');
+      if (!d || d.textContent !== 'https://evil.example') fails.push('the chip was not guessed afresh: ' + (d && d.textContent));
+      // Off the cursor, no highlight and no re-validation timer.
+      if (W.__timers250.size !== 1) fails.push('re-validation timers on the cursor message: ' + W.__timers250.size);
+      press(pane, 'p');
+      if (W.__timers250.size) fails.push('re-validation timers after the cursor left: ' + W.__timers250.size);
+      const mk2 = article.querySelector('.body .cta-mark');
+      if (article.classList.contains('selected')) fails.push('p did not move the cursor');
+      else if (mk2 && W.getComputedStyle(mk2).display !== 'none') fails.push('the highlight shows off the cursor message');
+      if (W.__errors.length) fails.push('page errors: ' + W.__errors.join(' | '));
+    } catch (e) { fails.push('harness error: ' + (e && e.stack || e)); }
+    results.push({ id: 'page-narrow-guess', pass: fails.length === 0, fails });
+    P.frame.remove();
+
+    // A throw inside the heuristic (forced: the first computed style of a
+    // link in the frame) is no pick, cleanly: the body still renders, no
+    // chip, no highlight, no timer, nothing reaches the page's errors.
+    const tfails = [];
+    out.textContent = 'pending: page-guess-throw';
+    const T2 = await threadPage(pageHTML, 'narrow', { '/body/personal/h2@hostile.test': { html, cids: {} } }, { throwOnce: true, noChip: true });
+    try {
+      if (T2.error) throw new Error(T2.error);
+      await sleep(300);
+      const { W, D } = T2;
+      const article = D.querySelector('article.message[data-msgid="h2@hostile.test"]');
+      const div = article.querySelector('.body[data-kind=html]');
+      if (W.__threw !== 1) tfails.push('the forced throw did not happen: ' + W.__threw);
+      if (!div || div.dataset.state !== 'done') tfails.push('the body did not finish rendering: ' + (div && div.dataset.state));
+      if (article.querySelector(':scope > header > .cta')) tfails.push('a chip after the throw');
+      if (article.querySelector('.cta-mark')) tfails.push('a highlight after the throw');
+      if (W.__timers250.size) tfails.push('timers after the throw: ' + W.__timers250.size);
+      if (W.__errors.length) tfails.push('page errors: ' + W.__errors.join(' | '));
+    } catch (e) { tfails.push('harness error: ' + (e && e.stack || e)); }
+    results.push({ id: 'page-narrow-guess-throw', pass: tfails.length === 0, fails: tfails });
+    T2.frame.remove();
+    return results;
+  }
+
+  // threadPage loads app-thread.html into a same-origin frame of the
+  // layout's width, the network stood in for (pageShim), and waits for the
+  // HTML message's body and chip.
+  async function threadPage(html, layout, bodies, options) {
+    const f = document.createElement('iframe');
+    f.style.cssText = 'position:fixed;left:0;top:0;z-index:20;border:0;background:#fff;height:560px;width:' + (layout === 'split' ? 1400 : 700) + 'px';
+    const shim = '<script>(' + pageShim.toString() + ')(' + JSON.stringify(bodies).replace(/</g, '\\u003c') + ', ' + JSON.stringify(options || {}) + ')<\/script>';
+    if (!html.includes('<head>')) return { frame: f, error: 'app-thread.html has no <head>' };
+    f.srcdoc = html.replace('<head>', '<head>' + shim);
+    const loaded = new Promise((r) => { f.addEventListener('load', r, { once: true }); setTimeout(r, 3000); });
+    document.body.appendChild(f);
+    await loaded;
+    const W = f.contentWindow, D = f.contentDocument;
+    for (let i = 0; i < 100; i++) {
+      const a = D.querySelector('article.message[data-msgid="h2@hostile.test"]');
+      const fr = a && a.querySelector('iframe.mail');
+      if (fr && fr.contentDocument && fr.contentDocument.readyState === 'complete' && (a.querySelector('.cta') || (options && options.noChip)) && fr.getBoundingClientRect().height > 100) {
+        return { frame: f, W, D };
+      }
+      await sleep(50);
+    }
+    return { frame: f, W, D, error: 'the HTML body or its chip never rendered' + (W.__errors ? ': ' + W.__errors.join(' | ') : '') };
+  }
+
+  // pageShim runs in the thread page ahead of its scripts (serialized there).
+  function pageShim(bodies, options) {
+    window.__errors = [];
+    window.addEventListener('error', function (e) { window.__errors.push(String(e.message)); });
+    // setTimeout's 250ms timers (the highlight's re-validation), pending.
+    var timers = window.__timers250 = new Map(), set = window.setTimeout, clear = window.clearTimeout;
+    window.setTimeout = function (f, ms) {
+      var args = Array.prototype.slice.call(arguments, 2);
+      var id = set.call(window, function () { timers.delete(id); return f.apply(this, args); }, ms);
+      if (ms === 250) timers.set(id, true);
+      return id;
+    };
+    window.clearTimeout = function (id) { timers.delete(id); return clear.call(window, id); };
+    if (typeof options === 'object' && options && options.throwOnce) {
+      // The first computed style asked of a link in a message frame throws.
+      var cs = window.getComputedStyle;
+      window.__threw = 0;
+      window.getComputedStyle = function (el) {
+        if (!window.__threw && el && el.ownerDocument !== document && el.localName === 'a') { window.__threw++; throw new Error('forced'); }
+        return cs.apply(window, arguments);
+      };
+    }
+    window.__opens = [];
+    window.open = function (url, target, features) { window.__opens.push([String(url), target, features]); return null; };
+    window.EventSource = function () {
+      this.addEventListener = function () {};
+      this.close = function () {};
+    };
+    window.fetch = function (url) {
+      var u = String(url);
+      if (Object.prototype.hasOwnProperty.call(bodies, u)) {
+        return Promise.resolve(new Response(JSON.stringify(bodies[u]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
+      return Promise.resolve(new Response('not in the harness', { status: 404 }));
+    };
+  }
 
   function snapshot(r) {
     return r.frame.contentWindow ? r.frame.contentWindow.location.href : null;
@@ -310,6 +1199,31 @@ body { margin: 0; font: 13px monospace; }
       if (last && root.clientHeight - last.getBoundingClientRect().bottom > 12) fails.push('frame taller than content');
     }
     if (c.synthetic === 'keys' && r.keys.join() !== 'j') fails.push('keydown not forwarded: ' + r.keys.join());
+    // JSON-LD (46–53): how many ld+json blocks the sanitize hook captured,
+    // and the one declared action they yield, exactly, or none.
+    if ('ldBlocks' in c && r.ldBlocks !== c.ldBlocks) fails.push('ldBlocks=' + r.ldBlocks + ' want ' + c.ldBlocks);
+    if ('action' in c && JSON.stringify(r.action || null) !== JSON.stringify(c.action)) {
+      fails.push('action=' + JSON.stringify(r.action) + ' want ' + JSON.stringify(c.action));
+    }
+    // The button heuristic (54-61): its pick, exactly, or none; links that
+    // must not even be candidates (hidden ones, 54), or must be (59, 60);
+    // the runner-up's host (60); whether the budget ran out (61); the frame
+    // untouched.
+    if ('guess' in c) {
+      const g = r.guess;
+      if (!g || !g.layout) fails.push('guess: no layout');
+      else {
+        if (JSON.stringify(g.pick) !== JSON.stringify(c.guess)) fails.push('guess=' + JSON.stringify(g.pick) + ' want ' + JSON.stringify(c.guess) + ' ranked ' + g.hosts.join(','));
+        for (const h of c.notCandidates || []) if (g.hosts.includes(h)) fails.push('candidate ' + h);
+        for (const h of c.rankedHosts || []) if (!g.hosts.includes(h)) fails.push('not a candidate: ' + h);
+        if ('runnerUp' in c && g.runnerUp !== c.runnerUp) fails.push('runnerUp=' + g.runnerUp + ' want ' + c.runnerUp);
+        if (g.over !== !!c.over) fails.push('over budget: ' + g.over);
+        if (g.touched) fails.push('the guess changed the frame document');
+      }
+    }
+    // DOMPurify hooks are global: assembly's must be gone once it returns.
+    // removeHook with no function pops the last one, so any left is found.
+    if ('ldBlocks' in c && DOMPurify.removeHook('uponSanitizeElement')) fails.push('sanitize hook left installed');
     return done();
 
     function done() {

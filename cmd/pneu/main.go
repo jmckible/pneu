@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -110,7 +111,7 @@ func serve(args []string) error {
 
 	accounts := make([]notmuch.Account, len(cfg.Accounts))
 	for i, a := range cfg.Accounts {
-		accounts[i] = notmuch.Account{Name: a.Name, Email: a.Email, ConfigPath: a.NotmuchConfig}
+		accounts[i] = notmuch.Account{Name: a.Name, Email: a.Email, ConfigPath: a.NotmuchConfig, Maildir: filepath.Join(a.GmiDir, "mail")}
 	}
 	srv, err := web.New(accounts, host, token)
 	if err != nil {

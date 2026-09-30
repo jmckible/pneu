@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>ld+json hidden</title>
+<script type="application/ld+json">{"@context":"http://schema.org","@type":"EmailMessage","potentialAction":{"@type":"ViewAction","url":"https://example.com/48-real","name":"The real one"}}</script>
+<!-- <script type="application/ld+json">{"@type":"EmailMessage","potentialAction":{"@type":"ViewAction","url":"https://example.com/48-comment","name":"comment"}}</script> -->
+</head>
+<body>
+<p class="canary">48 ld+json hidden: this paragraph must render.</p>
+<template><script type="application/ld+json">{"@type":"EmailMessage","potentialAction":{"@type":"ViewAction","url":"https://example.com/48-template","name":"template"}}</script></template>
+<noscript><script type="application/ld+json">{"@type":"EmailMessage","potentialAction":{"@type":"ViewAction","url":"https://example.com/48-noscript","name":"noscript"}}</script></noscript>
+<textarea><script type="application/ld+json">{"@type":"EmailMessage","potentialAction":{"@type":"ViewAction","url":"https://example.com/48-textarea","name":"textarea"}}</script></textarea>
+<xmp><script type="application/ld+json">{"@type":"EmailMessage","potentialAction":{"@type":"ViewAction","url":"https://example.com/48-xmp","name":"xmp"}}</script></xmp>
+<svg><script type="application/ld+json">{"@type":"EmailMessage","potentialAction":{"@type":"ViewAction","url":"https://example.com/48-svg","name":"svg"}}</script></svg>
+<math><mi><script type="application/ld+json">{"@type":"EmailMessage","potentialAction":{"@type":"ViewAction","url":"https://example.com/48-math","name":"math"}}</script></mi></math>
+<script type="application/json">{"@type":"EmailMessage","potentialAction":{"@type":"ViewAction","url":"https://example.com/48-json","name":"plain json"}}</script>
+<script type="application/ld+json;x">{"@type":"EmailMessage","potentialAction":{"@type":"ViewAction","url":"https://example.com/48-param","name":"parameter"}}</script>
+<p>Only the head block is a script element of the document tree with exactly that type. Were any other captured, there would be two actions, and so none.</p>
+</body>
+</html>

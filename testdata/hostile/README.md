@@ -79,6 +79,22 @@ an app path outside the message's parts (35, 36), or a receipt-tracker host (38)
 | `43-inline-color.html` | a `color:` in a style attribute. Rendered with a theme | render in the app's colors | render on the light sheet, the mail's color intact | A |
 | `44-no-colors.html` | no colors: `transparent`, `inherit`, `currentcolor` and an empty `<font color>`. Rendered with a theme; also as `harness-theme-invalid` with a `--bg` carrying a CSS injection, and `harness-theme-missing` with no theme | leave the theme's values anywhere in the document unless each is a 6-digit hex (or `light`/`dark`) | render in the theme's bg, fg and accent; fall back to the light sheet when the theme is malformed or absent | A |
 | `45-font-substitution.html` | Gmail's `font-family:sans-serif` span, a newsletter stack behind an unloadable web font, a serif and a mono stack, an `!important` Arial, a legacy `<font face>`, and an `@font-face` named Arial | rewrite serif or mono stacks, a family the sender put ahead of the stand-ins, `!important`, or an `@font-face` name | put the mail sans (Inter) ahead of the first sans stand-in (Arial, Helvetica, `sans-serif`…) in style attributes, `<style>` rules and `face` | A |
+| `46-ldjson-markup.html` | an ld+json block whose JSON string holds `</script><img onerror>` (the parser ends the script there, so the img is markup), and a valid block whose `name` holds `<img onerror>` and an escaped `<\/script><svg onload>` | execute; take anything from the broken blocks | capture three blocks; yield the valid block's action, its name the markup as text, capped at 60 code points | S, P, A |
+| `47-ldjson-huge.html` | a valid small block beside a block past 64 KiB | yield an action: past any bound there is none, not the small block's | render the canary | A |
+| `48-ldjson-hidden.html` | ld+json inside a comment, `<template>`, `<noscript>`, `<textarea>`, `<xmp>`, `<svg>`, `<math><mi>`, and with types `application/json` and `application/ld+json;x`; one real block in head | capture any but the head block (DOMPurify's own parse is the truth: none of those is an HTML script in the document tree with exactly that type) | capture one block and yield its action; a second capture would make two actions, and so none | P, A |
+| `49-ldjson-javascript-url.html` | the one declared action's `url` is `javascript:` | yield an action | render the canary | A |
+| `50-ldjson-data-url.html` | the one declared action's `url` is `data:text/html` | yield an action | render the canary | A |
+| `51-ldjson-relative-url.html` | the one declared action's `url` is relative (`/status`) | yield an action (with no base, a relative URL is refused, not resolved against the app) | render the canary | A |
+| `52-ldjson-ip-url.html` | the one declared action's `url` is on `127.0.0.1` | yield an action | render the canary | A |
+| `53-ldjson-github.html` | nothing hostile: GitHub's notification shape, an array holding an `EmailMessage` whose `potentialAction` is a `ViewAction` with both `url` and `target`, and a `publisher` | lose the action | yield `View Pull Request` and the pull request's URL | A |
+| `54-cta-hidden.html` | 38 button-styled "Verify account" links above a real one, each hidden one way, arranged so that every check of the button heuristic is the only one catching at least one of them (so breaking any check fails the case): opacity 0.3, and 0.6 × 0.7 nested; `visibility:hidden` with only its text made visible; `display:none`; a 10px `overflow:hidden` window onto its middle; `clip-path`, `clip`, `mask-image`, `mix-blend-mode`, `filter` each leaving the centre hit-testable; zero size; `scale(0.02)`; 75% off the left edge; far off-screen; covered by a relatively positioned div (only the hit test sees it); `pointer-events:none`; 4px text; a 1px run of text inside; text at 0.3 opacity or under `filter` in a span; text the button's colour (hex, gradient, `oklab()`), nearly transparent, or `-webkit-text-fill-color: transparent`; text indented away; text centred past both edges of a narrow box; text covered while the box's centre isn't. Paint tricks: a `pointer-events:none` absolute cover; an absolute cover over part of the text away from every hit-tested point; an image inside the link over its text; a background image (gradient) on the link, on an ancestor over a colour that would pass, and on a span inside; a `::before` with content; a `::first-line` in the button's colour; the text in an `<svg>`; a running CSS animation. Image-only (alt text) variants where a text check would otherwise stand in | be a candidate at all | pick the real "Confirm your order" (its text colour `oklab()`, so a broken canvas conversion refuses it) | A |
+| `55-cta-footer.html` | a button-styled "Verify account" to another host in the footer, under unsubscribe/privacy/help links, against the real button, which appears twice (two table-cell buttons to one URL) | win; count the real CTA's second button as its runner-up | pick the real destination (labelled by its best-scoring button) by the margin | A |
+| `56-cta-repoint.html` | a single clear "Reset your password" button; the app checks then re-point, hide, fade, retext and remove it after the pick, and redraw the frame | open anything after any of those | pick it; open it while unchanged, and again once each change is undone | A |
+| `57-cta-mismatch.html` | a button whose text says "Log in to paypal.com" and whose href goes to `login.evil.example` | show paypal.com as the destination | pick it, labelled with its text, the chip's destination `https://login.evil.example` | A |
+| `58-cta-pseudo.html` | an empty positioned `::after` painting the button colour over a button's text, and a real button further down | be a candidate (the first by its pseudo-element; the real one because a positioned pseudo-element has no rect and counts as covering the document) | pick nothing | A |
+| `59-cta-image-only.html` | a big, early, styled image link whose `alt` is "Shop the sale", and a styled button with no text | be picked (the alt is not a label; no text, no pick) | rank both as candidates, pick nothing | A |
+| `60-cta-label-hosts.html` | "Track package" twice on real.example (different parameters) and once on other.example | merge other.example into real.example's choice | rank two choices, pick real.example's, other.example the runner-up | A |
+| `61-cta-budget.html` | one link holding 2,100 separately drawn text nodes before a clear button | pick anything once the guess's budget (2,000 text ranges) is spent | report `over`, pick nothing | A |
 
 ## Sources
 
@@ -137,6 +153,78 @@ carries harness-only cases that need the live port:
   `theme` pass it as `opts.theme`; `colors`, `sheet` and `fits` assert the
   detection result, the frame mode and class, and that the frame's height
   covers its content, sheet border included, without clipping or slack.
+- Button-heuristic cases (54–61) carry `guess`, the pick `{text, host}`
+  (text as the chip labels it) or null, from `Pneu.actions.guess` on the
+  laid-out frame, and optionally `notCandidates`, hosts that must not be
+  among the ranked candidates at all, `rankedHosts`, hosts that must be,
+  `runnerUp`, the runner-up's host, and `over`, that the budget ran out;
+  the frame's serialized document must be the same before and after. Every check in the heuristic was broken
+  once to confirm a case fails (docs/actions.md).
+- JSON-LD cases (46–53) carry `ldBlocks`, the number of ld+json blocks the sanitize
+  hook captured, and `action`, what `declaredAction` (actions.js, loaded by the
+  harness) made of them: `{url, name}` or null. Each also checks that the hook was
+  removed after the call (DOMPurify's hooks are global).
+- After the cases, checks of the sinks that put sender data into the app's own
+  document, run in an app-shaped document (`#app`: a thread pane, the key bar
+  and status line, the shipping `app.css`, `mailframe.js` and `actions.js`),
+  with `window.open` intercepted, each reported like a case:
+  `app-chip-sinks` (every chip the corpus yields contains only the chip's own
+  elements and attributes, 46's markup shown as text, and its destination
+  stays inside the chip and the pane at 600px and 180px, wrapping rather than
+  clipped); `app-o-reveal` (`o` with the chip scrolled away reveals and opens
+  nothing, a repeat does nothing, the next `o` opens); `app-hints-positioning`
+  (fixed, absolute, transformed, negative-margin and huge links, 3-letter
+  labels, and 2px slivers on each edge of the clip: every label's box inside
+  it); `app-hints-frozen-url` (anchors re-pointed after hints open; the URL
+  shown at selection is what opens, and Shift+Enter opens nothing);
+  `app-hints-status-scroll` (a long destination scrolls by the status line's
+  own scroll and the inspection keys without closing hints or reaching the
+  app); `app-hints-yield-status` (another flash ends the session);
+  `app-guess-repoint` (56's pick opens while unchanged; re-pointed,
+  hidden, faded, retexted, removed or redrawn after the pick, `o` opens
+  nothing and says why, and opens again once undone); `app-guess-chip` (57's
+  chip is only the chip's own elements, dashed and tagged `guess`, its name
+  the text and its destination the href's host; the highlight is in the app
+  document, a layer exactly the frame's box that clips, its box over the
+  link, hidden off the cursor message, gone on `stop`; the frame's document
+  untouched; re-validated while it shows, it hides within 250ms of the link
+  moving, being hidden or being removed, comes back on the next update, and
+  isn't re-validated off the cursor message; its 250ms timers, counted by
+  wrapping the app realm's `setTimeout`/`clearTimeout`, run only while it
+  shows: none off the cursor (after `sync()`, or by itself without one),
+  none while hidden, none after a forced throw in re-validation, none
+  after `stop`); `app-hints-listeners` (three rounds of opening and ending hints every way,
+  frame replacement included: every listener and ResizeObserver a session
+  added is gone); `sanitize-throw-hook` (a sanitize call that throws still
+  removes the capture hook); `sanitize-hook-identical` (every case's assembled
+  document is byte-identical with the capture hook installed and without).
+  Under the harness's virtual time no rendering step runs, so where the
+  browser would fire a scroll event the harness dispatches one.
+- Then the shipping `app.js` on the real thread page: `app-thread.html` is
+  `base.html` and `thread.html` as the server renders them (checked in;
+  `go test ./internal/web -run TestHarnessThreadPage` fails when the templates
+  change, `-update-harness` regenerates it), loaded in a same-origin frame
+  with a script ahead of the page's own that stands in for the network only
+  (fetch answers the body URL with a mail carrying a JSON-LD action and a grid
+  of long links, and 404s the rest; EventSource is inert; `window.open` is
+  recorded). run.sh serves `/static/` and a fixed `/theme.css` for it. In the
+  narrow layout (700px) and the split (1400px), keys dispatched on the thread
+  pane and in the mail frame's document: `page-*-o-under-chrome` (a wrapped
+  chip half under the fixed key bar, narrow, or the split's sticky title: the
+  first `o` goes through `primary` and reveals for the bounds, the second
+  opens); `page-*-o-covered` (another element over the chip's top row, its
+  centre clear: no open); `page-*-o-from-frame`; `page-*-hints-status` (the
+  selected label under the status line is hidden, every label that meets it
+  stacks below it, and `Pneu.flash` ends the session so `Enter` opens
+  nothing). Then `page-narrow-guess`: the body is 56 (no JSON-LD), and
+  app.js must guess it on load: a guess chip, the highlight over the link
+  on the cursor message, `o` opening it; after its href is changed in the
+  frame, `o` opens nothing, the status line says `Not opened: …`, and the
+  chip is guessed afresh with the new destination; `p` moves the cursor
+  away and the highlight hides, its re-validation timer stopped. Then
+  `page-narrow-guess-throw`: the same page with the first computed style
+  of a link in the frame forced to throw; the body still renders
+  (`data-state=done`) with no chip, highlight, timer or page error.
 - `harness-link-opener-control`: the positive control. The shipping assembly, then
   `rel=opener` put back on the link before `srcdoc`. `opener.html` sees an opener and
   uses it to navigate the frame (reverse tabnabbing); the case passes only if the
