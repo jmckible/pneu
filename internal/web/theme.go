@@ -34,10 +34,10 @@ func configDir() (string, error) {
 }
 
 // theme serves the override sheet, or an empty sheet when there is none, so
-// base.html can always link it. Never cached: theme-set rewrites it in place.
+// base.html can always link it. Never cached (CacheNoStore): theme-set
+// rewrites it in place.
 func (s *Server) theme(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	w.Header().Set("Cache-Control", "private, no-store")
 	p := s.ThemePath
 	if p == "" {
 		var err error

@@ -23,8 +23,11 @@ const CookieName = "pneu"
 // AppCSP is the app page's policy: a second script wall behind the frame's
 // sandbox. A srcdoc frame inherits it and both policies must allow a load,
 // so it names nothing the frame needs (inline style, data:/https: images,
-// data: fonts) — no default-src, no img-src, no style-src.
-const AppCSP = "script-src 'self'; object-src 'none'; base-uri 'none'"
+// data: fonts) — no default-src, no img-src, no style-src. worker-src
+// 'none': a service worker registered by script in this origin would
+// outlive the page and the fix, answering future navigations itself
+// (docs/client.md, R4). The frame runs no script, so it loses nothing.
+const AppCSP = "script-src 'self'; object-src 'none'; base-uri 'none'; worker-src 'none'"
 
 // Auth guards every request. localhost is not a boundary: the browser that
 // hosts the --app window is also the user's daily browser, so any open tab
@@ -49,6 +52,9 @@ type Auth struct {
 	mu         sync.Mutex
 	nonce      string // "" until StartLaunch: /open refuses everything
 	launchPath string
+
+	// check sees every response's final headers (policyWriter); tests only.
+	check func(rt *Route, status int, h http.Header, r *http.Request)
 }
 
 func NewAuth(host, token string) *Auth {
@@ -73,20 +79,12 @@ func (a *Auth) sessionOK(r *http.Request) bool {
 	return ok
 }
 
-// Middleware enforces Host, Origin, and the session cookie, and sets the
-// headers every response carries.
+// Middleware enforces Host, Origin, and the session cookie. Every response
+// it passes on, refusals included, carries its policy class's security
+// headers and its route's cache rule (policyWriter).
 func (a *Auth) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		w := &cspWriter{ResponseWriter: rw}
-		h := w.Header()
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("Referrer-Policy", "no-referrer")
-		h.Set("X-Frame-Options", "DENY")
-		// Other ports of pneu.localhost are same-site: without these a page
-		// there could embed our responses (CORP) or keep a handle on our window
-		// (COOP).
-		h.Set("Cross-Origin-Resource-Policy", "same-origin")
-		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		w := &policyWriter{ResponseWriter: rw, r: r, check: a.check}
 
 		if r.Host != a.Host {
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
@@ -98,6 +96,7 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 		}
 		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Path == "/open" {
 			next.ServeHTTP(w, r)
+			w.finish()
 			return
 		}
 		if !a.sessionOK(r) {
@@ -105,38 +104,9 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r)
+		w.finish()
 	})
 }
-
-// cspWriter adds AppCSP to text/html responses, decided when the header is
-// written. Unwrap keeps http.ResponseController (SSE flushing) working.
-type cspWriter struct {
-	http.ResponseWriter
-	wrote bool
-}
-
-func (w *cspWriter) WriteHeader(code int) {
-	if !w.wrote {
-		w.wrote = true
-		if isHTML(w.Header().Get("Content-Type")) {
-			w.Header().Set("Content-Security-Policy", AppCSP)
-		}
-	}
-	w.ResponseWriter.WriteHeader(code)
-}
-
-func (w *cspWriter) Write(b []byte) (int, error) {
-	if !w.wrote {
-		if w.Header().Get("Content-Type") == "" {
-			// What net/http would sniff anyway; decided here so it is seen.
-			w.Header().Set("Content-Type", http.DetectContentType(b))
-		}
-		w.WriteHeader(http.StatusOK)
-	}
-	return w.ResponseWriter.Write(b)
-}
-
-func (w *cspWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func isHTML(ctype string) bool {
 	mt, _, err := mime.ParseMediaType(ctype)
@@ -171,7 +141,6 @@ func (a *Auth) Open(w http.ResponseWriter, r *http.Request) {
 	// which is a spent nonce. A request that already carries the session is
 	// simply sent home; the nonce is neither checked nor rotated.
 	if a.sessionOK(r) {
-		w.Header().Set("Cache-Control", "no-store")
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
@@ -188,7 +157,6 @@ func (a *Auth) Open(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	a.mu.Unlock()
-	w.Header().Set("Cache-Control", "no-store")
 	if !ok {
 		http.Error(w, "bad or used launch nonce", http.StatusForbidden)
 		return

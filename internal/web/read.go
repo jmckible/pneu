@@ -225,7 +225,6 @@ func (s *Server) listTotal(w http.ResponseWriter, r *http.Request, query string)
 		n, ok = s.total(r.Context(), query, true)
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
 	if !ok {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error":"count failed"}`))
@@ -634,7 +633,6 @@ func (s *Server) gmail(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, u, http.StatusSeeOther)
 }
 
@@ -664,7 +662,6 @@ func (s *Server) body(w http.ResponseWriter, r *http.Request) {
 		cids[cid] = prefix + strconv.Itoa(n)
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "private, no-store")
 	if err := json.NewEncoder(w).Encode(struct {
 		HTML string            `json:"html"`
 		CIDs map[string]string `json:"cids"`
@@ -734,27 +731,23 @@ func (s *Server) part(w http.ResponseWriter, r *http.Request) {
 	}
 	h := w.Header()
 	h.Set("Content-Type", ctype)
-	h.Set("X-Content-Type-Options", "nosniff")
-	// Not in the disk cache: the --app window shares the daily browser's profile.
-	h.Set("Cache-Control", "private, no-store")
 	disp := "attachment"
 	if inline {
 		disp = "inline"
 	}
 	h.Set("Content-Disposition", disp+"; filename*=UTF-8''"+rfc5987(name))
+	// If anything here is ever navigated to and rendered, it runs nothing;
+	// a PDF, which the viewer frames, is the exception (PolicyPDF).
 	if strings.HasPrefix(ctype, "application/pdf") {
-		// The viewer frames it (<iframe src>): same origin only.
-		h.Set("X-Frame-Options", "SAMEORIGIN")
-		h.Set("Content-Security-Policy", "frame-ancestors 'self'")
+		usePolicy(w, PolicyPDF)
 	} else {
-		// If anything here is ever navigated to and rendered, it runs nothing.
-		// (Chromium refuses to show PDFs under a sandbox CSP, hence the exception.)
-		h.Set("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'")
+		usePolicy(w, PolicyPart)
 	}
 	// Ranges for <video>/<audio> seeking; HEAD is handled here too. No
 	// modtime or ETag, so If-Modified-Since is ignored and an If-Range
 	// request gets the whole body, but ServeContent still answers
 	// If-None-Match: * with 304 and an If-Match naming a tag with 412.
+	singleRange(r)
 	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(body))
 }
 

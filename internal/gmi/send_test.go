@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -99,5 +101,72 @@ func TestSendLockWaitHonoursContext(t *testing.T) {
 	time.Sleep(700 * time.Millisecond)
 	if n := f.count("send -t"); n != 0 {
 		t.Errorf("gave-up send still ran %d times", n)
+	}
+}
+
+// A real run's Result carries the stream scan: the markers survive a tail
+// that has long dropped them, and a run that exited on its own is Scanned.
+func TestSendScanned(t *testing.T) {
+	f := newFixture(t)
+	t.Setenv("FAKEGMI_EXIT", "1")
+	t.Setenv("FAKEGMI_OUTPUT", "sending message, from: a@b..\nreceiving content (1) ...\n"+strings.Repeat("Traceback line\n", 2000))
+	e := mustNew(t, []Account{f.account("personal")}, f.opts(Options{}))
+	r, err := e.Send(context.Background(), "personal", strings.NewReader(rawMsg))
+	if err == nil || strings.Contains(r.Output, "receiving content") {
+		t.Fatalf("err %v; tail still holds the marker", err)
+	}
+	if !r.Scanned || !r.SendLine || !r.AcceptLine || !r.Accepted() || r.NotSent() {
+		t.Errorf("result %+v", r)
+	}
+	t.Setenv("FAKEGMI_OUTPUT", "Traceback\nValueError: Recipients passed")
+	r, err = e.Send(context.Background(), "personal", strings.NewReader(rawMsg))
+	if err == nil || !r.Scanned || r.SendLine || !r.NotSent() {
+		t.Errorf("failed before the send line: %v %+v", err, r)
+	}
+}
+
+// fakeScript writes an executable gmi stand-in.
+func fakeScript(t *testing.T, body string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "gmi")
+	if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// A descendant still holding the output after gmi exits means the scan
+// may have missed lines: not Scanned, so never NotSent, whatever Wait says.
+func TestSendScannedNeedsEOF(t *testing.T) {
+	f := newFixture(t)
+	old := pipeDrainWait
+	pipeDrainWait = 200 * time.Millisecond
+	defer func() { pipeDrainWait = old }()
+	o := f.opts(Options{})
+	o.GmiPath = fakeScript(t, "#!/bin/sh\ncat >/dev/null\necho Traceback\n(sleep 2; echo 'sending message, from: late') &\nexit 1\n")
+	e := mustNew(t, []Account{f.account("personal")}, o)
+	r, err := e.Send(context.Background(), "personal", strings.NewReader(rawMsg))
+	if err == nil || r.ExitCode != 1 || r.Scanned || r.NotSent() {
+		t.Errorf("err %v, result %+v", err, r)
+	}
+}
+
+// Every run is UTF-8 and unbuffered, whatever pneu's own environment says:
+// under an inherited utf-16, lieer's markers wouldn't match.
+func TestGmiPythonEnv(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	t.Setenv("PYTHONIOENCODING", "utf-16")
+	t.Setenv("PYTHONUTF8", "0")
+	f := newFixture(t)
+	o := f.opts(Options{})
+	o.GmiPath = fakeScript(t, "#!/usr/bin/env python3\nimport os, sys\nsys.stdin.read()\n"+
+		"print('env', os.environ.get('PYTHONIOENCODING'), os.environ.get('PYTHONUTF8'), os.environ.get('PYTHONUNBUFFERED'))\n"+
+		"print('sending message, from: a@b..')\nprint('receiving content (1) ...')\nsys.exit(1)\n")
+	e := mustNew(t, []Account{f.account("personal")}, o)
+	r, _ := e.Send(context.Background(), "personal", strings.NewReader(rawMsg))
+	if !strings.Contains(r.Output, "env utf-8 1 1") || !r.SendLine || !r.AcceptLine || !r.Accepted() || r.NotSent() {
+		t.Errorf("result %+v", r)
 	}
 }

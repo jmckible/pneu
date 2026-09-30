@@ -150,7 +150,6 @@ func (s *Server) partZip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "private, no-store")
 	out := struct {
 		Entries   []zipEntry `json:"entries"`
 		Total     uint64     `json:"total"`

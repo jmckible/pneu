@@ -118,6 +118,15 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Every send is reserved here before gmi gets it; opening prunes
+	// records past web.SendKeep.
+	sendsPath, err := web.SendsPath()
+	if err != nil {
+		return err
+	}
+	if srv.Sends, err = web.OpenSendLog(sendsPath); err != nil {
+		return err
+	}
 
 	// pneu.localhost resolves to both loopbacks and clients try ::1 first, so
 	// bind both or another local process on [::1]:port would receive the traffic.

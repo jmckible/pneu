@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -29,67 +30,34 @@ const (
 	maxSendBody  = 4 << 20
 	addressTTL   = 10 * time.Minute
 	maxAddresses = 20
-	sentMemory   = 64 // Message-IDs remembered for double-submit protection
 	maxRefs      = 20 // References kept on a reply, newest last
 	// SendWait bounds a send's wait for the account lock (a sync may hold
 	// it for minutes); past it POST /send answers 503 and the draft stays.
 	SendWait = 20 * time.Second
-	// sentNoCopy is the outbox's redirect for a message Gmail accepted but
-	// lieer failed to store locally: never a URL, never resent.
-	sentNoCopy = "\x00sent-no-copy"
 )
 
 const (
 	msgBusy       = "Sync in progress, try again in a moment."
 	msgSentNoCopy = "Sent, but the local copy failed; check Sent in Gmail before retrying."
+	// msgMaybeSent: the send log can't say whether Gmail has it (SendLog).
+	// pneu never sends this draft id again.
+	msgMaybeSent = "May have been sent: check Sent in Gmail. pneu won't send this draft again; to send it anyway, copy the text, discard the draft and start again."
+	msgChanged   = "This draft was already sent, or may have been, with different content: check Sent in Gmail."
+	msgSending   = "This message is already being sent."
 )
 
 // ---- state -----------------------------------------------------------------
 
-// composeState is the compose side's process memory: the address cache and
-// the Message-IDs already sent or in flight. The zero value is ready.
+// composeState is the compose side's process memory: the address cache.
+// Sends are the durable SendLog's. The zero value is ready.
 type composeState struct {
 	mu    sync.Mutex
 	addrs map[string]addrCache // account -> recipients of sent mail
-	sends map[string]string    // Message-ID -> "" while in flight, redirect once sent
-	order []string             // sent (not in-flight) ids, oldest first
 }
 
 type addrCache struct {
 	at   time.Time
 	list []notmuch.AddressEntry
-}
-
-// claim marks msgID in flight. If it is already in flight or sent, ok is
-// false and done is the sent message's redirect ("" while in flight).
-func (c *composeState) claim(msgID string) (done string, ok bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if d, seen := c.sends[msgID]; seen {
-		return d, false
-	}
-	if c.sends == nil {
-		c.sends = map[string]string{}
-	}
-	c.sends[msgID] = ""
-	return "", true
-}
-
-// finish records msgID as sent (redirect != "") or releases it after a
-// failure so the user can retry.
-func (c *composeState) finish(msgID, redirect string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if redirect == "" {
-		delete(c.sends, msgID)
-		return
-	}
-	c.sends[msgID] = redirect
-	c.order = append(c.order, msgID)
-	if len(c.order) > sentMemory {
-		delete(c.sends, c.order[0])
-		c.order = c.order[1:]
-	}
 }
 
 // ---- pages -----------------------------------------------------------------
@@ -157,11 +125,11 @@ func (s *Server) renderCompose(w http.ResponseWriter, r *http.Request, status in
 	}
 	data.Page = s.page(title, "", s.viewLabel()) // no list or thread to reconcile; labeled all the same
 	data.Accounts = s.composeAccounts(r.Context(), data.Account)
-	// The middleware's no-referrer policy makes Chromium send "Origin: null" on
-	// a form-navigation POST, which Auth rightly refuses (sandboxed frames send
-	// null too). same-origin still sends nothing cross-site and restores the
-	// real Origin on POST /send. Only this page is a form.
-	w.Header().Set("Referrer-Policy", "same-origin")
+	// The app's no-referrer policy makes Chromium send "Origin: null" on a
+	// form-navigation POST, which Auth rightly refuses (sandboxed frames send
+	// null too). PolicyCompose's same-origin still sends nothing cross-site
+	// and restores the real Origin on POST /send. Only this page is a form.
+	usePolicy(w, PolicyCompose)
 	data.Locked = data.InReplyTo != ""
 	if data.MessageID == "" {
 		data.MessageID = newMessageID()
@@ -314,7 +282,10 @@ func quoteText(s string) string {
 
 // ---- send ------------------------------------------------------------------
 
-// send handles POST /send.
+// send handles POST /send. The draft id is the form's message_id: minted
+// at render, kept with the draft by compose.js, so a resubmit, or the same
+// draft reopened, is the same send. The send log (SendLog) holds each id's
+// reservation and result, keyed to the hash of what was sent.
 func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxSendBody)
 	if err := r.ParseForm(); err != nil {
@@ -357,7 +328,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	if data.MessageID == "" {
 		data.MessageID = newMessageID()
 	}
-	msg, err := buildMessage(s.identity(r.Context(), acct), data, s.now())
+	out, err := prepareMessage(data)
 	if err != nil {
 		fail(http.StatusBadRequest, err.Error())
 		return
@@ -366,18 +337,39 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		fail(http.StatusServiceUnavailable, "Sending is unavailable: no sync engine.")
 		return
 	}
-	if done, ok := s.outbox.claim(data.MessageID); !ok {
-		if done == sentNoCopy {
-			fail(http.StatusConflict, msgSentNoCopy)
-			return
-		}
-		if done != "" {
-			http.Redirect(w, r, done+sentFragment, http.StatusSeeOther) // resubmit of a sent message
-			return
-		}
-		fail(http.StatusConflict, "This message is already being sent.")
+	if s.Sends == nil {
+		// Never a send nothing could deduplicate.
+		fail(http.StatusServiceUnavailable, "Sending is unavailable: no send log.")
 		return
 	}
+	from := s.identity(r.Context(), acct)
+
+	hash := out.hash(acct.Name)
+	rec, fresh, err := s.Sends.reserve(data.MessageID, acct.Name, hash)
+	switch {
+	case errors.Is(err, errInFlight):
+		fail(http.StatusConflict, msgSending)
+		return
+	case err != nil:
+		log.Printf("send %s %s: send log: %v", acct.Name, data.MessageID, err)
+		fail(http.StatusInternalServerError, "Not sent: pneu couldn't record the send.")
+		return
+	case !fresh:
+		// Answered from the record, never by sending.
+		defer s.Sends.release(data.MessageID)
+		switch {
+		case rec.Hash != hash:
+			fail(http.StatusConflict, msgChanged)
+		case rec.Result == sendAccepted:
+			http.Redirect(w, r, rec.Dest+sentFragment, http.StatusSeeOther) // resubmit of a sent message
+		case rec.Result == sendNoCopy:
+			fail(http.StatusConflict, msgSentNoCopy)
+		default: // sendUnknown, or a reservation with no result: the server stopped mid-send
+			fail(http.StatusConflict, msgMaybeSent)
+		}
+		return
+	}
+
 	// ctx bounds only the wait for the account lock (a sync may hold it);
 	// once gmi starts, the send runs to completion.
 	wait := s.SendWait
@@ -386,22 +378,28 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), wait)
 	defer cancel()
-	if res, err := s.Syncer.Send(ctx, acct.Name, bytes.NewReader(msg)); err != nil {
+	if res, err := s.Syncer.Send(ctx, acct.Name, bytes.NewReader(out.render(from, s.now()))); err != nil {
 		log.Printf("send %s %s: %v", acct.Name, data.MessageID, err)
 		switch {
 		case errors.Is(err, gmi.ErrBusy):
-			s.outbox.finish(data.MessageID, "")
+			// gmi never started.
+			s.Sends.record(rec, sendRejected, "")
 			w.Header().Set("Retry-After", "10")
 			fail(http.StatusServiceUnavailable, msgBusy)
 		case res.Accepted():
-			// Gmail has it: keep the id claimed so a resubmit can't send it
-			// twice, and pull so the sent copy shows up.
-			s.outbox.finish(data.MessageID, sentNoCopy)
+			// Gmail has it: never resent. Pull so the sent copy shows up.
+			s.Sends.record(rec, sendNoCopy, "")
 			s.Syncer.SyncNow(acct.Name)
 			fail(http.StatusBadGateway, msgSentNoCopy)
-		default:
-			s.outbox.finish(data.MessageID, "")
+		case res.NotSent():
+			s.Sends.record(rec, sendRejected, "")
 			fail(http.StatusBadGateway, "Not sent: "+err.Error())
+		default:
+			// gmi got as far as the API call and failed without saying
+			// whether Gmail took it. Pull: a sent copy may turn up in Sent.
+			s.Sends.record(rec, sendUnknown, "")
+			s.Syncer.SyncNow(acct.Name)
+			fail(http.StatusBadGateway, msgMaybeSent)
 		}
 		return
 	}
@@ -418,9 +416,9 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 			threads = []threadRef{{acct.Name, t}}
 		}
 	}
+	s.Sends.record(rec, sendAccepted, dest)
 	// The sent copy is in the database now: Sent and the thread show it.
 	s.viewChanged(windowFrom(r), threads)
-	s.outbox.finish(data.MessageID, dest)
 	http.Redirect(w, r, dest+sentFragment, http.StatusSeeOther)
 }
 
@@ -447,15 +445,35 @@ func newMessageID() string {
 	return "<" + hex.EncodeToString(b) + "@pneu." + host + ">"
 }
 
+// outgoing is a message as the form gave it, validated and normalized:
+// everything sent but the From identity, the Date and the MIME boundary.
+type outgoing struct {
+	to, cc, bcc string // header values, each address re-serialized
+	subject     string // encoded
+	inReplyTo   string
+	refs        string
+	messageID   string
+	body        string // line ends normalized to \n
+}
+
 // buildMessage renders the RFC 5322 message gmi sends. Errors are the
 // user's to fix (shown on the re-rendered form).
 func buildMessage(from mail.Address, d composePage, now time.Time) ([]byte, error) {
+	o, err := prepareMessage(d)
+	if err != nil {
+		return nil, err
+	}
+	return o.render(from, now), nil
+}
+
+// prepareMessage validates the form and normalizes what will be sent.
+func prepareMessage(d composePage) (outgoing, error) {
 	var rcpt int
 	lists := map[string]string{}
 	for _, f := range []struct{ name, value string }{{"To", d.To}, {"Cc", d.Cc}, {"Bcc", d.Bcc}} {
 		addrs, err := parseList(f.value)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %v", f.name, err)
+			return outgoing{}, fmt.Errorf("%s: %v", f.name, err)
 		}
 		rcpt += len(addrs)
 		strs := make([]string, len(addrs))
@@ -465,21 +483,42 @@ func buildMessage(from mail.Address, d composePage, now time.Time) ([]byte, erro
 		lists[f.name] = strings.Join(strs, ", ")
 	}
 	if rcpt == 0 {
-		return nil, errors.New("No recipients.")
+		return outgoing{}, errors.New("No recipients.")
 	}
 	if d.InReplyTo != "" && !msgIDRE.MatchString(d.InReplyTo) {
-		return nil, errors.New("Bad In-Reply-To.")
+		return outgoing{}, errors.New("Bad In-Reply-To.")
 	}
 	refs := strings.Fields(d.References)
 	for _, ref := range refs {
 		if !msgIDRE.MatchString(ref) {
-			return nil, errors.New("Bad References.")
+			return outgoing{}, errors.New("Bad References.")
 		}
 	}
 	if !generatedIDRE.MatchString(d.MessageID) {
-		return nil, errors.New("Bad Message-ID.")
+		return outgoing{}, errors.New("Bad Message-ID.")
 	}
+	return outgoing{
+		to: lists["To"], cc: lists["Cc"], bcc: lists["Bcc"],
+		subject:   encodeSubject(d.Subject),
+		inReplyTo: d.InReplyTo,
+		refs:      strings.Join(refs, " "),
+		messageID: d.MessageID,
+		body:      strings.ReplaceAll(strings.ReplaceAll(d.Body, "\r\n", "\n"), "\r", "\n"),
+	}, nil
+}
 
+// hash is the send log's key for what goes out from account: each field
+// length-prefixed, so no two different messages share an encoding.
+func (o outgoing) hash(account string) string {
+	h := sha256.New()
+	for _, f := range []string{account, o.to, o.cc, o.bcc, o.subject, o.inReplyTo, o.refs, o.messageID, o.body} {
+		fmt.Fprintf(h, "%d:%s\n", len(f), f)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// render writes the message.
+func (o outgoing) render(from mail.Address, now time.Time) []byte {
 	var b bytes.Buffer
 	header := func(name, value string) {
 		if value != "" {
@@ -487,24 +526,24 @@ func buildMessage(from mail.Address, d composePage, now time.Time) ([]byte, erro
 		}
 	}
 	header("From", headerAddr(&from))
-	header("To", lists["To"])
-	header("Cc", lists["Cc"])
+	header("To", o.to)
+	header("Cc", o.cc)
 	// Gmail delivers to Bcc and strips the header from what others receive;
 	// lieer checks recipients against To/Cc/Bcc.
-	header("Bcc", lists["Bcc"])
-	header("Subject", encodeSubject(d.Subject))
+	header("Bcc", o.bcc)
+	header("Subject", o.subject)
 	header("Date", now.Format(time.RFC1123Z))
-	header("Message-ID", d.MessageID)
-	header("In-Reply-To", d.InReplyTo)
-	header("References", strings.Join(refs, " "))
+	header("Message-ID", o.messageID)
+	header("In-Reply-To", o.inReplyTo)
+	header("References", o.refs)
 	header("MIME-Version", "1.0")
-	if !hasQuote(d.Body) {
+	if !hasQuote(o.body) {
 		header("Content-Type", "text/plain; charset=utf-8")
-		body, cte := encodeBody(d.Body)
+		body, cte := encodeBody(o.body)
 		header("Content-Transfer-Encoding", cte)
 		b.WriteString("\r\n")
 		b.WriteString(body)
-		return b.Bytes(), nil
+		return b.Bytes()
 	}
 	// A quote goes out with an HTML twin so clients can fold it (see
 	// quoteHTML); text/plain stays first and is the message of record.
@@ -512,8 +551,8 @@ func buildMessage(from mail.Address, d composePage, now time.Time) ([]byte, erro
 	header("Content-Type", `multipart/alternative; boundary="`+boundary+`"`)
 	b.WriteString("\r\n")
 	for _, p := range []struct{ ct, s string }{
-		{"text/plain; charset=utf-8", d.Body},
-		{"text/html; charset=utf-8", quoteHTML(d.Body)},
+		{"text/plain; charset=utf-8", o.body},
+		{"text/html; charset=utf-8", quoteHTML(o.body)},
 	} {
 		body, cte := encodeBody(p.s)
 		b.WriteString("--" + boundary + "\r\n")
@@ -522,7 +561,7 @@ func buildMessage(from mail.Address, d composePage, now time.Time) ([]byte, erro
 		b.WriteString(body + "\r\n") // the CRLF before a delimiter belongs to it
 	}
 	b.WriteString("--" + boundary + "--\r\n")
-	return b.Bytes(), nil
+	return b.Bytes()
 }
 
 func newBoundary() string {
@@ -724,7 +763,6 @@ func (s *Server) addresses(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(out); err != nil {
 		log.Printf("addresses: %v", err)
 	}

@@ -274,3 +274,55 @@ func TestAccepted(t *testing.T) {
 		}
 	}
 }
+
+func TestNotSent(t *testing.T) {
+	fail := errors.New("gmi send [personal]: exit 1")
+	cases := []struct {
+		name string
+		r    Result
+		want bool
+	}{
+		{"setup failed before the send line", Result{Op: OpSend, ExitCode: 1, Err: fail, Scanned: true}, true},
+		{"4xx after the send line: unknown", Result{Op: OpSend, ExitCode: 1, Err: fail, Scanned: true, SendLine: true}, false},
+		{"stream not wholly scanned", Result{Op: OpSend, ExitCode: 1, Err: fail}, false},
+		{"killed", Result{Op: OpSend, ExitCode: -1, Err: fail, Scanned: true}, false},
+		{"accepted wins", Result{Op: OpSend, ExitCode: 1, Err: fail, Scanned: true, AcceptLine: true}, false},
+		{"success", Result{Op: OpSend, Scanned: true}, false},
+		{"not a send", Result{Op: OpSync, ExitCode: 1, Err: fail, Scanned: true}, false},
+	}
+	for _, c := range cases {
+		if got := c.r.NotSent(); got != c.want {
+			t.Errorf("%s: NotSent %v", c.name, got)
+		}
+	}
+}
+
+// The markers are caught as the output streams: across write boundaries,
+// and however much follows them.
+func TestSendScan(t *testing.T) {
+	http403 := "googleapiclient.errors.HttpError: <HttpError 403 when requesting https://gmail.googleapis.com/gmail/v1/users/me/messages/x returned \"Forbidden\">\n"
+	s := &sendScan{}
+	for _, chunk := range []string{"sending mes", "sage, from: a@b..\nrecei", "ving content (1) ..."} {
+		s.Write([]byte(chunk))
+	}
+	for range 1000 { // far past the 8 KiB tail
+		s.Write([]byte(http403))
+	}
+	if !s.sendLine || !s.accept {
+		t.Fatalf("scan %+v", s)
+	}
+	r := Result{Op: OpSend, ExitCode: 1, Err: errors.New("exit 1"), Scanned: true, SendLine: s.sendLine, AcceptLine: s.accept, Output: strings.Repeat(http403, 40)}
+	if !r.Accepted() || r.NotSent() {
+		t.Errorf("acceptance early, 4xx late: Accepted %v NotSent %v", r.Accepted(), r.NotSent())
+	}
+	s = &sendScan{}
+	s.Write([]byte("sending message, from: a@b..\n" + http403))
+	if !s.sendLine || s.accept {
+		t.Errorf("4xx after the send line: %+v", s)
+	}
+	s = &sendScan{}
+	s.Write([]byte("Traceback\ngoogle.auth.exceptions.RefreshError: invalid_grant\n"))
+	if s.sendLine || s.accept {
+		t.Errorf("failed before the send line: %+v", s)
+	}
+}

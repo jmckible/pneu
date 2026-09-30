@@ -8,8 +8,11 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/mail"
@@ -142,6 +145,10 @@ func (s *Server) unsubPreview(w http.ResponseWriter, r *http.Request) {
 			unsubNone(w, http.StatusOK, "Sending is unavailable: no sync engine.")
 			return
 		}
+		if s.Sends == nil {
+			unsubNone(w, http.StatusOK, "Sending is unavailable: no send log.")
+			return
+		}
 		act.from = s.identity(ctx, acct)
 		act.messageID = newMessageID()
 		out.Origin = ""
@@ -216,9 +223,12 @@ func (s *Server) runUnsub(ctx context.Context, a unsubAction) unsubResult {
 }
 
 // sendUnsub sends the mailto from the account that received the original,
-// through compose's outbox claim and gmi send.
+// through the send log like a draft (SendLog), keyed by unsubSendID: a
+// second preview of the same message's same mailto is the same send, across
+// restarts. Gmail having it (or maybe having it) means it isn't sent again.
 func (s *Server) sendUnsub(ctx context.Context, a unsubAction) unsubResult {
 	fail := func(cat string) unsubResult { return unsubResult{State: "failed", Category: cat} }
+	maybe := unsubResult{State: "maybe-sent", Category: "maybe-sent"}
 	acct, ok := s.byName[a.account]
 	if !ok {
 		return fail("unavailable")
@@ -226,15 +236,30 @@ func (s *Server) sendUnsub(ctx context.Context, a unsubAction) unsubResult {
 	if s.readOnly(acct.Name) {
 		return fail("read-only")
 	}
-	if s.Syncer == nil {
+	if s.Syncer == nil || s.Sends == nil {
 		return fail("unavailable")
 	}
 	msg, err := buildUnsubMessage(a.from, a.offer.Mailto, a.messageID, s.now())
 	if err != nil {
 		return fail("bad-message")
 	}
-	if _, ok := s.outbox.claim(a.messageID); !ok {
+	id := unsubSendID(a)
+	rec, fresh, err := s.Sends.reserve(id, acct.Name, id)
+	switch {
+	case errors.Is(err, errInFlight):
 		return fail("duplicate")
+	case err != nil:
+		log.Printf("unsubscribe %s: send log: %v", acct.Name, err)
+		return fail("unavailable")
+	case !fresh:
+		defer s.Sends.release(id)
+		switch rec.Result {
+		case sendAccepted:
+			return unsubResult{State: "ok", Category: "already-sent"}
+		case sendNoCopy:
+			return unsubResult{State: "ok", Category: "sent-no-copy"}
+		}
+		return maybe
 	}
 	wait := s.SendWait
 	if wait <= 0 {
@@ -245,20 +270,35 @@ func (s *Server) sendUnsub(ctx context.Context, a unsubAction) unsubResult {
 	res, err := s.Syncer.Send(sctx, acct.Name, bytes.NewReader(msg))
 	switch {
 	case err == nil:
-		s.outbox.finish(a.messageID, "/")
+		s.Sends.record(rec, sendAccepted, "/")
 		return unsubResult{State: "ok", Category: unsub.CatOK}
 	case errors.Is(err, gmi.ErrBusy):
-		s.outbox.finish(a.messageID, "")
+		s.Sends.record(rec, sendRejected, "")
 		return fail(unsub.CatBusy)
 	case res.Accepted():
 		// Gmail has it; never resent.
-		s.outbox.finish(a.messageID, sentNoCopy)
+		s.Sends.record(rec, sendNoCopy, "")
 		s.Syncer.SyncNow(acct.Name)
 		return unsubResult{State: "ok", Category: "sent-no-copy"}
-	default:
-		s.outbox.finish(a.messageID, "")
+	case res.NotSent():
+		s.Sends.record(rec, sendRejected, "")
 		return fail("send-failed")
+	default:
+		s.Sends.record(rec, sendUnknown, "")
+		s.Syncer.SyncNow(acct.Name)
+		return maybe
 	}
+}
+
+// unsubSendID is a mailto unsubscribe's send log key: the account, the
+// message it unsubscribes from, and exactly what the mailto sends.
+func unsubSendID(a unsubAction) string {
+	h := sha256.New()
+	m := a.offer.Mailto
+	for _, f := range []string{a.account, a.msgid, m.To, m.Subject, m.Body} {
+		fmt.Fprintf(h, "%d:%s\n", len(f), f)
+	}
+	return "unsub:" + hex.EncodeToString(h.Sum(nil))
 }
 
 // unsubSubject is the Subject header for exactly s, the text the

@@ -426,7 +426,7 @@ func (e *Engine) Reauth(ctx context.Context, account string) (string, error) {
 	actx, cancel := context.WithTimeout(base, e.opts.AuthTimeout)
 	cmd := exec.CommandContext(actx, e.opts.GmiPath, "auth", "-f", "-c", a.ClientSecret)
 	cmd.Dir = a.GmiDir
-	cmd.Env = append(os.Environ(), "NOTMUCH_CONFIG="+a.NotmuchConfig, "PYTHONUNBUFFERED=1", "BROWSER=true")
+	cmd.Env = gmiEnv(a.NotmuchConfig, "BROWSER=true")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGINT) }
 	cmd.WaitDelay = 5 * time.Second
@@ -522,7 +522,7 @@ func (e *Engine) checkAuth(ctx context.Context, a *account) error {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, e.opts.GmiPath, "pull", "-t")
 	cmd.Dir = a.GmiDir
-	cmd.Env = append(os.Environ(), "NOTMUCH_CONFIG="+a.NotmuchConfig, "PYTHONUNBUFFERED=1", "BROWSER=true")
+	cmd.Env = gmiEnv(a.NotmuchConfig, "BROWSER=true")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := lastLine(string(out))

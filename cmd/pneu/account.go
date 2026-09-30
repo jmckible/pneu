@@ -400,9 +400,10 @@ func gmiLocked(gmiDir, nmConfig string, term io.Writer, env []string, args ...st
 	}
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = gmiDir
-	// Unbuffered, as the engine runs it: term is a pipe, and the consent URL
-	// must reach it while lieer waits on the consent, not when lieer exits.
-	cmd.Env = withEnv(os.Environ(), append([]string{"NOTMUCH_CONFIG=" + nmConfig, "PYTHONUNBUFFERED=1"}, env...)...)
+	// Unbuffered and UTF-8, as the engine runs it (gmi.PythonEnv): term is
+	// a pipe, and the consent URL must reach it while lieer waits on the
+	// consent, not when lieer exits.
+	cmd.Env = withEnv(os.Environ(), append(append([]string{"NOTMUCH_CONFIG=" + nmConfig}, gmi.PythonEnv...), env...)...)
 	var out bytes.Buffer
 	if term != nil {
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, term, term

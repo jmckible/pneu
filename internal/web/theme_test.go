@@ -21,7 +21,7 @@ func TestThemeCSS(t *testing.T) {
 	os.WriteFile(p, []byte(":root{--bg:#000}"), 0o600)
 	s.ThemePath = p
 	w = do(s, "GET", "/theme.css", withCookie)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "--bg:#000") || w.Header().Get("Cache-Control") != "private, no-store" {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "--bg:#000") || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("theme: %d %q", w.Code, w.Body.String())
 	}
 	if !strings.Contains(getOK(t, s, "/"), `href="/theme.css"`) {

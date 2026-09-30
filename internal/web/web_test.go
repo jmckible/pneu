@@ -38,7 +38,30 @@ func serverFor(t *testing.T, fixture []testmail.Account) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if s.Sends, err = OpenSendLog(filepath.Join(t.TempDir(), "sends")); err != nil {
+		t.Fatal(err)
+	}
+	checkResponses(t, s)
 	return s
+}
+
+// checkResponses holds every response s writes to its route's contract
+// (Checker.Check), so the server and the client proxy that will check the
+// same responses can't disagree.
+func checkResponses(t *testing.T, s *Server) {
+	c := Checker{Origin: s.Auth.Origin, Email: func(name string) (string, bool) {
+		a, ok := s.byName[name]
+		return a.Email, ok
+	}}
+	s.Auth.check = func(rt *Route, status int, h http.Header, r *http.Request) {
+		if err := c.Check(rt, status, h, r); err != nil {
+			pattern := "(unrouted)"
+			if rt != nil {
+				pattern = rt.Pattern
+			}
+			t.Errorf("%s %s → %d on %s: %v", r.Method, r.URL, status, pattern, err)
+		}
+	}
 }
 
 func do(s http.Handler, method, target string, mod func(*http.Request)) *httptest.ResponseRecorder {
@@ -266,6 +289,7 @@ func TestSecurityHeaders(t *testing.T) {
 		}
 	}
 	// Written without an explicit Content-Type: sniffed, and still covered.
+	s.Auth.check = nil // no route: a handler outside the table
 	h := s.Auth.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("<!DOCTYPE html><p>hi"))
 	}))

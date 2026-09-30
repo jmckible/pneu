@@ -880,6 +880,92 @@ Each step works on its own. Codex review happens at the steps marked ◆.
 8. **Server work over SSH:** `pneu account` forwarding and the consent
    forward.
 
+## As built: step 3
+
+Where the code differs from the plan above:
+
+- **Route fields.** `Policies` and `Types` are one map, class to allowed
+  media types (`routes.go`). Entries also carry `Handler` (the server's),
+  `Local` (`/open`, `/theme.css`, `/events`: the client answers them) and
+  `Location` (none, local, or Gmail). There is no separate `part-image`
+  class: an SVG part is `part-sandbox` with `image/svg+xml`, and the
+  route's Dest rule allows that type only to an image destination.
+- **Two more classes.** `data`: JSON, SSE, CSS, scripts and plain-text
+  errors, the base set with no CSP; Check refuses HTML and SVG under it,
+  on every route. `static-svg`: an SVG under `/static/` (the favicon), with
+  `sandbox; default-src 'none'; style-src 'unsafe-inline'`, so navigating
+  to it runs nothing; it still renders as an `<img>` and a favicon (checked
+  in headless Chromium, whose favicon fetch is `Sec-Fetch-Dest: image`).
+- **Errors on part and static-svg answers** (ServeContent's 416 and 412)
+  switch to `data` `text/plain` without the file's disposition; Check
+  allows `data` on the part route only at status ≥ 400. A multi-range
+  request has its `Range` dropped and gets the whole file as a 200 (parts
+  and static): no route answers `multipart/byteranges`.
+- **1xx responses** a handler writes are swallowed by the policy writer;
+  the class applies at the first status ≥ 200 (N5, server side).
+- **Cache is the route's, on every response,** errors included:
+  `no-store` (the old `private, no-store` lost `private`, which adds
+  nothing to `no-store`). `/static/` sends `no-cache`. In server mode it
+  also sends a strong ETag (its content hash; embedded files have no
+  modtime), so the browser revalidates with a 304: the server is the
+  source of truth for its own files. **N2 stands for the proxy:** the
+  client strips `If-None-Match`, `If-Modified-Since`, `If-Match`,
+  `If-Unmodified-Since` and `If-Range` from `/static/` requests and `ETag`
+  and `Last-Modified` from the answers, and always fetches the body (the
+  assets are small). Otherwise a compromised dell could serve a hostile
+  `app.js` under the clean file's known ETag, and after the repair the
+  honest server's 304 would keep the hostile bytes running. Check doesn't
+  carry this: it validates what the server sends, and the stripping is
+  the proxy's (step 5).
+- **Unrouted responses** (middleware refusals, mux 404/405) are `data`
+  `text/plain`; the mux's own trailing-slash redirect (`/static` →
+  `/static/`) is allowed as a local redirect.
+- **Send reservations (N7).**
+  - The draft id is the form's `message_id`. A gmi failure is recorded
+    `rejected`, freeing the id for another try with any content, only
+    when it proves nothing went out: `ErrBusy` (gmi never started), or
+    lieer exiting on its own before its "sending message" line, judged
+    from a scan of the whole output stream (`gmi.Result.NotSent`), never
+    from the 8 KiB tail. Everything after that line short of acceptance
+    is `unknown`, whatever the HTTP status: lieer makes more requests
+    after the send, and a later 4xx says nothing about the send.
+  - **Known limit:** httplib2, lieer's transport, resends a POST whose
+    connection dropped (`BadStatusLine`, `RemoteDisconnected`) even with
+    `num_retries=0`. If Gmail took the first attempt, one `gmi send` can
+    send twice. That is inside lieer's run and out of pneu's reach; pneu
+    doesn't patch lieer.
+  - Retention runs on one clock, the last submit: a replay durably
+    refreshes the record's `submitted`, and compose.js's `idAt` is the
+    last submit too. A submitted draft keeps its id whatever the clock
+    says; only a discard drops it. Only a never-submitted draft's id
+    expires client-side.
+  - The draft id is in the localStorage draft, with a second copy in the
+    sessionStorage marker. If localStorage doesn't keep it, the submit is
+    blocked with a message.
+  - Prune checks and removes each record under the same lock reserve
+    writes under, and never touches an id in flight.
+  - A replay whose refresh write fails (a full disk) is still answered
+    from its record and pinned in memory: Prune keeps it and retries the
+    write on every pass until it lands. **Residual:** if the server
+    crashes before that, the pin is lost and the record's previous
+    deadline applies.
+  - "Scanned" means gmi exited on its own and pneu read its output pipe to
+    a clean EOF (pneu owns the pipe; exec's Wait would report the exit
+    over an unfinished drain). A descendant holding the pipe past the
+    WaitDelay makes the run not Scanned, so never `rejected`.
+  - Every gmi run pneu reads sets `PYTHONIOENCODING=utf-8` and
+    `PYTHONUTF8=1` over whatever it inherited (`gmi.PythonEnv`): under
+    an inherited utf-16 the ASCII markers wouldn't match, and an accepted
+    send could read as failing before its send line.
+  - Trimming the stored drafts (20 kept) never evicts a submitted draft
+    or the one being sent, and runs before the persist and read-back, not
+    after.
+  - A 304 or 204 carries no `Content-Disposition` (the policy writer drops
+    the part's; Check requires none).
+  - Mailto unsubscribes go through the same log, keyed by account, message
+    and exactly what the mailto sends: a second preview of the same one is
+    the same send, across restarts; `unknown` answers `maybe-sent`.
+
 ## Review status
 
 Round 2 (Codex, 2026-09-30) found R1, R2, R7, R13, R14, R16 and R17 closed

@@ -737,10 +737,10 @@ func TestSendAcceptedButNoLocalCopy(t *testing.T) {
 	if w.Code != http.StatusConflict || parseForm(t, w.Body.String()).err != msgSentNoCopy || fx.sync.sends() != 1 {
 		t.Errorf("resubmit: %d, %d sends", w.Code, fx.sync.sends())
 	}
-	// A plain failure (no sign Gmail took it) still releases the id.
+	// A failure before lieer's send line proves nothing went out: "Not sent".
 	v2 := replyForm(t, fx.s, "personal", cabin3, false).values
-	fx.sync.sendOut = "sending message, from: x..\ngoogleapiclient.errors.HttpError: 400"
-	fx.sync.sendErr = errors.New("gmi send [personal]: exit 1: HttpError 400")
+	fx.sync.sendOut = "Traceback (most recent call last):\nValueError: Recipients passed via sendmail(1) arguments"
+	fx.sync.sendErr = errors.New("gmi send [personal]: exit 1: ValueError")
 	if w := postSend(fx.s, v2); w.Code != http.StatusBadGateway || !strings.HasPrefix(parseForm(t, w.Body.String()).err, "Not sent:") {
 		t.Errorf("plain failure: %d", w.Code)
 	}

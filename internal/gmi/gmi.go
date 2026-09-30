@@ -107,6 +107,11 @@ type Result struct {
 	// Refused holds lieer's lines saying its push left changes behind (see
 	// pushRefused); those changes' writes were re-applied.
 	Refused []string
+	// SendLine and AcceptLine: a send's whole output, scanned as it
+	// streamed (Output is only its tail), held lieer's "sending message"
+	// line and an acceptance marker (Accepted). Scanned says the scan saw
+	// all of it: gmi exited and its pipes drained.
+	SendLine, AcceptLine, Scanned bool
 }
 
 // Status is an account's sync health.
@@ -803,15 +808,24 @@ func (e *Engine) run(ctx context.Context, a *account, op Op, args []string, o ru
 
 	tail := &tailBuffer{max: outputLimit}
 	refused := &refusalScan{}
-	out := io.MultiWriter(tail, refused)
+	scan := &sendScan{}
+	out := io.MultiWriter(tail, refused, scan)
 	if o.out != nil {
-		out = io.MultiWriter(tail, refused, o.out)
+		out = io.MultiWriter(tail, refused, scan, o.out)
 	}
 	cmd := exec.CommandContext(cctx, e.opts.GmiPath, args...)
 	cmd.Stdin = o.stdin
 	cmd.Dir = a.GmiDir
-	cmd.Env = append(os.Environ(), "NOTMUCH_CONFIG="+a.NotmuchConfig, "PYTHONUNBUFFERED=1")
-	cmd.Stdout, cmd.Stderr = out, out
+	cmd.Env = gmiEnv(a.NotmuchConfig)
+	// Our own pipe, not exec's: Wait prefers an ExitError to saying the
+	// output never finished, and NotSent needs to know it did (Scanned).
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return Result{Account: a.Name, Op: op, Started: time.Now(), ExitCode: -1,
+			Err: fmt.Errorf("gmi %s [%s]: %w", op, a.Name, err)}, true
+	}
+	defer pr.Close()
+	cmd.Stdout, cmd.Stderr = pw, pw
 	// Own process group so the kill reaches children holding the pipes.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
@@ -824,14 +838,37 @@ func (e *Engine) run(ctx context.Context, a *account, op Op, args []string, o ru
 	}
 
 	r = Result{Account: a.Name, Op: op, Started: time.Now(), ExitCode: -1}
-	if err = cmd.Start(); err == nil {
+	drainedClean := false
+	err = cmd.Start()
+	pw.Close() // the child's copy is the only writer now
+	if err == nil {
+		drained := make(chan error, 1)
+		go func() { _, err := io.Copy(out, pr); drained <- err }()
 		if o.stall > 0 && o.out != nil {
 			go watchStall(cctx, cancel, o.out, o.stall, cmd.Process.Pid)
 		}
 		err = cmd.Wait()
+		// A descendant may hold the pipe past gmi's exit: wait for EOF as
+		// long as exec would have, then give up on the rest.
+		wait := cmd.WaitDelay
+		if pipeDrainWait > 0 {
+			wait = pipeDrainWait
+		}
+		select {
+		case derr := <-drained:
+			drainedClean = derr == nil // io.Copy: nil at EOF
+		case <-time.After(wait):
+			pr.Close()
+			<-drained
+			if err == nil {
+				err = exec.ErrWaitDelay // as Wait said when the pipe was exec's
+			}
+		}
 	}
 	r.Duration = time.Since(r.Started)
 	r.Output = strings.ToValidUTF8(tail.String(), "")
+	r.SendLine, r.AcceptLine = scan.sendLine, scan.accept
+	r.Scanned = cmd.ProcessState != nil && cmd.ProcessState.Exited() && drainedClean
 	if cmd.ProcessState != nil {
 		r.ExitCode = cmd.ProcessState.ExitCode()
 	}
@@ -873,9 +910,70 @@ func (e *Engine) run(ctx context.Context, a *account, op Op, args []string, o ru
 // though gmi failed: lieer 1.6 prints its "receiving content" progress bar
 // (storing the sent copy) and then "message sent successfully" only after
 // the API send returned. A failure after that point is the local copy's.
+// The markers are caught as the output streams, so a long traceback after
+// them can't push them out of the tail.
 func (r Result) Accepted() bool {
-	return r.Op == OpSend && (strings.Contains(r.Output, "message sent successfully") ||
-		strings.Contains(r.Output, "receiving content"))
+	return r.Op == OpSend && (r.AcceptLine || acceptedIn(r.Output))
+}
+
+func acceptedIn(out string) bool {
+	return strings.Contains(out, "message sent successfully") || strings.Contains(out, "receiving content")
+}
+
+// NotSent reports whether a failed send proves Gmail never got the
+// message, so it may be sent again under the same id: lieer exited on its
+// own (a kill proves nothing: ExitCode -1), its whole output scanned,
+// without printing "sending message", the line it prints right before its
+// one API send call. Anything after that line, short of Accepted, is
+// unknown: an HTTP error says nothing reliable (httplib2 resends a POST
+// whose connection dropped, and lieer makes more requests after the send).
+// ErrBusy (gmi never started) is the caller's check.
+func (r Result) NotSent() bool {
+	return r.Op == OpSend && r.Err != nil && r.Scanned && r.ExitCode > 0 &&
+		!r.SendLine && !r.Accepted()
+}
+
+// pipeDrainWait overrides how long a run waits for its output's EOF after
+// gmi exits (default: the run's WaitDelay); tests only.
+var pipeDrainWait time.Duration
+
+// PythonEnv is set on every gmi run whose output pneu reads: unbuffered,
+// so lines arrive while gmi runs, and UTF-8 whatever the environment
+// says, so the ASCII markers pneu matches (Accepted, NotSent, the consent
+// URL, progress) read as written. Later values win in exec's Env.
+var PythonEnv = []string{"PYTHONUNBUFFERED=1", "PYTHONIOENCODING=utf-8", "PYTHONUTF8=1"}
+
+// gmiEnv is a gmi run's environment for the account's database.
+func gmiEnv(notmuchConfig string, extra ...string) []string {
+	env := append(os.Environ(), "NOTMUCH_CONFIG="+notmuchConfig)
+	env = append(env, PythonEnv...)
+	return append(env, extra...)
+}
+
+// sendScan watches a send's output stream for the markers NotSent and
+// Accepted read, across write boundaries.
+type sendScan struct {
+	carry            []byte
+	sendLine, accept bool
+}
+
+var sendMarks = []string{"sending message", "message sent successfully", "receiving content"}
+
+func (s *sendScan) Write(p []byte) (int, error) {
+	buf := append(s.carry, p...)
+	str := string(buf)
+	if strings.Contains(str, sendMarks[0]) {
+		s.sendLine = true
+	}
+	if acceptedIn(str) {
+		s.accept = true
+	}
+	keep := len("message sent successfully") - 1
+	if len(buf) > keep {
+		buf = buf[len(buf)-keep:]
+	}
+	s.carry = append(s.carry[:0], buf...)
+	return len(p), nil
 }
 
 // changed reads lieer 1.6's (non-quiet, non-TTY) summary lines. See Result.Changed.

@@ -131,7 +131,7 @@ func TestPartViewer(t *testing.T) {
 	if code != http.StatusPartialContent || h.Get("Content-Type") != "video/mp4" || len(b) != 100 ||
 		!strings.HasPrefix(h.Get("Content-Range"), "bytes 0-99/") || h.Get("Content-Length") != "100" ||
 		h.Get("Content-Disposition") != "inline; filename*=UTF-8''walkthrough.mp4" || !sandboxed(h) ||
-		h.Get("Cache-Control") != "private, no-store" {
+		h.Get("Cache-Control") != "no-store" {
 		t.Errorf("range: %d %v", code, h)
 	}
 	if code, h, _ := get(survey2+"7", nil); code != 200 || h.Get("Content-Type") != "audio/wav" || h.Get("Accept-Ranges") != "bytes" {
@@ -170,7 +170,7 @@ func TestPartZip(t *testing.T) {
 		Total     int        `json:"total"`
 		Truncated bool       `json:"truncated"`
 	}
-	if w.Code != 200 || w.Header().Get("Content-Type") != "application/json" || w.Header().Get("Cache-Control") != "private, no-store" {
+	if w.Code != 200 || w.Header().Get("Content-Type") != "application/json" || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("%d %v", w.Code, w.Header())
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {

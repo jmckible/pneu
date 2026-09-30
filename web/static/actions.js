@@ -1084,6 +1084,11 @@
         if (live(s)) succeeded(null, what);
         else s.ctx.flash(what);
         return;
+      case 'maybe-sent':
+        // The send log's unknown: never sent again, from any preview.
+        report(s, 'Unsubscribe email may have been sent: check Sent.', 'error',
+          { title: 'May have been sent', text: 'The unsubscribe email may have been sent: check Sent in Gmail. pneu won’t send it again.' });
+        return;
       case 'refused':
         report(s, 'Unsubscribe refused for safety; nothing was sent.', 'error',
           { title: 'Refused', text: 'The destination was refused for safety. Nothing was sent.' });

@@ -287,3 +287,32 @@ uncached, the page shows the range first and the total follows.
 Reached by `c`. Plain text. Fields: from (account picker, defaults to the
 account of the current view's last-opened thread), to, cc, subject, body.
 Same send/discard keys as inline reply. *default*
+
+**Sending is never repeated.** A draft keeps one id from its first render
+until it is sent, stored with the draft in the browser, so a resubmit, or
+the same draft reopened after the window closed, is the same send. The
+server writes each send's reservation to disk before handing the message
+to lieer and its result after; a repeat is answered from that record.
+What the page says when a send doesn't simply go out:
+
+- **Not sent: …** — lieer failed before Gmail had the message (it never
+  started, or failed before its send call). Fix and send again.
+- **Sent, but the local copy failed** — Gmail has it; lieer couldn't store
+  its copy. Never sent again; a pull follows.
+- **May have been sent: check Sent in Gmail** — lieer failed at or after
+  its send call (whatever error it reports) without showing that Gmail
+  took it, or the server stopped mid-send. pneu won't send that draft again; to send it anyway, copy the
+  text, discard the draft and start again.
+- A draft already sent (or that may have been) and then edited is refused
+  with the same advice.
+
+If the browser can't save the draft before sending, the send is blocked
+with a message: without the saved id a reopened draft could send twice.
+A sent-but-unresolved draft keeps its id until discarded; records are kept
+30 days from the last send attempt, and a never-sent draft older than that
+gets a new id. A mailto unsubscribe follows the same rules: once sent (or
+maybe sent), previewing it again never sends it again.
+
+Known limit: lieer's HTTP library itself resends a send whose connection
+dropped mid-request, so on a flaky network one send can, rarely, arrive
+twice. That happens inside lieer, beyond what pneu can see.

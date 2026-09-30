@@ -89,7 +89,6 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request, c chan []byte, first
 	rc := http.NewResponseController(w)
 	hdr := w.Header()
 	hdr.Set("Content-Type", "text/event-stream")
-	hdr.Set("Cache-Control", "no-store")
 	hdr.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	if _, err := fmt.Fprint(w, ": open\n\n"); err != nil {

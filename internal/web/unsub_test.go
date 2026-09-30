@@ -200,16 +200,58 @@ func TestUnsubscribeMailto(t *testing.T) {
 		t.Errorf("unknown token: %d", code)
 	}
 
-	// gmi failing before Gmail accepted it: failed, not resent.
+	// A second preview of the same unsubscribe is the same send: answered
+	// from the send log, not sent again.
 	_, p2 := preview(t, f.s, "personal", "m1@news.example", "")
+	if _, res := execute(t, f.s, p2.Token); res.State != "ok" || res.Category != "already-sent" || f.sync.sends() != 1 {
+		t.Errorf("repeat: %+v, %d sends", res, f.sync.sends())
+	}
+
+	// gmi failing before its send line: failed, and free to try again.
+	f.deliver(t, "mailto2", newsMsg("m2@news.example", "<mailto:leave+robin@news.example>", ""))
+	_, p3 := preview(t, f.s, "personal", "m2@news.example", "")
 	f.sync.mu.Lock()
 	f.sync.sendErr = errors.New("gmi exited 1")
 	f.sync.mu.Unlock()
-	if _, res := execute(t, f.s, p2.Token); res.State != "failed" || res.Fallback {
+	if _, res := execute(t, f.s, p3.Token); res.State != "failed" || res.Fallback {
 		t.Errorf("failed send: %+v", res)
 	}
 	if g := genOf(f.s); g != 1 {
 		t.Errorf("gen %d after a failed unsubscribe", g)
+	}
+	f.sync.mu.Lock()
+	f.sync.sendErr = nil
+	f.sync.mu.Unlock()
+	_, p4 := preview(t, f.s, "personal", "m2@news.example", "")
+	if _, res := execute(t, f.s, p4.Token); res.State != "ok" || res.Category != "ok" || f.sync.sends() != 3 {
+		t.Errorf("retry: %+v, %d sends", res, f.sync.sends())
+	}
+}
+
+// gmi failing after its send line: maybe sent, and never again, from any
+// preview, across a restart.
+func TestUnsubscribeMaybeSent(t *testing.T) {
+	f := newUnsubFixture(t)
+	f.deliver(t, "mailto3", newsMsg("m3@news.example", "<mailto:leave@news.example>", ""))
+	_, p := preview(t, f.s, "personal", "m3@news.example", "")
+	f.sync.mu.Lock()
+	f.sync.sendOut = "sending message, from: x..\nTimeoutError: The read operation timed out"
+	f.sync.sendErr = errors.New("gmi send [personal]: exit 1: TimeoutError")
+	f.sync.mu.Unlock()
+	if _, res := execute(t, f.s, p.Token); res.State != "maybe-sent" {
+		t.Fatalf("ambiguous failure: %+v", res)
+	}
+	f.sync.mu.Lock()
+	f.sync.sendOut, f.sync.sendErr = "", nil
+	f.sync.mu.Unlock()
+	log, err := OpenSendLog(f.s.Sends.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.s.Sends = log // as after a restart
+	_, p2 := preview(t, f.s, "personal", "m3@news.example", "")
+	if _, res := execute(t, f.s, p2.Token); res.State != "maybe-sent" || f.sync.sends() != 1 {
+		t.Errorf("repeat: %+v, %d sends", res, f.sync.sends())
 	}
 }
 

@@ -32,10 +32,12 @@ type Syncer interface {
 }
 
 type Server struct {
-	Accounts  []notmuch.Account // display/merge order
-	Auth      *Auth
-	Hub       *Hub
-	Syncer    Syncer // nil in tests that don't care
+	Accounts []notmuch.Account // display/merge order
+	Auth     *Auth
+	Hub      *Hub
+	Syncer   Syncer // nil in tests that don't care
+	// Sends is the send log (SendLog); POST /send refuses without one.
+	Sends     *SendLog
 	PerPage   int    // threads per list page; each account is asked for enough to fill it
 	ThemePath string // override for tests; default ThemePath()
 	// TagTimeout bounds a tag write's wait on the Xapian lock; 0 means
@@ -59,6 +61,7 @@ type Server struct {
 	totals  sync.Map
 	outbox  composeState
 	handler http.Handler
+	static  http.Handler // /static/ (staticHandler)
 	// RunStatus's wakeups, cap 1 so pending requests collapse.
 	statusNow, statusTags chan struct{}
 	marks                 accountMarks
@@ -75,7 +78,7 @@ type Server struct {
 	onLabel func()
 }
 
-// New wires routes. host is the exact Host header to accept
+// New wires the route table (routes.go). host is the exact Host header to accept
 // ("pneu.localhost:7317"); token is the install token.
 func New(accounts []notmuch.Account, host, token string) (*Server, error) {
 	pages, err := parsePages()
@@ -108,42 +111,10 @@ func New(accounts []notmuch.Account, host, token string) (*Server, error) {
 		s.order[a.Name] = i
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /open", s.Auth.Open)
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
-	mux.HandleFunc("GET /events", s.events)
-	mux.HandleFunc("GET /theme.css", s.theme)
-	mux.HandleFunc("GET /{$}", s.list("inbox", "Inbox", "tag:inbox"))
-	mux.HandleFunc("GET /starred", s.list("starred", "Starred", "tag:flagged"))
-	mux.HandleFunc("GET /sent", s.list("sent", "Sent", "tag:sent"))
-	mux.HandleFunc("GET /spam", s.list("spam", "Spam", "tag:spam"))
-	mux.HandleFunc("GET /trash", s.list("trash", "Trash", "tag:trash"))
-	// Gmail's All Mail: everything but spam and trash. Fixed queries run
-	// verbatim (list never combines them with ?q=), so no outer parens.
-	mux.HandleFunc("GET /all", s.list("all", "All Mail", "not tag:spam and not tag:trash"))
-	mux.HandleFunc("GET /search", s.list("search", "Search", ""))
-	mux.HandleFunc("GET /t/{account}/{thread}", s.thread)
-	mux.HandleFunc("GET /gmail/{account}/{thread}", s.gmail)
-	// {msgid} is one path segment: callers url.PathEscape it ('/' is legal in a Message-ID).
-	mux.HandleFunc("GET /body/{account}/{msgid}", s.body)
-	mux.HandleFunc("GET /part/{account}/{msgid}/{n}", s.part)
-	mux.HandleFunc("GET /part/{account}/{msgid}/{n}/zip", s.partZip)
-	mux.HandleFunc("POST /tag", s.tag)
-	mux.HandleFunc("POST /sync", s.syncNow)
-	mux.HandleFunc("GET /status", s.status)
-	mux.HandleFunc("GET /reply/{account}/{msgid}", s.reply)
-	mux.HandleFunc("GET /compose", s.compose)
-	mux.HandleFunc("POST /send", s.send)
-	mux.HandleFunc("GET /addresses", s.addresses)
-	// {msgid} as for /body. The literal "result" segment wins over {account}.
-	mux.HandleFunc("GET /unsubscribe/{account}/{msgid}", s.unsubPreview)
-	mux.HandleFunc("GET /unsubscribe-result/{token}", s.unsubResultGet)
-	mux.HandleFunc("POST /unsubscribe", s.unsubExecute)
-	mux.HandleFunc("POST /accounts/{account}/pull", s.retryPull)
-	mux.HandleFunc("POST /accounts/{account}/reauth", s.reauth)
-	mux.HandleFunc("POST /accounts/{account}/reauth/cancel", s.reauthCancel)
-
-	s.handler = s.Auth.Middleware(mux)
+	if s.static, err = staticHandler(static); err != nil {
+		return nil, err
+	}
+	s.handler = s.Auth.Middleware(s.serveRoutes())
 	return s, nil
 }
 
@@ -224,7 +195,6 @@ func (s *Server) page(title, query string, at viewLabel) Page {
 
 func (s *Server) render(w http.ResponseWriter, status int, page string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	if err := s.pages[page].ExecuteTemplate(w, "base", data); err != nil {
 		log.Printf("render %s: %v", page, err)

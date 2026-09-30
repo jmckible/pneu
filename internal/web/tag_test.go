@@ -43,6 +43,7 @@ type fakeSyncer struct {
 	sendErr     error                 // Send's answer
 	sendOut     string                // Send's Result.Output
 	sendCtx     context.Context       // the last Send's context
+	onSend      func()                // runs as Send starts, before it records anything
 	states      map[string]gmi.Status // Status overrides per account
 	reauths     []string              // accounts Reauth was called for
 	reURL       string                // Reauth's answer
@@ -83,11 +84,24 @@ func (f *fakeSyncer) Send(ctx context.Context, account string, msg io.Reader) (g
 	if err != nil {
 		return gmi.Result{}, err
 	}
+	if f.onSend != nil {
+		f.onSend()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sendCtx = ctx
 	f.sent = append(f.sent, sentMsg{account, raw})
-	return gmi.Result{Account: account, Op: gmi.OpSend, Output: f.sendOut, Err: f.sendErr}, f.sendErr
+	// As gmi.Exec reports it: -1 when gmi never started, lieer's exit status otherwise.
+	code := 0
+	switch {
+	case errors.Is(f.sendErr, gmi.ErrBusy):
+		code = -1
+	case f.sendErr != nil:
+		code = 1
+	}
+	// The whole of sendOut is the stream gmi.Exec scans.
+	return gmi.Result{Account: account, Op: gmi.OpSend, ExitCode: code, Output: f.sendOut, Err: f.sendErr,
+		Scanned: true, SendLine: strings.Contains(f.sendOut, "sending message")}, f.sendErr
 }
 
 func (f *fakeSyncer) NoteWrite(account string, changes, ids []string) {

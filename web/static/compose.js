@@ -166,6 +166,16 @@
   var DRAFT_CAP = 20;
   var FIELDS = ['to', 'cc', 'bcc', 'subject', 'body'];
 
+  // A draft is {fields…, at, id, idAt, sent}. id is its draft id, the
+  // form's message_id: the server's send log (compose.go, SendLog) answers
+  // a repeat of it from its record instead of sending again, so it lives
+  // with the draft and a reopened draft is the same send. idAt is when it
+  // was minted or last submitted; sent, that it has been submitted.
+  var ID_RE = /^<[0-9a-f]{32}@pneu\.[A-Za-z0-9.-]{1,253}>$/; // compose.go generatedIDRE
+  // The server keeps a send's record 30 days (web.SendKeep); past that an
+  // id guarantees nothing, and the draft gets a new one.
+  var ID_KEEP = 30 * 24 * 60 * 60 * 1000;
+
   // parseDraft reads a stored draft, or null when it isn't one.
   function parseDraft(json) {
     var v;
@@ -173,7 +183,57 @@
     if (!v || typeof v !== 'object') return null;
     for (var i = 0; i < FIELDS.length; i++) if (typeof v[FIELDS[i]] !== 'string') return null;
     if (typeof v.at !== 'number') v.at = 0;
+    if (typeof v.id !== 'string' || !ID_RE.test(v.id) || typeof v.idAt !== 'number') { delete v.id; delete v.idAt; }
+    v.sent = v.sent === true;
     return v;
+  }
+
+  // draftID is the stored draft's id, or null when the page's fresh id
+  // should stand. A submitted draft keeps its id whatever the clock says:
+  // an unresolved send is abandoned only by an explicit discard. A draft
+  // never submitted drops an id older than the server's record would be.
+  function draftID(d, now) {
+    if (!d || !d.id) return null;
+    if (d.sent) return d.id;
+    var age = now - d.idAt;
+    return age >= 0 && age < ID_KEEP ? d.id : null;
+  }
+
+  // persistForSend stores draft (with its id) in local, reads it back, and
+  // only then leaves the marker, with a second copy of the id, in session.
+  // False when local storage didn't keep the id: the send must not go,
+  // or a reopened draft would send again under a new id.
+  function persistForSend(local, session, key, draft, now) {
+    try {
+      local.setItem(key, JSON.stringify(draft));
+      var back = parseDraft(local.getItem(key));
+      if (!back || back.id !== draft.id || !back.sent) return false;
+    } catch (e) { return false; }
+    try { session.setItem(SENDING_KEY, JSON.stringify({ key: key, id: draft.id, at: now })); } catch (e) { /* the second copy only */ }
+    return true;
+  }
+
+  // capDrafts trims the stored drafts to DRAFT_CAP, oldest first, never
+  // touching the active draft (key) or a submitted one: its id is what
+  // keeps a resend from being a second send.
+  function capDrafts(s, key) {
+    var entries = [];
+    for (var i = 0; i < s.length; i++) {
+      var k = s.key(i);
+      if (!k || k.indexOf(DRAFT_PREFIX) !== 0 || k === key) continue;
+      var d = parseDraft(s.getItem(k));
+      if (d && d.sent) continue;
+      entries.push({ key: k, at: d ? d.at : 0 });
+    }
+    prune(entries, DRAFT_CAP - 1).forEach(function (k) { s.removeItem(k); });
+  }
+
+  // submitDraft is the submit handler's storage work: trim first, then
+  // persist and read back, so nothing runs after the check that could
+  // undo it. False: don't send.
+  function submitDraft(local, session, key, draft, now) {
+    try { capDrafts(local, key); } catch (e) { /* the persist below decides */ }
+    return persistForSend(local, session, key, draft, now);
   }
 
   function sameFields(a, b) {
@@ -189,10 +249,10 @@
   }
 
   // ---- pending send ---------------------------------------------------------
-  // Submitting keeps the draft and leaves a marker in sessionStorage,
-  // {key: the draft's storage key, id: the form's message_id, at}. Only the
-  // send's own redirect (compose.go appends #sent to it) deletes the draft:
-  // leaving a POST that never answered, by Back or a key, must not.
+  // Submitting keeps the draft (with its id) and leaves a marker in
+  // sessionStorage, {key: the draft's storage key, id: a second copy, at}. Only the send's own
+  // redirect (compose.go appends #sent to it) deletes the draft: leaving a
+  // POST that never answered, by Back or a key, must not.
 
   var SENDING_KEY = 'pneu:sending';
 
@@ -200,7 +260,7 @@
     var v;
     try { v = JSON.parse(json); } catch (e) { return null; }
     if (!v || typeof v.key !== 'string' || v.key.indexOf(DRAFT_PREFIX) !== 0) return null;
-    if (typeof v.id !== 'string') v.id = '';
+    if (typeof v.id !== 'string' || !ID_RE.test(v.id)) v.id = '';
     return v;
   }
 
@@ -208,23 +268,23 @@
   // page: {sent: arrived by the send's redirect, compose: a compose page,
   // key: its draft key, error: it carries an error banner}. Returns
   // {drop: draft key to delete or null, clear: remove the marker, id: the
-  // message_id the compose form should reuse or null}.
+  // marker's copy of the draft id, for a draft that lost its own, or null}.
   function settle(marker, page) {
     var keep = { drop: null, clear: false, id: null };
     if (!marker) return keep;
     if (page.sent) return { drop: marker.key, clear: true, id: null };
     if (!page.compose || page.key !== marker.key) return keep; // the POST may still land
-    // The server re-rendered a failed send with its message_id: done.
+    // The server re-rendered a failed send, with its id: done.
     if (page.error) return { drop: null, clear: true, id: null };
-    // Back on the draft without an answer: keep it, and resend under the same
-    // message_id so the server's dedupe refuses a second copy if the first
-    // went out after all.
+    // Back on the draft without an answer: keep it. Its id makes a resend
+    // the same send, which the server answers from its record if the
+    // first went out after all.
     return { drop: null, clear: false, id: marker.id || null };
   }
 
   var C = {
     htmlToText: htmlToText, quote: quote, tokenAt: tokenAt, replaceToken: replaceToken,
-    parseDraft: parseDraft, sameFields: sameFields, prune: prune,
+    parseDraft: parseDraft, sameFields: sameFields, prune: prune, draftID: draftID, ID_KEEP: ID_KEEP, persistForSend: persistForSend, capDrafts: capDrafts, submitDraft: submitDraft,
     parseMarker: parseMarker, settle: settle, SENDING_KEY: SENDING_KEY,
     DRAFT_PREFIX: DRAFT_PREFIX, DRAFT_CAP: DRAFT_CAP, FIELDS: FIELDS,
   };
@@ -269,6 +329,9 @@
     var submitting = false;
     var saveTimer = 0;
     var store = local;
+    var idEl = form.elements.namedItem('message_id');
+    var idAt = Date.now();
+    var sent = false; // submitted at least once: the draft keeps its id however it reads
 
     function current() {
       var v = {};
@@ -281,27 +344,17 @@
       return v;
     }
 
-    function capDrafts(s) {
-      var entries = [];
-      for (var i = 0; i < s.length; i++) {
-        var k = s.key(i);
-        if (k && k.indexOf(DRAFT_PREFIX) === 0) {
-          var d = parseDraft(s.getItem(k));
-          entries.push({ key: k, at: d ? d.at : 0 });
-        }
-      }
-      prune(entries, DRAFT_CAP).forEach(function (k) { s.removeItem(k); });
-    }
-
     function save() {
       clearTimeout(saveTimer);
       if (submitting) return;
       var v = current();
       store(function (s) {
-        if (sameFields(v, server()) && !hadError) { s.removeItem(key); return; }
+        if (sameFields(v, server()) && !hadError && !sent) { s.removeItem(key); return; }
         v.at = Date.now();
+        if (idEl && idEl.value) { v.id = idEl.value; v.idAt = idAt; }
+        v.sent = sent;
+        capDrafts(s, key);
         s.setItem(key, JSON.stringify(v));
-        capDrafts(s);
       });
     }
 
@@ -309,15 +362,19 @@
 
     var pending = settle(marker(), { compose: true, key: key, error: hadError });
     apply(pending);
-    var idEl = form.elements.namedItem('message_id');
-    if (pending.id && idEl) idEl.value = pending.id;
 
     var restored = false;
+    var d = parseDraft(store(function (s) { return s.getItem(key); }));
+    if (d) sent = d.sent;
     if (hadError) {
-      // The server re-rendered what was sent: that is the draft now.
+      // The server re-rendered what was sent, under the id it was sent
+      // with: that is the draft now.
+      if (d && idEl && d.id === idEl.value) idAt = d.idAt;
       save();
     } else {
-      var d = parseDraft(store(function (s) { return s.getItem(key); }));
+      var id = draftID(d, Date.now());
+      if (id && idEl) { idEl.value = id; idAt = d.idAt; }
+      else if (pending.id && idEl) { idEl.value = pending.id; sent = true; } // the draft lost it; the marker kept it
       if (d && !sameFields(d, server())) {
         FIELDS.forEach(function (f) { if (el[f]) el[f].value = d[f]; });
         restored = true;
@@ -337,13 +394,28 @@
       if (on) form.setAttribute('aria-busy', 'true'); else form.removeAttribute('aria-busy');
       if (sendBtn) sendBtn.textContent = on ? 'Sending' : sendLabel;
     }
-    form.addEventListener('submit', function () {
-      save(); // the draft stays until the send's redirect lands (settle)
+    form.addEventListener('submit', function (e) {
+      // The draft, id and all, stays until the send's redirect lands
+      // (settle); the server keeps the id's record from now. It must be on
+      // disk first, or a reopened draft would be a second send.
+      clearTimeout(saveTimer);
+      var now = Date.now();
+      var v = current();
+      v.at = now;
+      v.id = idEl ? idEl.value : '';
+      v.idAt = now;
+      v.sent = true;
+      var ok = false;
+      try { ok = submitDraft(window.localStorage, window.sessionStorage, key, v, now); } catch (err) { ok = false; }
+      if (!ok) {
+        e.preventDefault();
+        flash('Not sent: pneu couldn’t save the draft first, so it couldn’t make sure it sends only once. Free some browser storage and try again.', 'error');
+        return;
+      }
+      sent = true;
+      idAt = now;
       arm(false);
       sending(true);
-      session(function (s) {
-        s.setItem(SENDING_KEY, JSON.stringify({ key: key, id: idEl ? idEl.value : '', at: Date.now() }));
-      });
     });
     // A page restored from the back-forward cache after a failed navigation
     // is editable again.

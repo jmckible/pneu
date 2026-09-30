@@ -58,7 +58,18 @@ and build order; this file is the working contract. Read PLAN.md before touching
   image` (an `<img>` runs no script), text/plain otherwise. A PDF is the one
   unsandboxed frame, because Chromium's viewer refuses a sandbox CSP; it gets
   `frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN` in place of the
-  global DENY, and nothing else is frameable.
+  global DENY (`part-pdf`, only on `/part` with a parsed `application/pdf`),
+  and nothing else is frameable.
+- Security headers come only from the policy classes (`policy.go`: `app`,
+  `compose`, `data`, `part-sandbox`, `part-pdf`, `static-svg`), applied at
+  the final header write (1xx writes are swallowed) and named in
+  `Pneu-Policy`; SVG is never `data`; a handler picks one with `usePolicy`
+  or gets `app` for HTML and `data` otherwise. Never set a security header
+  in a handler. Routes come only from the table (`routes.go` `Routes`): a
+  new route is an entry with its classes and their media types, its
+  disposition, Sec-Fetch-Dest, redirect and cache rules, or it doesn't
+  exist. `Checker.Check` is the contract; every response in the web tests
+  goes through it, and the client proxy (docs/client.md) will enforce it.
 - Mutations are POST with Host and Origin checks. localhost is not a boundary:
   the default browser is also the daily browser, so every open tab can reach
   this port.
@@ -99,10 +110,12 @@ and build order; this file is the working contract. Read PLAN.md before touching
   parts keep their original charset; use the JSON's inline UTF-8 content for
   text and raw only for binary parts (`Part()` already does).
 - A srcdoc iframe inherits the app page's CSP on top of its own meta CSP, and a
-  load must pass both. The app page's policy (`web.AppCSP`, HTML responses only)
-  is therefore exactly `script-src 'self'; object-src 'none'; base-uri 'none'`:
-  a second script wall that names nothing the frame needs. Never add
-  `default-src`, `img-src`, `style-src` or `font-src` to it.
+  load must pass both. The app page's policy (`web.AppCSP`, the `app` and
+  `compose` classes) is therefore exactly `script-src 'self'; object-src
+  'none'; base-uri 'none'; worker-src 'none'`: a second script wall that
+  names nothing the frame needs, and no service worker (one would outlive
+  the page and any fix). Never add `default-src`, `img-src`, `style-src` or
+  `font-src` to it.
 - `/open?nonce=N` takes a single-use nonce from `~/.local/state/pneu/launch`,
   written by the server at startup and rotated on every successful open. The
   install token stays in the token file and the cookie; never log or print it.
@@ -163,11 +176,33 @@ and build order; this file is the working contract. Read PLAN.md before touching
   way. The test suite binds 8080 too: never run it while a real consent
   (an install's step 5, a Reconnect) is waiting. Every gmi run pneu starts
   sets `PYTHONUNBUFFERED=1`: its output is a pipe, and lines pneu acts on
-  (the consent URL, progress) must arrive while gmi runs.
+  (the consent URL, progress) must arrive while gmi runs. It also sets
+  `PYTHONIOENCODING=utf-8` and `PYTHONUTF8=1` over any inherited values
+  (`gmi.PythonEnv`), so the ASCII markers pneu matches read as written.
 - `gmi send` prints its "receiving content" bar and then "message sent
   successfully: <gmail id>" only after the Gmail API accepted the message; a
   failure after that is the local copy's, and the message must not be resent
   (`gmi.Result.Accepted`).
+- A send is idempotent on its draft id, the form's `message_id`, which
+  compose.js keeps with the localStorage draft (a second copy in the
+  sessionStorage marker; the submit is blocked if localStorage won't keep
+  it). `SendLog` (`$XDG_STATE_HOME/pneu/sends/`, dir 0700, files 0600,
+  temp + fsync + rename + fsync dir) holds a reservation for (account, id,
+  payload hash) before gmi is handed anything, then the result: accepted,
+  accepted-no-local-copy, unknown, or rejected. Only rejected frees the id,
+  and only a failure that proves nothing went out is rejected: `ErrBusy`
+  (gmi never started) or `gmi.Result.NotSent` (lieer exited on its own
+  before its "sending message" line, from a scan of the whole output
+  stream, never the tail). After that line, anything short of acceptance
+  is unknown, whatever HTTP error follows. A reservation with no result is
+  unknown too: "may have been sent", never resent. Same id and hash gets
+  the recorded answer; a different hash is refused. The hash is the
+  server's, over what it sends. Records are kept 30 days from the last
+  submit (`SendKeep`; a replay refreshes it); a submitted draft keeps its
+  id until discarded. Mailto unsubscribes use the same log, keyed by
+  account, message and mailto. Known limit: httplib2 (lieer's transport)
+  resends a POST whose connection dropped, so one `gmi send` can send
+  twice; that is lieer's, not patched here.
 - Theme contract: `install/pneu-theme` (installed as an Omarchy theme-set.d
   hook) writes only `color-scheme`,
   `--bg`, `--fg`, `--accent`, `--selection` to `~/.config/pneu/theme.css`;

@@ -427,7 +427,7 @@ func TestThread(t *testing.T) {
 func TestBody(t *testing.T) {
 	s := newServer(t)
 	w := do(s, "GET", "/body/personal/5f2e9a10-trip-photos@fastmail.example", withCookie)
-	if w.Code != 200 || w.Header().Get("Content-Type") != "application/json" || w.Header().Get("Cache-Control") != "private, no-store" {
+	if w.Code != 200 || w.Header().Get("Content-Type") != "application/json" || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("%d %v", w.Code, w.Header())
 	}
 	var got struct {
@@ -469,7 +469,7 @@ func TestPart(t *testing.T) {
 		w := do(s, "GET", target, withCookie)
 		h := w.Header()
 		if w.Code != 200 || h.Get("Content-Type") != ctype || h.Get("Content-Disposition") != disp ||
-			h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Cache-Control") != "private, no-store" ||
+			h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Cache-Control") != "no-store" ||
 			!strings.HasPrefix(w.Body.String(), prefix) {
 			t.Errorf("%s: %d %v %.20q", target, w.Code, h, w.Body.String())
 		}
