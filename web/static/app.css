@@ -275,6 +275,23 @@ article.message > header > .cta.reveal { border-color: var(--accent); box-shadow
   padding: 0 1px;
 }
 article.message.collapsed > header > .cta { display: none; }
+/* A guess (actions.js guess, the button heuristic): the same chip, dashed,
+   with a tag saying so. Its link is marked over the frame by a layer in
+   this document the size of the frame's viewport (the frame's box clips
+   it; the pane's scroll carries it; the sticky titles, the key bar and
+   dialogs stack above it), on the cursor message only. */
+article.message > header > .cta.guess { border-style: dashed; border-color: color-mix(in oklab, var(--accent) 45%, var(--bg)); }
+.cta .tag { flex: none; font-size: 12px; color: var(--muted); }
+.body[data-kind=html] { position: relative; }
+.cta-mark { position: absolute; overflow: hidden; pointer-events: none; }
+.cta-mark[hidden], article.message:not(.selected) .cta-mark { display: none; }
+.cta-mark > span {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px dashed var(--accent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
 
 /* Link hints (actions.js hints): labels in this document over the frame,
    in a layer clipped to the thread pane and the viewport. Dialogs are in

@@ -182,8 +182,20 @@ func (a Account) Revision(ctx context.Context) (string, error) {
 // MessageIDs lists the Message-IDs matching query, newest first.
 // search.exclude_tags applies unless the query names an excluded tag.
 func (a Account) MessageIDs(ctx context.Context, query string) ([]string, error) {
+	return a.MessageIDsPage(ctx, query, SearchOpts{})
+}
+
+// MessageIDsPage is MessageIDs, a page at a time.
+func (a Account) MessageIDsPage(ctx context.Context, query string, opts SearchOpts) ([]string, error) {
+	args := []string{"search", "--format=json", "--output=messages", "--sort=newest-first"}
+	if opts.Limit > 0 {
+		args = append(args, "--limit="+strconv.Itoa(opts.Limit))
+	}
+	if opts.Offset > 0 {
+		args = append(args, "--offset="+strconv.Itoa(opts.Offset))
+	}
 	var out []string
-	if err := a.runJSON(ctx, &out, "search", "--format=json", "--output=messages", "--sort=newest-first", "--", query); err != nil {
+	if err := a.runJSON(ctx, &out, append(args, "--", query)...); err != nil {
 		return nil, err
 	}
 	for i, id := range out {

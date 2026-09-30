@@ -681,3 +681,178 @@ test('usable: the pane less the sticky and fixed chrome over it, in both layouts
   // Nothing left: nothing is inside.
   assert.equal(A.inside(r(10, 10, 20, 20), A.usable(r(0, 0, 100, 30), view, [r(0, 0, 100, 40)])), false);
 });
+
+// ---- button heuristic (o, tier 2) ------------------------------------------
+
+test('ctaText: a leading action verb, footer words, addresses, words', () => {
+  const t = A.ctaText;
+  for (const s of ['View order', 'Confirm your email', '→ Verify account', '  sign in ', 'Log in to paypal.com', 'Get started',
+    'Manage your order', 'Manage booking', 'RSVP', 'Track package 🚚', 'Pay now',
+    'Retrieve Card Number', 'Go to your account', 'Check order details', 'Manage your account',
+    'Take the 2-minute survey →', 'Update your card', 'Register']) {
+    assert.equal(t(s).verb, true, s);
+  }
+  for (const s of ['Order #4411', 'Viewing options', 'Preview', 'Hello', '', 'Manage preferences', 'Update your preferences']) assert.equal(t(s).verb, false, s);
+  for (const s of ['Unsubscribe', 'Update your email preferences', 'Privacy policy', 'Terms', 'View in browser', 'View this email online',
+    'View it as a web page', 'Manage preferences', 'Manage subscription', 'Help center', 'Contact us', 'Facebook', 'X',
+    'Download on the App Store', 'Get it on Google Play', 'Support', 'View in web browser', 'View Web Version',
+    'Download the Shop app', 'Download to track with Shop', 'Get the app']) {
+    assert.equal(t(s).footer, true, s);
+  }
+  for (const s of ['View order', 'Manage your order', 'Confirm', 'Helpful tips', 'Contactless pay']) assert.equal(t(s).footer, false, s);
+  assert.equal(t('https://example.com/a').rawURL, true);
+  assert.equal(t('www.example.com').rawURL, true);
+  assert.equal(t('example.com/x?y').rawURL, true);
+  assert.equal(t('View example.com').rawURL, false);
+  assert.equal(t('one two  three\nfour').words, 4);
+  assert.equal(t('').words, 0);
+});
+
+test('ctaScore: the weighted sum, fractions scaled, booleans counted once', () => {
+  const s = A.ctaScore({ styled: true, verb: true, early: 0.5, footer: false, area: 0 }, { styled: 3, verb: 3, early: 2, footer: -6, area: 2 });
+  assert.equal(s.score, 7);
+  assert.deepEqual(s.parts, { styled: 3, verb: 3, early: 1 });
+  // The default table is CTA.weights.
+  assert.equal(A.ctaScore({ footer: true }).score, A.CTA.weights.footer);
+});
+
+const feat = (o) => Object.assign({ styled: false, padding: false, radius: false, border: false, verb: false, short: true, long: false,
+  early: 0.5, area: 100, footer: false, imageOnly: false, tail: false, rawURL: false }, o);
+const button = (o) => feat(Object.assign({ styled: true, padding: true, radius: true, verb: true, early: 0.9, area: 4000 }, o));
+
+test('ctaRank: one clear button is picked; area becomes a fraction of the largest', () => {
+  const r = A.ctaRank([
+    { url: 'https://a.example/view', text: 'View order', f: button() },
+    { url: 'https://a.example/help', text: 'Help', f: feat({ footer: true, tail: true, early: 0.05, area: 400 }) },
+  ]);
+  assert.equal(r.pick.url, 'https://a.example/view');
+  assert.equal(r.pick.f.area, 1);
+  assert.equal(r.ranked[1].f.area, 0.1);
+  assert.equal(r.runnerUp.url, 'https://a.example/help');
+  assert.ok(r.pick.score >= A.CTA.threshold);
+});
+
+test('ctaRank: below the threshold, or within the margin of another destination, no pick', () => {
+  const weak = A.ctaRank([{ url: 'https://a.example/', text: 'Our blog', f: feat({ short: true, early: 0.2, area: 10 }) }]);
+  assert.equal(weak.pick, null);
+  assert.equal(weak.ranked.length, 1);
+  const close = A.ctaRank([
+    { url: 'https://a.example/one', text: 'View order', f: button() },
+    { url: 'https://b.example/two', text: 'View invoice', f: button({ early: 0.8 }) },
+  ]);
+  // Two verb-led buttons over threshold within the margin: the earlier.
+  assert.equal(close.pick.url, 'https://a.example/one', 'a tie between two real buttons goes to the first');
+  assert.equal(close.runnerUp.url, 'https://b.example/two');
+  const later = A.ctaRank([
+    { url: 'https://b.example/two', text: 'View invoice', f: button({ early: 0.8 }) },
+    { url: 'https://a.example/one', text: 'View order', f: button() },
+  ]);
+  assert.equal(later.pick.url, 'https://b.example/two', 'document order, not score, breaks the tie');
+  assert.equal(later.runnerUp.url, 'https://a.example/one');
+  // Within the margin of a styled link without a verb: no pick.
+  const noverb = A.ctaRank([
+    { url: 'https://a.example/one', text: 'View order', f: button({ padding: false, radius: false }) },
+    { url: 'https://b.example/brand', text: 'Acme Store', f: button({ early: 0.8, verb: false }) },
+  ]);
+  assert.equal(noverb.pick, null, 'tie with a verbless rival: none');
+});
+
+test('ctaRank: no verb, no pick, however button-like', () => {
+  const r = A.ctaRank([{ url: 'https://a.example/', text: 'here', f: button({ verb: false }) }]);
+  assert.equal(r.pick, null);
+});
+
+test('ctaRank: one label counts once, whatever its tracking parameters', () => {
+  const r = A.ctaRank([
+    { url: 'https://t.example/c?id=1', text: 'Track package', f: button() },
+    { url: 'https://t.example/c?id=2', text: 'Track  package', f: button({ early: 0.85 }) },
+    { url: 'https://a.example/help', text: 'Help', f: feat({ short: true, footer: true }) },
+  ]);
+  assert.equal(r.ranked.length, 2);
+  assert.equal(r.pick.url, 'https://t.example/c?id=1');
+});
+
+test('ctaRank: one label on two hosts is two choices, which meet on the margin', () => {
+  // A link elsewhere with the real button's label must not absorb it (or be absorbed).
+  const r = A.ctaRank([
+    { url: 'https://evil.example/t', text: 'Track package', f: button({ early: 0.95 }) },
+    { url: 'https://real.example/t?id=1', text: 'Track package', f: button({ early: 0.9 }) },
+    { url: 'https://real.example/t?id=2', text: 'Track package', f: button({ early: 0.5 }) },
+  ]);
+  assert.deepEqual(r.ranked.map((x) => x.url), ['https://evil.example/t', 'https://real.example/t?id=1']);
+  assert.equal(r.runnerUp.url, 'https://real.example/t?id=1');
+});
+
+test('ctaRank: joined by destination or label, transitively; no candidate stands twice', () => {
+  // (A, X), (B, X), (B, Y): B joined A's choice through its label, and its
+  // second link joins through its URL; one choice, listed once.
+  const r = A.ctaRank([
+    { url: 'https://a.example/A', text: 'View order', f: button() },
+    { url: 'https://a.example/B', text: 'View order', f: button({ early: 0.95 }) },
+    { url: 'https://a.example/B', text: 'Open it', f: button({ early: 0.2 }) },
+    { url: 'https://a.example/help', text: 'Help', f: feat({ footer: true }) },
+  ]);
+  assert.equal(r.ranked.length, 2);
+  assert.equal(new Set(r.ranked).size, r.ranked.length);
+  assert.equal(r.ranked.filter((x) => x.url === 'https://a.example/B').length, 1);
+  assert.equal(r.pick.url, 'https://a.example/B');
+  assert.equal(r.pick.text, 'View order');
+  assert.equal(r.runnerUp.url, 'https://a.example/help');
+});
+
+test('ctaRank: an image alone, or a link with no text, is never picked', () => {
+  const img = A.ctaRank([{ url: 'https://a.example/', text: '', f: button({ imageOnly: true, verb: true }) }]);
+  assert.equal(img.pick, null);
+  assert.equal(img.ranked.length, 1);
+  const blank = A.ctaRank([{ url: 'https://a.example/', text: '  ', f: button({ verb: true }) }]);
+  assert.equal(blank.pick, null);
+  // Ahead of a real button within the margin, it still blocks the pick.
+  const tie = A.ctaRank([
+    { url: 'https://a.example/img', text: '', f: button({ imageOnly: true, verb: true, early: 0.95, area: 8000 }) },
+    { url: 'https://b.example/view', text: 'View order', f: button({ padding: false, radius: false }) },
+  ]);
+  assert.equal(tie.ranked[0].url, 'https://a.example/img');
+  assert.equal(tie.pick, null);
+});
+
+test('ctaRank: one destination counts once (a button and its text link), the best standing for it', () => {
+  const r = A.ctaRank([
+    { url: 'https://a.example/order', text: 'View order', f: button() },
+    { url: 'https://a.example/order', text: 'view your order online', f: feat({ early: 0.7, area: 300 }) },
+    { url: 'https://a.example/order', text: 'Track your package', f: button({ early: 0.85, area: 5000 }) },
+  ]);
+  assert.equal(r.ranked.length, 1);
+  assert.equal(r.pick.text, 'Track your package');
+  assert.equal(r.runnerUp, null);
+});
+
+test('ctaRank: a footer button loses to an early one; footer words sink even a styled verb', () => {
+  const r = A.ctaRank([
+    { url: 'https://evil.example/verify', text: 'Verify account', f: button({ early: 0.05, tail: true }) },
+    { url: 'https://shop.example/order', text: 'View your order', f: button() },
+  ]);
+  assert.equal(r.pick.url, 'https://shop.example/order');
+  const f = A.ctaRank([{ url: 'https://x.example/', text: 'View in browser', f: button({ footer: true }) }]);
+  assert.equal(f.pick, null);
+});
+
+test('contrast and over: WCAG ratios, alpha composited', () => {
+  assert.equal(Math.round(A.contrast([0, 0, 0], [255, 255, 255])), 21);
+  assert.equal(A.contrast([26, 115, 232], [26, 115, 232]), 1);
+  assert.deepEqual(A.over([255, 255, 255, 0], [10, 20, 30]), [10, 20, 30]);
+  assert.deepEqual(A.over([255, 255, 255, 1], [10, 20, 30]), [255, 255, 255]);
+  // Nearly transparent white on blue reads as blue.
+  assert.ok(A.contrast(A.over([255, 255, 255, 0.05], [26, 115, 232]), [26, 115, 232]) < A.CTA.minContrast);
+});
+
+test('chip: a guess is marked as one; its destination is the href\'s, whatever the text says', () => {
+  const D = loadDOM();
+  const g = { anchor: {}, href: 'https://login.evil.example/p', url: 'https://login.evil.example/p', label: 'Log in to paypal.com' };
+  const c = D.A.chip({ url: 'https://login.evil.example/p', name: 'Log in to paypal.com', guess: g }, () => {});
+  assert.equal(c.textContent, 'oguessLog in to paypal.com→https://login.evil.example');
+  assert.ok(/\bguess\b/.test(c.className));
+  assert.equal(c.pneuAction.guess, g);
+  const d = D.A.chip({ url: 'https://a.example/', name: 'View' }, () => {});
+  assert.ok(!/\bguess\b/.test(d.className));
+  assert.equal(d.pneuAction.guess, undefined);
+});

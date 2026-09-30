@@ -645,6 +645,123 @@
   }
  },
  {
+  "id": "54-cta-hidden",
+  "file": "54-cta-hidden.html",
+  "action": null,
+  "guess": {
+   "text": "Confirm your order",
+   "host": "real.example"
+  },
+  "notCandidates": [
+   "h-opacity.example",
+   "h-opacity-product.example",
+   "h-visibility.example",
+   "h-display.example",
+   "h-overflow.example",
+   "h-clip-path.example",
+   "h-mask.example",
+   "h-blend.example",
+   "h-filter.example",
+   "h-zero.example",
+   "h-scale.example",
+   "h-offscreen.example",
+   "h-tiny-font.example",
+   "h-mixed.example",
+   "h-text-opacity.example",
+   "h-text-filter.example",
+   "h-same-color.example",
+   "h-transparent-text.example",
+   "h-text-fill.example",
+   "h-gradient.example",
+   "h-oklab.example",
+   "h-indent.example",
+   "h-text-covered.example",
+   "h-opacity-image.example",
+   "h-clip.example",
+   "h-partial-offscreen.example",
+   "h-covered.example",
+   "h-pointer.example",
+   "h-overflow-text.example",
+   "h-pe-overlay.example",
+   "h-partial-cover.example",
+   "h-image-cover.example",
+   "h-bgimage-ancestor.example",
+   "h-bgimage-inside.example",
+   "h-pseudo-content.example",
+   "h-first-line.example",
+   "h-svg.example",
+   "h-animated.example"
+  ]
+ },
+ {
+  "id": "55-cta-footer",
+  "file": "55-cta-footer.html",
+  "action": null,
+  "guess": {
+   "text": "Track your package",
+   "host": "real.example"
+  }
+ },
+ {
+  "id": "56-cta-repoint",
+  "file": "56-cta-repoint.html",
+  "action": null,
+  "guess": {
+   "text": "Reset your password",
+   "host": "reset.example"
+  }
+ },
+ {
+  "id": "57-cta-mismatch",
+  "file": "57-cta-mismatch.html",
+  "action": null,
+  "guess": {
+   "text": "Log in to paypal.com",
+   "host": "login.evil.example"
+  }
+ },
+ {
+  "id": "58-cta-pseudo",
+  "file": "58-cta-pseudo.html",
+  "action": null,
+  "guess": null,
+  "notCandidates": [
+   "h-pseudo-cover.example",
+   "real.example"
+  ]
+ },
+ {
+  "id": "59-cta-image-only",
+  "file": "59-cta-image-only.html",
+  "action": null,
+  "guess": null,
+  "rankedHosts": [
+   "image-only.example",
+   "empty.example"
+  ]
+ },
+ {
+  "id": "60-cta-label-hosts",
+  "file": "60-cta-label-hosts.html",
+  "action": null,
+  "guess": {
+   "text": "Track package",
+   "host": "real.example"
+  },
+  "runnerUp": "other.example",
+  "rankedHosts": [
+   "real.example",
+   "other.example"
+  ]
+ },
+ {
+  "id": "61-cta-budget",
+  "file": "61-cta-budget.html",
+  "action": null,
+  "guess": null,
+  "over": true
+ },
+ {
   "id": "harness-theme-invalid",
   "file": "44-no-colors.html",
   "theme": {

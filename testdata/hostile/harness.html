@@ -139,6 +139,23 @@ body { margin: 0; font: 13px monospace; }
     }
     await sleep(50);
 
+    // The button heuristic (54-61) on each laid-out frame, read-only:
+    // the frame's document is the same before and after.
+    for (const r of runs) {
+      if (!('guess' in r.c) || !r.frame.contentDocument) continue;
+      const root = Object.getOwnPropertyDescriptor(Document.prototype, 'documentElement').get.call(r.frame.contentDocument);
+      const before = root.outerHTML;
+      const g = Pneu.actions.guess(r.frame, [origin]);
+      r.guess = {
+        layout: g.layout,
+        pick: g.pick && { text: g.pick.label, host: new URL(g.pick.url).hostname },
+        runnerUp: g.runnerUp ? new URL(g.runnerUp.url).hostname : null,
+        over: g.over,
+        hosts: g.ranked.map((x) => new URL(x.url).hostname),
+        touched: root.outerHTML !== before,
+      };
+    }
+
     // Link clicks, after every other check has its snapshot of a settled
     // frame. run.sh passes --disable-popup-blocking so a scripted click opens.
     const appHref = location.href;
@@ -163,6 +180,7 @@ body { margin: 0; font: 13px monospace; }
     // The trusted document's sinks, after every case has its snapshot.
     for (const res of await appChecks(runs)) results.push(res);
     for (const res of await pageChecks()) results.push(res);
+    for (const res of await guessPageChecks()) results.push(res);
     const pwned = window.__pwned;
     const appWide = document.documentElement.scrollWidth > window.innerWidth;
     const summary = {
@@ -478,6 +496,165 @@ body { margin: 0; font: 13px monospace; }
       }
     });
 
+    // The button heuristic's pick (56): o opens it only while it still
+    // stands. Re-pointed, hidden, retexted, removed or redrawn after the
+    // pick, o opens nothing and says why; unchanged, it opens the href.
+    await check('app-guess-repoint', async (fails) => {
+      const r56 = runs.find((r) => r.c.id.startsWith('56'));
+      const want = 'https://reset.example/token/56';
+      let frame = await mail(r56.html);
+      await scrollPane(0);
+      const fresh = () => {
+        const g = A.guess(frame);
+        const c = g.action && A.chip(g.action, () => {});
+        if (c) header.replaceChildren(from, c);
+        return { g, c };
+      };
+      const o = (c) => { opens.length = 0; return A.primary(c, key('o'), bounds()); };
+      let { g, c } = fresh();
+      if (!c) { fails.push('no guess: ' + JSON.stringify(g.ranked.map((x) => [x.url, x.score]))); return; }
+      const anchor = g.action.guess.anchor;
+      let got = o(c);
+      if (got.act !== 'open' || !got.check.ok || opens.length !== 1 || opens[0][0] !== want) fails.push('unchanged: ' + JSON.stringify(got.check) + ' ' + JSON.stringify(opens));
+      const tries = [
+        ['re-pointed', () => anchor.setAttribute('href', 'https://evil.example/'), () => anchor.setAttribute('href', want), /changed/],
+        ['hidden', () => { anchor.style.visibility = 'hidden'; }, () => { anchor.style.visibility = ''; }, /no longer shows/],
+        ['covered', () => { anchor.style.opacity = '0.2'; }, () => { anchor.style.opacity = ''; }, /no longer shows/],
+        ['retexted', () => { anchor.firstChild.data = 'Claim your prize'; }, () => { anchor.firstChild.data = 'Reset your password'; }, /changed/],
+      ];
+      for (const [how, change, undo, why] of tries) {
+        change();
+        got = o(c);
+        if (got.act !== 'open' || got.check.ok || !got.check.stale || !why.test(got.check.reason) || opens.length) fails.push(how + ': ' + JSON.stringify(got.check) + ' opened ' + opens.length);
+        undo();
+        got = o(c);
+        if (!got.check || !got.check.ok || opens.length !== 1) fails.push(how + ', undone: ' + JSON.stringify(got.check));
+      }
+      anchor.remove();
+      got = o(c);
+      if (got.check.ok || !/gone/.test(got.check.reason) || opens.length) fails.push('removed: ' + JSON.stringify(got.check));
+      frame = await mail(r56.html);
+      ({ g, c } = fresh());
+      const again = c;
+      const loaded = new Promise((r) => { frame.addEventListener('load', r, { once: true }); setTimeout(r, 3000); });
+      W.Pneu.renderMailFrame(r56.html, {}, origin, { frame });
+      await loaded;
+      got = o(again);
+      if (got.check.ok || !/redrawn/.test(got.check.reason) || opens.length) fails.push('redrawn: ' + JSON.stringify(got.check));
+      header.replaceChildren(from);
+    });
+
+    // The guess's chip (57): marked as a guess, the text the sender wrote as
+    // the name, the destination the href's host (not the paypal.com the
+    // text names); its highlight is drawn in this document over the link,
+    // inside the frame's box, and the frame's document is untouched.
+    await check('app-guess-chip', async (fails) => {
+      const r57 = runs.find((r) => r.c.id.startsWith('57'));
+      const frame = await mail(r57.html);
+      await scrollPane(0);
+      const froot = Object.getOwnPropertyDescriptor(Document.prototype, 'documentElement').get.call(frame.contentDocument);
+      const before = froot.outerHTML;
+      const g = A.guess(frame);
+      if (!g.action) { fails.push('no guess'); return; }
+      const c = A.chip(g.action, () => {});
+      header.replaceChildren(from, c);
+      const OWN = { BUTTON: ['class', 'type', 'tabindex'], KBD: [], BDI: ['class'], SPAN: ['class'] };
+      for (const n of [c, ...c.querySelectorAll('*')]) {
+        const ok = OWN[n.tagName];
+        if (!ok) { fails.push('element ' + n.localName + ' in the chip'); continue; }
+        for (const a of n.attributes) if (!ok.includes(a.name)) fails.push('attribute ' + n.localName + '[' + a.name + ']');
+      }
+      if (!c.classList.contains('guess') || !c.querySelector('.tag') || c.querySelector('.tag').textContent !== 'guess') fails.push('not marked as a guess: ' + c.outerHTML);
+      if (W.getComputedStyle(c).borderTopStyle !== 'dashed') fails.push('guess chip border ' + W.getComputedStyle(c).borderTopStyle);
+      const name = c.querySelector('bdi.name'), dest = c.querySelector('bdi.destination');
+      if (!name || name.textContent !== 'Log in to paypal.com') fails.push('name ' + (name && name.textContent));
+      if (!dest || dest.textContent !== 'https://login.evil.example') fails.push('destination ' + (dest && dest.textContent));
+      const holder = article.querySelector('.body');
+      // The app realm's 250ms timers (the mark's re-validation), counted.
+      const pending = new Map(), realSet = W.setTimeout, realClear = W.clearTimeout;
+      W.setTimeout = function (f, ms, ...rest) {
+        const id = realSet.call(W, function () { pending.delete(id); return f.apply(this, arguments); }, ms, ...rest);
+        if (ms === 250) pending.set(id, true);
+        return id;
+      };
+      W.clearTimeout = function (id) { pending.delete(id); return realClear.call(W, id); };
+      const m = A.mark(holder, frame, g.action.guess.anchor, g.action.guess);
+      if (pending.size) fails.push('a timer runs for a mark off the cursor message');
+      article.classList.add('selected');
+      m.sync();
+      if (pending.size !== 1 || !m.timing()) fails.push('no re-validation timer on the cursor message: ' + pending.size);
+      await frames(1);
+      if (m.el.ownerDocument !== D || !holder.contains(m.el)) fails.push('the mark is not in the app document');
+      const fr = frame.getBoundingClientRect();
+      const clip = { left: fr.left + frame.clientLeft, top: fr.top + frame.clientTop, right: fr.left + frame.clientLeft + frame.clientWidth, bottom: fr.top + frame.clientTop + frame.clientHeight };
+      const lr = m.el.getBoundingClientRect(), br = m.el.firstChild.getBoundingClientRect();
+      if (W.getComputedStyle(m.el).display === 'none') fails.push('the mark is hidden on the cursor message');
+      if (!within(lr, clip) || !within(clip, lr)) fails.push('mark layer ' + box(lr) + ' is not the frame\'s box ' + box(clip));
+      if (W.getComputedStyle(m.el).overflow !== 'hidden') fails.push('mark layer does not clip');
+      const ar = g.action.guess.anchor.getBoundingClientRect();
+      const want = { left: ar.left + clip.left, top: ar.top + clip.top, right: ar.right + clip.left, bottom: ar.bottom + clip.top };
+      if (['left', 'top', 'right', 'bottom'].some((k) => Math.abs(br[k] - want[k]) > 1)) fails.push('mark ' + box(br) + ' is not over the link ' + box(want));
+      if (froot.outerHTML !== before) fails.push('the frame document changed');
+      // Stale highlights hide: re-validated at most every 250ms while it
+      // shows, it hides when the link moves with nothing to follow, stops
+      // showing, or goes; the next update (a resize) shows it again.
+      const link = g.action.guess.anchor;
+      for (const [how, change, undo] of [
+        ['moved', () => { link.style.marginLeft = '40px'; }, () => { link.style.marginLeft = ''; }],
+        ['hidden', () => { link.style.visibility = 'hidden'; }, () => { link.style.visibility = ''; }],
+      ]) {
+        change();
+        await sleep(400);
+        if (!m.el.hidden) fails.push('the mark stayed on a ' + how + ' link');
+        undo();
+        m.update();
+        if (m.el.hidden) fails.push('the mark did not come back after ' + how);
+      }
+      // A hidden mark schedules nothing.
+      link.style.marginLeft = '40px';
+      await sleep(400);
+      if (pending.size || m.timing()) fails.push('a hidden mark kept its timer');
+      link.style.marginLeft = '';
+      m.update();
+      article.classList.remove('selected');
+      m.sync();
+      if (pending.size || m.timing()) fails.push('the timer outlived the cursor: ' + pending.size);
+      link.style.marginLeft = '40px';
+      await sleep(400);
+      if (m.el.hidden) fails.push('the mark was re-validated off the cursor message');
+      link.style.marginLeft = '';
+      article.classList.add('selected');
+      m.sync();
+      if (m.el.hidden || pending.size !== 1) fails.push('sync did not re-validate and restart on the cursor: ' + pending.size);
+      // Off the cursor with no sync, the timer stops by itself.
+      article.classList.remove('selected');
+      await sleep(400);
+      if (pending.size || m.timing()) fails.push('the timer kept running off the cursor without a sync');
+      article.classList.add('selected');
+      m.sync();
+      // A throw while re-validating hides it and schedules nothing more.
+      const realCS = W.getComputedStyle;
+      W.getComputedStyle = function (el) { if (el && el.ownerDocument !== D) throw new Error('forced'); return realCS.apply(W, arguments); };
+      await sleep(400);
+      W.getComputedStyle = realCS;
+      if (!m.el.hidden || pending.size || m.timing()) fails.push('a throw in re-validation left it ' + (m.el.hidden ? 'hidden' : 'shown') + ' with ' + pending.size + ' timers');
+      m.update();
+      if (m.el.hidden || pending.size !== 1) fails.push('the mark did not come back after the throw');
+      link.remove();
+      await sleep(400);
+      if (!m.el.hidden) fails.push('the mark stayed on a removed link');
+      frame.contentDocument.body.appendChild(link);
+      m.update();
+      article.classList.remove('selected');
+      if (W.getComputedStyle(m.el).display !== 'none') fails.push('the mark shows off the cursor message');
+      m.stop();
+      if (pending.size) fails.push('a timer outlived stop');
+      W.setTimeout = realSet;
+      W.clearTimeout = realClear;
+      if (holder.querySelector('.cta-mark')) fails.push('the mark stayed after stop');
+      header.replaceChildren(from);
+    });
+
     app.remove();
 
     // DOMPurify's hooks are global: the capture hook is gone even when the
@@ -737,13 +914,96 @@ body { margin: 0; font: 13px monospace; }
     return results;
   }
 
+  // The button heuristic through app.js on the thread page (narrow): a
+  // body with no JSON-LD gets a guess chip once its frame has laid out, the
+  // link is highlighted on the cursor message only, o opens it, and after
+  // its href changes o opens nothing and the chip is guessed afresh, now
+  // showing where the link goes.
+  async function guessPageChecks() {
+    const results = [];
+    const pageHTML = await (await fetch('app-thread.html')).text();
+    const html = await (await fetch('56-cta-repoint.html')).text();
+    const P = await threadPage(pageHTML, 'narrow', { '/body/personal/h2@hostile.test': { html, cids: {} } });
+    const fails = [];
+    out.textContent = 'pending: page-guess';
+    try {
+      if (P.error) throw new Error(P.error);
+      const { W, D } = P;
+      const article = D.querySelector('article.message[data-msgid="h2@hostile.test"]');
+      const pane = D.querySelector('main.thread');
+      const chip = () => article.querySelector(':scope > header > .cta');
+      const mframe = article.querySelector('iframe.mail');
+      const statusEl = D.getElementById('status');
+      const press = (target, k) => {
+        const o = { key: k, code: 'Key' + k.toUpperCase(), bubbles: true, cancelable: true };
+        target.dispatchEvent(new W.KeyboardEvent('keydown', o));
+        target.dispatchEvent(new W.KeyboardEvent('keyup', o));
+      };
+      const want = 'https://reset.example/token/56';
+      if (!chip().classList.contains('guess')) fails.push('the chip is not a guess');
+      if (!article.classList.contains('selected')) fails.push('the message is not the cursor');
+      const mk = article.querySelector('.body .cta-mark');
+      if (!mk || mk.hidden || W.getComputedStyle(mk).display === 'none') fails.push('no highlight on the cursor message');
+      else {
+        const fr = mframe.getBoundingClientRect(), br = mk.firstChild.getBoundingClientRect();
+        const ar = mframe.contentDocument.querySelector('a[href="' + want + '"]').getBoundingClientRect();
+        if (Math.abs(br.left - (fr.left + mframe.clientLeft + ar.left)) > 1 || Math.abs(br.top - (fr.top + mframe.clientTop + ar.top)) > 1) fails.push('highlight not over the link');
+      }
+      chip().scrollIntoView({ block: 'center' });
+      W.__opens.length = 0;
+      press(pane, 'o');
+      if (W.__opens.length !== 1 || W.__opens[0][0] !== want) fails.push('o opened ' + JSON.stringify(W.__opens));
+      const a = mframe.contentDocument.querySelector('a[href="' + want + '"]');
+      a.setAttribute('href', 'https://evil.example/56');
+      W.__opens.length = 0;
+      press(pane, 'o');
+      if (W.__opens.length) fails.push('o opened the re-pointed link: ' + W.__opens[0][0]);
+      if (!/^Not opened: the link changed/.test(statusEl.textContent)) fails.push('status: ' + statusEl.textContent);
+      const d = chip() && chip().querySelector('bdi.destination');
+      if (!d || d.textContent !== 'https://evil.example') fails.push('the chip was not guessed afresh: ' + (d && d.textContent));
+      // Off the cursor, no highlight and no re-validation timer.
+      if (W.__timers250.size !== 1) fails.push('re-validation timers on the cursor message: ' + W.__timers250.size);
+      press(pane, 'p');
+      if (W.__timers250.size) fails.push('re-validation timers after the cursor left: ' + W.__timers250.size);
+      const mk2 = article.querySelector('.body .cta-mark');
+      if (article.classList.contains('selected')) fails.push('p did not move the cursor');
+      else if (mk2 && W.getComputedStyle(mk2).display !== 'none') fails.push('the highlight shows off the cursor message');
+      if (W.__errors.length) fails.push('page errors: ' + W.__errors.join(' | '));
+    } catch (e) { fails.push('harness error: ' + (e && e.stack || e)); }
+    results.push({ id: 'page-narrow-guess', pass: fails.length === 0, fails });
+    P.frame.remove();
+
+    // A throw inside the heuristic (forced: the first computed style of a
+    // link in the frame) is no pick, cleanly: the body still renders, no
+    // chip, no highlight, no timer, nothing reaches the page's errors.
+    const tfails = [];
+    out.textContent = 'pending: page-guess-throw';
+    const T2 = await threadPage(pageHTML, 'narrow', { '/body/personal/h2@hostile.test': { html, cids: {} } }, { throwOnce: true, noChip: true });
+    try {
+      if (T2.error) throw new Error(T2.error);
+      await sleep(300);
+      const { W, D } = T2;
+      const article = D.querySelector('article.message[data-msgid="h2@hostile.test"]');
+      const div = article.querySelector('.body[data-kind=html]');
+      if (W.__threw !== 1) tfails.push('the forced throw did not happen: ' + W.__threw);
+      if (!div || div.dataset.state !== 'done') tfails.push('the body did not finish rendering: ' + (div && div.dataset.state));
+      if (article.querySelector(':scope > header > .cta')) tfails.push('a chip after the throw');
+      if (article.querySelector('.cta-mark')) tfails.push('a highlight after the throw');
+      if (W.__timers250.size) tfails.push('timers after the throw: ' + W.__timers250.size);
+      if (W.__errors.length) tfails.push('page errors: ' + W.__errors.join(' | '));
+    } catch (e) { tfails.push('harness error: ' + (e && e.stack || e)); }
+    results.push({ id: 'page-narrow-guess-throw', pass: tfails.length === 0, fails: tfails });
+    T2.frame.remove();
+    return results;
+  }
+
   // threadPage loads app-thread.html into a same-origin frame of the
   // layout's width, the network stood in for (pageShim), and waits for the
   // HTML message's body and chip.
-  async function threadPage(html, layout, bodies) {
+  async function threadPage(html, layout, bodies, options) {
     const f = document.createElement('iframe');
     f.style.cssText = 'position:fixed;left:0;top:0;z-index:20;border:0;background:#fff;height:560px;width:' + (layout === 'split' ? 1400 : 700) + 'px';
-    const shim = '<script>(' + pageShim.toString() + ')(' + JSON.stringify(bodies).replace(/</g, '\\u003c') + ')<\/script>';
+    const shim = '<script>(' + pageShim.toString() + ')(' + JSON.stringify(bodies).replace(/</g, '\\u003c') + ', ' + JSON.stringify(options || {}) + ')<\/script>';
     if (!html.includes('<head>')) return { frame: f, error: 'app-thread.html has no <head>' };
     f.srcdoc = html.replace('<head>', '<head>' + shim);
     const loaded = new Promise((r) => { f.addEventListener('load', r, { once: true }); setTimeout(r, 3000); });
@@ -753,7 +1013,7 @@ body { margin: 0; font: 13px monospace; }
     for (let i = 0; i < 100; i++) {
       const a = D.querySelector('article.message[data-msgid="h2@hostile.test"]');
       const fr = a && a.querySelector('iframe.mail');
-      if (fr && fr.contentDocument && fr.contentDocument.readyState === 'complete' && a.querySelector('.cta') && fr.getBoundingClientRect().height > 100) {
+      if (fr && fr.contentDocument && fr.contentDocument.readyState === 'complete' && (a.querySelector('.cta') || (options && options.noChip)) && fr.getBoundingClientRect().height > 100) {
         return { frame: f, W, D };
       }
       await sleep(50);
@@ -762,9 +1022,27 @@ body { margin: 0; font: 13px monospace; }
   }
 
   // pageShim runs in the thread page ahead of its scripts (serialized there).
-  function pageShim(bodies) {
+  function pageShim(bodies, options) {
     window.__errors = [];
     window.addEventListener('error', function (e) { window.__errors.push(String(e.message)); });
+    // setTimeout's 250ms timers (the highlight's re-validation), pending.
+    var timers = window.__timers250 = new Map(), set = window.setTimeout, clear = window.clearTimeout;
+    window.setTimeout = function (f, ms) {
+      var args = Array.prototype.slice.call(arguments, 2);
+      var id = set.call(window, function () { timers.delete(id); return f.apply(this, args); }, ms);
+      if (ms === 250) timers.set(id, true);
+      return id;
+    };
+    window.clearTimeout = function (id) { timers.delete(id); return clear.call(window, id); };
+    if (typeof options === 'object' && options && options.throwOnce) {
+      // The first computed style asked of a link in a message frame throws.
+      var cs = window.getComputedStyle;
+      window.__threw = 0;
+      window.getComputedStyle = function (el) {
+        if (!window.__threw && el && el.ownerDocument !== document && el.localName === 'a') { window.__threw++; throw new Error('forced'); }
+        return cs.apply(window, arguments);
+      };
+    }
     window.__opens = [];
     window.open = function (url, target, features) { window.__opens.push([String(url), target, features]); return null; };
     window.EventSource = function () {
@@ -926,6 +1204,22 @@ body { margin: 0; font: 13px monospace; }
     if ('ldBlocks' in c && r.ldBlocks !== c.ldBlocks) fails.push('ldBlocks=' + r.ldBlocks + ' want ' + c.ldBlocks);
     if ('action' in c && JSON.stringify(r.action || null) !== JSON.stringify(c.action)) {
       fails.push('action=' + JSON.stringify(r.action) + ' want ' + JSON.stringify(c.action));
+    }
+    // The button heuristic (54-61): its pick, exactly, or none; links that
+    // must not even be candidates (hidden ones, 54), or must be (59, 60);
+    // the runner-up's host (60); whether the budget ran out (61); the frame
+    // untouched.
+    if ('guess' in c) {
+      const g = r.guess;
+      if (!g || !g.layout) fails.push('guess: no layout');
+      else {
+        if (JSON.stringify(g.pick) !== JSON.stringify(c.guess)) fails.push('guess=' + JSON.stringify(g.pick) + ' want ' + JSON.stringify(c.guess) + ' ranked ' + g.hosts.join(','));
+        for (const h of c.notCandidates || []) if (g.hosts.includes(h)) fails.push('candidate ' + h);
+        for (const h of c.rankedHosts || []) if (!g.hosts.includes(h)) fails.push('not a candidate: ' + h);
+        if ('runnerUp' in c && g.runnerUp !== c.runnerUp) fails.push('runnerUp=' + g.runnerUp + ' want ' + c.runnerUp);
+        if (g.over !== !!c.over) fails.push('over budget: ' + g.over);
+        if (g.touched) fails.push('the guess changed the frame document');
+      }
     }
     // DOMPurify hooks are global: assembly's must be gone once it returns.
     // removeHook with no function pops the last one, so any left is found.

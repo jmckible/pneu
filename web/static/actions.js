@@ -302,6 +302,179 @@
     return { name: String(action.name || ''), dest: cap(dest, CAPS.destination).text, redirect: redirector(action.url) };
   }
 
+  // ---- button heuristic (o, tier 2) -----------------------------------------
+  // With no declared action, a guess from the rendered body: the one link
+  // that looks like the message's call to action. A sender can manufacture
+  // any score, so the guess is only ever a suggestion shown as one (the chip
+  // says "guess", its destination is the href's), made only among links the
+  // user can see, and re-validated when o opens it (docs/actions.md).
+  //
+  // Every number the pick depends on is in CTA, so an evaluation over real
+  // mail (scripts/ctaeval) can tune it in one place. A feature is a boolean
+  // (counted 1) or a fraction; the score is the weighted sum.
+  var CTA = {
+    max: 500,          // anchors considered, in document order
+    minFont: 9,        // px: smaller text is hidden text
+    minContrast: 1.25, // text/background contrast ratio (WCAG) below which text is hidden
+    threshold: 6,      // the pick's score must reach this, its text must lead with a verb,
+    margin: 2,         // and beat the best other choice by this; within it, two verb-led
+                       // candidates both over threshold go to the earlier (the primary
+                       // button comes first: measured on real mail, 2026-09-30)
+    budget: {          // one guess's work; past any of it, no pick for the message
+      nodes: 20000,    // elements and text nodes visited (ancestors, subtrees, the overlay scan)
+      ranges: 2000,    // text ranges measured
+      styles: 20000,   // computed styles looked up (each element's once per guess)
+    },
+    weights: {
+      styled: 3,     // a background of its own, or the sole content of a cell with one
+      padding: 1,    // padded like a button (its own, or that cell's)
+      radius: 1,     // rounded corners
+      border: 0.5,   // a border all round (an outline button)
+      verb: 3,       // its text starts with an action verb (CTA_VERBS)
+      short: 1,      // 1-5 words
+      long: -2,      // more than 8 words: a sentence, not a button
+      early: 2,      // × how early it sits (1 at the top, 0 at the bottom)
+      area: 2,       // × its area over the largest candidate's
+      footer: -8,    // footer text (CTA_FOOTER): sinks even a styled, early verb
+      imageOnly: -3, // no drawn text (an image; its alt is never a label): never picked
+      tail: -3,      // in the last quarter of the document
+      rawURL: -3,    // its text is an address
+    },
+  };
+
+  var CTA_VERBS = new RegExp('^(?:' + [
+    'view', 'confirm', 'verify', 'track', 'pay', 'reset', 'sign in', 'log in', 'login', 'accept', 'join',
+    'review', 'download', 'open', 'get started', 'activate', 'complete', 'continue', 'shop', 'read', 'reply',
+    'see', 'start', 'claim', 'schedule', 'book', 'rsvp', 'check', 'go to', 'retrieve', 'solve', 'apply',
+    'share', 'print', 'buy', 'take', 'register', 'update (?:your )?(?:card|payment|billing)', 'manage (?:your )?(?:order|booking|reservation|trip|account)',
+  ].join('|') + ')(?![\\p{L}\\p{N}])', 'u');
+  // "manage" alone is a footer word; managing an order or a trip is not.
+  var CTA_FOOTER = new RegExp('(?:^|[^\\p{L}\\p{N}])(?:' + [
+    'unsubscribe', 'opt[ -]?out', 'preferences', 'privacy', 'terms', 'legal',
+    'view (?:it |this |the )?(?:e-?mail |message |newsletter )?(?:in (?:your |a )?(?:web )?browser|online|as a web ?page)',
+    'web version', 'download (?:the |our )?(?:[\\p{L}]+ )?app', 'download to track', 'get the app',
+    'manage(?! (?:your )?(?:order|booking|reservation|trip|account))', 'help', 'contact', 'support', 'faq',
+    'facebook', 'twitter', 'instagram', 'linkedin', 'youtube', 'tiktok', 'pinterest', 'threads', 'bluesky',
+    'mastodon', 'app store', 'google play', 'download on the', 'get it on', 'forward to a friend',
+    'update (?:your )?(?:e-?mail )?(?:preferences|profile|settings)', 'careers', 'about us',
+  ].join('|') + ')(?![\\p{L}\\p{N}])', 'u');
+  var CTA_RAW_URL = /^(?:https?:\/\/|www\.)\S*$|^[\w-]+(?:\.[\w-]+)+(?:\/\S*)?$/i;
+
+  // ctaText classifies a link's visible text (whitespace runs collapsed):
+  // its word count, a leading action verb (after any leading symbols: an
+  // arrow or an emoji), footer words anywhere, and whether it is an address.
+  function ctaText(s) {
+    var t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase();
+    var words = t ? t.split(' ').length : 0;
+    var lead = t.replace(/^[^\p{L}\p{N}]+/u, '');
+    return {
+      words: words,
+      verb: CTA_VERBS.test(lead),
+      footer: CTA_FOOTER.test(t) || t === 'x',
+      rawURL: CTA_RAW_URL.test(t),
+    };
+  }
+
+  // ctaScore is features' weighted sum: {score, parts: {feature: points}}.
+  function ctaScore(f, weights) {
+    weights = weights || CTA.weights;
+    var score = 0, parts = {};
+    Object.keys(weights).forEach(function (k) {
+      var v = f[k];
+      v = typeof v === 'number' ? v : v ? 1 : 0;
+      if (!v) return;
+      parts[k] = weights[k] * v;
+      score += parts[k];
+    });
+    return { score: Math.round(score * 1000) / 1000, parts: parts };
+  }
+
+  // ctaRank scores candidates ({url, text, f: features with area in px²,
+  // anything else carried through}) and picks one. area becomes a fraction
+  // of the largest. Candidates are one choice when they share a destination
+  // (a button and its text link) or a label on one host (the same "Track
+  // package" twice with different tracking parameters), transitively: the
+  // best-scoring stands for them, so a CTA isn't its own runner-up. One
+  // label on two hosts is two candidates, so a link elsewhere can't absorb
+  // the real one; they compete on the margin. The pick is the best if it
+  // leads with a verb, has text (never an image alone), reaches the
+  // threshold and beats the best other choice by the margin; within the
+  // margin of another such, the earlier in the document; else none. opts
+  // overrides CTA's threshold, margin and weights.
+  function ctaRank(cands, opts) {
+    opts = opts || {};
+    var threshold = opts.threshold != null ? opts.threshold : CTA.threshold;
+    var margin = opts.margin != null ? opts.margin : CTA.margin;
+    var weights = opts.weights || CTA.weights;
+    var maxArea = 0;
+    cands.forEach(function (c) { if (c.f.area > maxArea) maxArea = c.f.area; });
+    var rs = cands.map(function (c, i) {
+      var f = {};
+      Object.keys(c.f).forEach(function (k) { f[k] = c.f[k]; });
+      f.area = maxArea > 0 ? c.f.area / maxArea : 0;
+      var s = ctaScore(f, weights);
+      var r = {};
+      Object.keys(c).forEach(function (k) { r[k] = c[k]; });
+      r.f = f; r.score = s.score; r.parts = s.parts; r.index = i;
+      return r;
+    });
+    // Union-find over the candidates, joined by destination and by
+    // (host, label); a group's best-scoring member (the earlier on a tie)
+    // stands for it.
+    var up = rs.map(function (_, i) { return i; });
+    var find = function (i) { while (up[i] !== i) { up[i] = up[up[i]]; i = up[i]; } return i; };
+    var owner = Object.create(null);
+    rs.forEach(function (r, i) {
+      var keys = ['u\n' + r.url];
+      var label = own.call(r, 'text') && r.text ? String(r.text).replace(/\s+/g, ' ').trim().toLowerCase() : '';
+      var host = hostOf(r.url);
+      if (label && host) keys.push('l\n' + host + '\n' + label);
+      keys.forEach(function (k) {
+        if (!(k in owner)) { owner[k] = i; return; }
+        var x = find(i), y = find(owner[k]);
+        if (x !== y) up[Math.max(x, y)] = Math.min(x, y);
+      });
+    });
+    var best = Object.create(null), roots = [];
+    rs.forEach(function (r, i) {
+      var k = find(i);
+      if (!(k in best)) { best[k] = r; roots.push(k); } else if (r.score > best[k].score) best[k] = r;
+    });
+    var ranked = roots.map(function (k) { return best[k]; });
+    ranked.sort(function (a, b) { return b.score - a.score || a.index - b.index; });
+    var top = ranked[0] || null, next = ranked[1] || null;
+    var ok = function (r) { return r.score >= threshold && r.f.verb && !r.f.imageOnly && /\S/.test(r.text || ''); };
+    var pick = null;
+    if (top && ok(top)) {
+      if (!next || top.score - next.score >= margin) pick = top;
+      else if (ok(next)) pick = next.index < top.index ? next : top;
+    }
+    return { ranked: ranked, pick: pick, runnerUp: pick === next ? top : next };
+  }
+
+  function hostOf(u) {
+    try { return new URL(u).hostname.toLowerCase(); } catch (e) { return ''; }
+  }
+
+  // contrast is the WCAG contrast ratio of two opaque [r, g, b] colors.
+  function contrast(a, b) {
+    function lum(c) {
+      var l = c.slice(0, 3).map(function (v) {
+        v /= 255;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+      });
+      return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2];
+    }
+    var x = lum(a), y = lum(b);
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  }
+
+  // over composites [r, g, b, a] (a 0-1) onto an opaque [r, g, b].
+  function over(top, base) {
+    var a = top[3];
+    return [0, 1, 2].map(function (i) { return top[i] * a + base[i] * (1 - a); });
+  }
+
   // ---- link hints (L) -----------------------------------------------------
 
   var HINT_ALPHABET = 'asdfghjkl';
@@ -451,6 +624,7 @@
     browserCheck: browserCheck, destination: destination, Arming: Arming, previewURL: previewURL,
     dialogKey: dialogKey,
     LD: LD, declaredAction: declaredAction, redirector: redirector, chipParts: chipParts,
+    CTA: CTA, ctaText: ctaText, ctaScore: ctaScore, ctaRank: ctaRank, contrast: contrast, over: over,
     HINT_ALPHABET: HINT_ALPHABET, HINT_MAX: HINT_MAX, hintLabels: hintLabels, intersect: intersect,
     hintURL: hintURL, hintKey: hintKey, placeLabel: placeLabel, inside: inside, primaryKey: primaryKey, usable: usable,
   };
@@ -967,6 +1141,11 @@
     b.type = 'button';
     b.tabIndex = -1;
     b.appendChild(el('kbd', null, 'o'));
+    if (action.guess) {
+      // A guess from the body's links (tier 2), marked as one.
+      b.className += ' guess';
+      b.appendChild(el('span', 'tag', 'guess'));
+    }
     b.appendChild(field(p.name, { cls: 'name' }));
     b.appendChild(el('span', 'arrow', '→'));
     var d = el('span', 'dest');
@@ -974,6 +1153,7 @@
     if (p.redirect) d.appendChild(el('span', 'redirect', '(redirect)'));
     b.appendChild(d);
     b.pneuAction = { url: action.url, name: p.name };
+    if (action.guess) b.pneuAction.guess = action.guess;
     b.addEventListener('click', function (e) {
       e.stopPropagation(); // not a header click: no fold
       b.blur(); // a later Enter is the app's again
@@ -984,9 +1164,16 @@
 
   // openAction opens the action a chip carries, re-checked now; returns
   // the check (ok, url | reason).
+  // A guess is re-validated first (stillPicked): the same link, connected,
+  // visible and pointing where it did when picked, else nothing opens and
+  // the check says why (stale).
   function openAction(chipEl) {
     var a = chipEl && chipEl.pneuAction;
     if (!a) return { ok: false, reason: 'no link' };
+    if (a.guess) {
+      var why = stillPicked(a.guess);
+      if (why) return { ok: false, stale: true, reason: why };
+    }
     return openInBrowser(a.url);
   }
 
@@ -1033,6 +1220,620 @@
   A.chip = chip;
   A.openAction = openAction;
   A.primary = primary;
+
+  // ---- the guess (o, tier 2) -------------------------------------------------
+  // Read off the frame's live document after it has laid out; the frame runs
+  // no script, so nothing in it changes but by our hand, a re-render, or
+  // the sender's CSS animating it (which refuses a link: moving).
+  // Everything is read through the prototypes (docRoot's reason), in the
+  // frame's own coordinates: its viewport is the whole document (mailframe.js
+  // sizes it to its content), so a link below the fold is still hit-tested.
+  //
+  // None of this is a security boundary: a sender can already name any
+  // destination for o, invisibly, with JSON-LD. The boundary is the chip,
+  // which shows the real destination (the href that opens), and o opening
+  // only what the chip shows. These checks make a guess plausible (a link
+  // the reader can see, saying what it says), and they refuse
+  // conservatively rather than model CSS paint exactly.
+
+  var P = null;
+  function dom() {
+    if (P) return P;
+    var get = function (proto, n) { return Object.getOwnPropertyDescriptor(proto, n).get; };
+    P = {
+      rects: Element.prototype.getClientRects, bcr: Element.prototype.getBoundingClientRect,
+      attr: Element.prototype.getAttribute, qsa: Element.prototype.querySelectorAll,
+      animations: Element.prototype.getAnimations,
+      contains: Node.prototype.contains, fromPoint: Document.prototype.elementFromPoint,
+      range: Document.prototype.createRange, walker: Document.prototype.createTreeWalker,
+      parent: get(Node.prototype, 'parentElement'), connected: get(Node.prototype, 'isConnected'),
+      owner: get(Node.prototype, 'ownerDocument'), text: get(Node.prototype, 'textContent'),
+      type: get(Node.prototype, 'nodeType'),
+      ns: get(Element.prototype, 'namespaceURI'), local: get(Element.prototype, 'localName'),
+      clientW: get(Element.prototype, 'clientWidth'), clientH: get(Element.prototype, 'clientHeight'),
+      scrollH: get(Element.prototype, 'scrollHeight'),
+      sheets: get(Document.prototype, 'styleSheets'),
+    };
+    return P;
+  }
+
+  // The work one guess may do (CTA.budget): past any of it, spend throws
+  // OVER and the message gets no pick. A pass (frameEnv) counts its nodes
+  // visited, text ranges measured and computed styles looked up; each
+  // element's style is looked up once per pass.
+  var OVER = { over: true };
+  function spend(env, kind, n) {
+    env.spent[kind] += n == null ? 1 : n;
+    if (env.spent[kind] > CTA.budget[kind]) throw OVER;
+  }
+  function style(env, el, pseudo) {
+    var m = env.cs[pseudo || ''] || (env.cs[pseudo || ''] = new Map());
+    var cs = m.get(el);
+    if (!cs) {
+      spend(env, 'styles');
+      cs = getComputedStyle(el, pseudo || null);
+      m.set(el, cs);
+    }
+    return cs;
+  }
+
+  function areaOf(r) { return r ? (r.right - r.left) * (r.bottom - r.top) : 0; }
+
+  // largestRect is el's client rect with the most area, or null.
+  function largestRect(el) {
+    var rs = dom().rects.call(el), best = null, ba = 0;
+    for (var i = 0; i < rs.length; i++) {
+      var r = rs[i], ar = r.width * r.height;
+      if (ar > ba) { ba = ar; best = r; }
+    }
+    return best && { left: best.left, top: best.top, right: best.right, bottom: best.bottom };
+  }
+
+  // rgba is a CSS color as [r, g, b, a (0-1)], or null. Computed colors are
+  // rgb()/rgba() but for the newer spaces (oklab, color(), ...), which a
+  // 1×1 canvas converts.
+  var colorCtx = null, colors = Object.create(null);
+  function rgba(css) {
+    css = String(css || '').trim();
+    if (own.call(colors, css)) return colors[css];
+    var out = null;
+    var m = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+)(%?))?\s*\)$/.exec(css);
+    if (m) {
+      out = [+m[1], +m[2], +m[3], m[4] == null ? 1 : m[5] ? m[4] / 100 : +m[4]];
+    } else if (css) {
+      try {
+        if (!colorCtx) {
+          var cv = document.createElement('canvas');
+          cv.width = cv.height = 1;
+          colorCtx = cv.getContext('2d', { willReadFrequently: true });
+        }
+        colorCtx.clearRect(0, 0, 1, 1);
+        colorCtx.fillStyle = 'rgba(1, 2, 3, 0)';
+        colorCtx.fillStyle = css;
+        colorCtx.fillRect(0, 0, 1, 1);
+        var d = colorCtx.getImageData(0, 0, 1, 1).data;
+        out = [d[0], d[1], d[2], d[3] / 255];
+      } catch (e) { out = null; }
+    }
+    colors[css] = out;
+    return out;
+  }
+
+  function painted(c) { return !!(c && c[3] > 0); }
+
+  // backdrop is the opaque color el's content sits on: its own background
+  // and its ancestors', composited from the first opaque one up (white
+  // under a transparent root). Background images never get here: a link
+  // with one on it, inside it or behind it is refused (seen).
+  function backdrop(el, env) {
+    var chain = [];
+    for (var n = el; n; n = n === env.root ? null : dom().parent.call(n)) {
+      spend(env, 'nodes');
+      var c = rgba(style(env, n).backgroundColor);
+      if (painted(c)) chain.push(c);
+      if (c && c[3] >= 0.999) break;
+    }
+    var b = [255, 255, 255];
+    for (var i = chain.length - 1; i >= 0; i--) b = over(chain[i], b);
+    return b;
+  }
+
+  // surface is el's own background, when it has one that shows (a color at
+  // least half opaque), as it paints over its container: [r, g, b].
+  function surface(el, env) {
+    var c = rgba(style(env, el).backgroundColor);
+    if (!(c && c[3] >= 0.5)) return null;
+    var p = dom().parent.call(el);
+    return over(c, p && el !== env.root ? backdrop(p, env) : [255, 255, 255]);
+  }
+
+  function distinct(a, b) {
+    return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) > 24;
+  }
+
+  // legible: text drawn in el's style is not near-invisible against its
+  // backdrop (same-color and transparent text).
+  function legible(el, cs, env) {
+    var fg = rgba(cs.getPropertyValue('-webkit-text-fill-color') || cs.color);
+    if (!fg) return false;
+    var b = backdrop(el, env);
+    return contrast(over(fg, b), b) >= CTA.minContrast;
+  }
+
+  // clipped reports whether cs hides its box by other means than size and
+  // opacity: a clip, a mask, a filter or a blend mode, any of which can
+  // make a link vanish while every rect says it's there. Conservative.
+  function clipped(cs) {
+    var mask = cs.getPropertyValue('mask-image') || cs.getPropertyValue('-webkit-mask-image') || 'none';
+    return cs.clipPath !== 'none' || (cs.clip && cs.clip !== 'auto') || cs.filter !== 'none' ||
+      mask !== 'none' || (cs.mixBlendMode && cs.mixBlendMode !== 'normal');
+  }
+
+  // moving: a CSS animation or transition runs on el (or, subtree, on
+  // anything inside it): what shows now may not in a moment.
+  function moving(el, subtree) {
+    var f = dom().animations;
+    return !!f && f.call(el, subtree ? { subtree: true } : undefined).length > 0;
+  }
+
+  // pseudos reports whether the frame's style sheets name a pseudo-element
+  // (::before, ::after, ::first-line, ::first-letter) anywhere, read off the
+  // CSSOM so escapes are already undone. Without one only a <q> has one
+  // (the UA's quotes), and the per-element pseudo lookups are skipped.
+  var PSEUDO_SEL = /:(?:before|after|first-line|first-letter)\b/i;
+  function pseudos(env) {
+    if (env.pseudos != null) return env.pseudos;
+    var found = false;
+    var walk = function (rules) {
+      for (var i = 0; rules && i < rules.length && !found; i++) {
+        spend(env, 'nodes');
+        var r = rules[i];
+        if (typeof r.selectorText === 'string' && PSEUDO_SEL.test(r.selectorText)) found = true;
+        else if (r.cssRules) walk(r.cssRules);
+      }
+    };
+    var sheets = dom().sheets.call(env.doc);
+    for (var i = 0; i < sheets.length && !found; i++) {
+      var rules = null;
+      try { rules = sheets[i].cssRules; } catch (e) { found = true; }
+      walk(rules);
+    }
+    env.pseudos = found;
+    return found;
+  }
+  function pseudoCheck(env, el) { return pseudos(env) || dom().local.call(el) === 'q'; }
+
+  // pseudoTrick: el draws something that isn't in the DOM text, or draws
+  // its text other than its computed style says. A ::before/::after with
+  // content (other than none, normal or ""), or an empty one that paints a
+  // background; a ::first-line or ::first-letter whose color, fill, size
+  // or background differs from el's own. Conservative: it refuses elements
+  // where the rule doesn't apply too.
+  function pseudoTrick(env, el) {
+    if (!pseudoCheck(env, el)) return false;
+    var cs = style(env, el);
+    for (var i = 0; i < 2; i++) {
+      var ps = style(env, el, i ? '::after' : '::before'), ct = ps.content;
+      if (ct === 'none' || ct === 'normal') continue;
+      if (ct !== '""' || painted(rgba(ps.backgroundColor)) || ps.backgroundImage !== 'none') return true;
+    }
+    for (var j = 0; j < 2; j++) {
+      var fs = style(env, el, j ? '::first-letter' : '::first-line');
+      if (fs.color !== cs.color || fs.fontSize !== cs.fontSize ||
+        fs.getPropertyValue('-webkit-text-fill-color') !== cs.getPropertyValue('-webkit-text-fill-color') ||
+        painted(rgba(fs.backgroundColor)) || fs.backgroundImage !== 'none') return true;
+    }
+    return false;
+  }
+
+  // overlays are what may paint over a link without taking the hit test,
+  // found by one bounded scan of the document rather than by modelling
+  // paint order: every element with pointer-events: none and a position
+  // other than static, or positioned fixed, absolute or sticky with a
+  // background or any opacity, and everything inside one (it paints in the
+  // same layer); and every positioned ::before/::after that paints, which
+  // has no rect of its own to read and so counts as covering the whole
+  // document. [{el, r, pseudo}], once per pass.
+  function suspect(cs) {
+    var pos = cs.position;
+    if (cs.pointerEvents === 'none' && pos !== 'static') return true;
+    if (pos !== 'fixed' && pos !== 'absolute' && pos !== 'sticky') return false;
+    return painted(rgba(cs.backgroundColor)) || cs.backgroundImage !== 'none' || parseFloat(cs.opacity) > 0;
+  }
+  function overlays(env) {
+    if (env.overlays) return env.overlays;
+    var D = dom(), all = D.qsa.call(env.root, '*'), out = [], open = [];
+    spend(env, 'nodes', all.length);
+    var whole = { left: -Infinity, top: -Infinity, right: Infinity, bottom: Infinity };
+    for (var i = 0; i < all.length; i++) {
+      var e = all[i];
+      while (open.length && !D.contains.call(open[open.length - 1], e)) open.pop();
+      var inside = open.length > 0;
+      if (inside || suspect(style(env, e))) {
+        if (!inside) open.push(e);
+        out.push({ el: e, r: D.bcr.call(e), pseudo: false });
+      }
+      if (pseudoCheck(env, e)) {
+        for (var k = 0; k < 2; k++) {
+          var ps = style(env, e, k ? '::after' : '::before');
+          if (ps.content === 'none' || ps.content === 'normal') continue;
+          if (ps.position !== 'static' && (inside || suspect(ps))) out.push({ el: e, r: whole, pseudo: true });
+        }
+      }
+    }
+    env.overlays = out;
+    return out;
+  }
+
+  // overlaid: something from overlays that isn't a, inside a or around it
+  // (a pseudo-element counts as its element's only when a holds it) meets
+  // a's box.
+  function overlaid(a, env) {
+    var D = dom(), box = D.bcr.call(a), list = overlays(env);
+    spend(env, 'nodes', list.length);
+    for (var i = 0; i < list.length; i++) {
+      var o = list[i];
+      if (D.contains.call(a, o.el)) continue;
+      if (!o.pseudo && D.contains.call(o.el, a)) continue;
+      if (intersect(o.r, box)) return true;
+    }
+    return false;
+  }
+
+  // Elements that paint an opaque box of their own content.
+  var REPLACED = /^(?:img|picture|video|canvas|object|embed|iframe|input|select|textarea|meter|progress)$/;
+  var HTML_NS = 'http://www.w3.org/1999/xhtml';
+
+  // seen is what of anchor a shows, or null if it doesn't show (or throws
+  // OVER past the budget). The box: its largest client rect, half of it
+  // at least inside the frame's viewport and inside every ancestor that
+  // clips; no ancestor under 0.5 opacity (the product), hidden, clipped,
+  // masked, filtered or blended, painting a background image, or animated;
+  // the element at the centre of what shows is a or inside it; nothing
+  // from overlays meets it. Inside it: HTML only (an <svg> refuses it), no
+  // background image, no pseudo-element trick (pseudoTrick), nothing
+  // animated; every text node that draws (a box with area, visibility
+  // visible) at least CTA.minFont, legible, under 0.5 opacity nowhere, and
+  // drawn inside the visible box where it hits the link; and no opaque box
+  // inside it (a background, an image) over a quarter or more of its text.
+  // One piece that fails refuses the link (hidden-text tricks).
+  // {box, text, imageOnly}: text is the drawn text; imageOnly when there is
+  // none (an image's alt is never a label).
+  function seen(a, env) {
+    var D = dom();
+    var full = largestRect(a);
+    if (!full) return null;
+    var half = areaOf(full) / 2;
+    var vis = intersect(full, { left: 0, top: 0, right: env.vw, bottom: env.vh });
+    if (!vis || areaOf(vis) < half) return null;
+    var o = 1;
+    for (var n = a; n; n = n === env.root ? null : D.parent.call(n)) {
+      spend(env, 'nodes');
+      var cs = style(env, n);
+      var v = parseFloat(cs.opacity);
+      if (v >= 0 && v <= 1) o *= v;
+      if (o < 0.5 || clipped(cs) || cs.backgroundImage !== 'none') return null;
+      if (moving(n, n === a)) return null;
+      if (n === a && cs.visibility !== 'visible') return null;
+      if (n !== a && (cs.overflowX !== 'visible' || cs.overflowY !== 'visible')) {
+        vis = intersect(vis, D.bcr.call(n));
+        if (!vis || areaOf(vis) < half) return null;
+      }
+    }
+    if (vis.right - vis.left < 8 || vis.bottom - vis.top < 8) return null;
+    var hit = D.fromPoint.call(env.doc, (vis.left + vis.right) / 2, (vis.top + vis.bottom) / 2);
+    if (!hit || !D.contains.call(a, hit)) return null;
+    if (overlaid(a, env)) return null;
+    if (pseudoTrick(env, a)) return null;
+
+    var parts = [], opaque = [];
+    var w = D.walker.call(env.doc, a, 5 /* NodeFilter.SHOW_ELEMENT | SHOW_TEXT */);
+    for (var t = w.nextNode(); t; t = w.nextNode()) {
+      spend(env, 'nodes');
+      if (D.type.call(t) === 1) {
+        if (D.ns.call(t) !== HTML_NS) return null; // <svg>, <math>
+        var ecs = style(env, t);
+        if (ecs.backgroundImage !== 'none' || pseudoTrick(env, t)) return null;
+        var bc = rgba(ecs.backgroundColor);
+        if ((bc && bc[3] >= 0.5) || REPLACED.test(D.local.call(t))) opaque.push(t);
+        continue;
+      }
+      var data = D.text.call(t);
+      if (!/\S/.test(data)) continue;
+      var pe = D.parent.call(t);
+      var pcs = style(env, pe);
+      if (pcs.visibility !== 'visible') continue; // not drawn
+      spend(env, 'ranges');
+      var range = D.range.call(env.doc);
+      range.selectNodeContents(t);
+      var r = range.getBoundingClientRect();
+      if (!(r.width > 0 && r.height > 0)) continue; // not drawn
+      if (parseFloat(pcs.fontSize) < CTA.minFont) return null;
+      var po = o;
+      for (var m = pe; m && m !== a; m = D.parent.call(m)) {
+        spend(env, 'nodes');
+        var mcs = style(env, m), mv = parseFloat(mcs.opacity);
+        if (mv >= 0 && mv <= 1) po *= mv;
+        if (clipped(mcs)) return null;
+      }
+      if (po < 0.5 || !legible(pe, pcs, env)) return null;
+      var tr = { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+      var tv = intersect(tr, vis);
+      if (!tv || areaOf(tv) < areaOf(tr) / 2) return null;
+      var th = D.fromPoint.call(env.doc, (tv.left + tv.right) / 2, (tv.top + tv.bottom) / 2);
+      if (!th || !D.contains.call(a, th)) return null;
+      parts.push({ s: data, r: tr, node: t });
+    }
+    // An opaque box inside the link that doesn't hold a piece of text may
+    // paint over it (an inline-block, an image, a positioned child): a
+    // quarter of the text's area under such boxes refuses the link.
+    var total = 0, covered = 0;
+    parts.forEach(function (p) { total += areaOf(p.r); });
+    opaque.forEach(function (el) {
+      var er = D.bcr.call(el);
+      spend(env, 'nodes', parts.length);
+      parts.forEach(function (p) {
+        if (!D.contains.call(el, p.node)) covered += areaOf(intersect(er, p.r));
+      });
+    });
+    if (total > 0 && covered >= total / 4) return null;
+    // Pieces on one line, touching, run together ("Ver<b>ify</b>"); any
+    // other break is a space.
+    var text = '';
+    parts.forEach(function (p, i) {
+      var q = i ? parts[i - 1].r : null;
+      if (q && !(Math.abs(p.r.top - q.top) < Math.max(p.r.bottom - p.r.top, q.bottom - q.top) / 2 && p.r.left - q.right < 4)) text += ' ';
+      text += p.s;
+    });
+    text = text.replace(/\s+/g, ' ').trim();
+    return { box: vis, text: text, imageOnly: !text };
+  }
+
+  // styling is how button-like a looks: a background of its own that
+  // differs from its container's, or, for the table-cell buttons email
+  // uses, an ancestor (up to 4) whose only content is this link with such a
+  // background; padding, rounded corners and a border on either. area is
+  // the visual button's (that cell's, if any) visible area.
+  function styling(a, env, box) {
+    var D = dom();
+    var srcs = [a], styled = false, cellBox = null;
+    var mine = surface(a, env), p = D.parent.call(a);
+    if (mine && p && distinct(mine, backdrop(p, env))) styled = true;
+    var norm = function (s) { return String(s || '').replace(/\s+/g, ' ').trim(); };
+    var text = norm(D.text.call(a));
+    for (var n = p, i = 0; n && n !== env.root && i < 4; n = D.parent.call(n), i++) {
+      var nt = D.text.call(n);
+      spend(env, 'nodes', 1 + Math.ceil(nt.length / 256));
+      if (norm(nt) !== text) break;
+      var links = D.qsa.call(n, 'a[href]');
+      spend(env, 'nodes', links.length);
+      if (links.length !== 1) break;
+      srcs.push(n);
+      var s = surface(n, env), np = D.parent.call(n);
+      if (s && np && distinct(s, backdrop(np, env))) {
+        styled = true;
+        cellBox = intersect(D.bcr.call(n), { left: 0, top: 0, right: env.vw, bottom: env.vh });
+        break;
+      }
+    }
+    var padding = false, radius = false, border = false;
+    srcs.forEach(function (e) {
+      var cs = style(env, e), px = function (k) { return parseFloat(cs[k]) || 0; };
+      if (px('paddingTop') + px('paddingBottom') >= 4 && px('paddingLeft') + px('paddingRight') >= 8) padding = true;
+      if (px('borderTopLeftRadius') >= 2 || px('borderBottomRightRadius') >= 2) radius = true;
+      if (['Top', 'Right', 'Bottom', 'Left'].every(function (side) {
+        var c = rgba(cs['border' + side + 'Color']);
+        return px('border' + side + 'Width') >= 1 && !/^(none|hidden)$/.test(cs['border' + side + 'Style']) && c && c[3] > 0;
+      })) border = true;
+    });
+    return { styled: styled, padding: padding, radius: radius, border: border, area: areaOf(cellBox || box) };
+  }
+
+  // candidate is anchor a as a scored candidate's features, or null: an
+  // absolute http(s) href that passes the browser-open check (never a
+  // mailto), a link that shows (seen). Throws OVER past the budget.
+  function candidate(a, env) {
+    var raw = dom().attr.call(a, 'href');
+    if (raw == null || !/^\s*https?:\/\//i.test(raw)) return null;
+    var c = browserCheck(raw.trim(), env.origins);
+    if (!c.ok || Array.from(c.url).length > WHOLE.url) return null;
+    var s = seen(a, env);
+    if (!s) return null;
+    var st = styling(a, env, s.box);
+    var info = ctaText(s.text);
+    var cy = (s.box.top + s.box.bottom) / 2;
+    var at = env.docH > 0 ? Math.min(Math.max(cy / env.docH, 0), 1) : 0;
+    return {
+      url: c.url, href: raw, text: s.text, label: cap(s.text, NAME_CAP).text, anchor: a, box: s.box,
+      f: {
+        styled: st.styled, padding: st.padding, radius: st.radius, border: st.border,
+        verb: info.verb, short: info.words >= 1 && info.words <= 5, long: info.words > 8,
+        early: 1 - at, area: st.area, footer: info.footer, imageOnly: s.imageOnly, tail: at > 0.75,
+        rawURL: info.rawURL,
+      },
+    };
+  }
+
+  // frameEnv is one pass over doc: its geometry, and the pass's budget
+  // counters and style cache.
+  function frameEnv(doc, origins) {
+    var root = docRoot(doc);
+    if (!root) return null;
+    var D = dom();
+    return {
+      doc: doc, root: root, vw: D.clientW.call(root), vh: D.clientH.call(root), docH: D.scrollH.call(root),
+      origins: origins || appOrigins(),
+      spent: { nodes: 0, ranges: 0, styles: 0 }, cs: {}, overlays: null, pseudos: null,
+    };
+  }
+
+  // guess runs the heuristic on frame's document, which must have laid out
+  // (layout: false otherwise; try again once it shows). {pick, runnerUp,
+  // ranked (ctaRank's, with each candidate's anchor, features and score),
+  // candidates (how many links showed), layout, over (the budget ran out:
+  // no pick), error (something threw: no pick), action (the pick as the
+  // chip carries it)}. It never throws. Only for a
+  // message with no declared action; the caller decides that.
+  function guess(frame, origins) {
+    var r = { pick: null, runnerUp: null, ranked: [], candidates: 0, layout: false, over: false, error: false, action: null };
+    var doc, env;
+    try {
+      doc = frame && frame.contentDocument;
+      env = doc && frameEnv(doc, origins);
+    } catch (e) { env = null; }
+    if (!env || !(env.vw > 0 && env.vh > 0)) return r;
+    var cands = [];
+    try {
+      var anchors = dom().qsa.call(env.root, 'a[href]');
+      for (var i = 0; i < anchors.length && i < CTA.max; i++) {
+        var c = candidate(anchors[i], env);
+        if (c) cands.push(c);
+      }
+      var got = ctaRank(cands);
+      got.candidates = cands.length;
+      got.layout = true;
+      got.over = false;
+      got.error = false;
+      got.action = null;
+      if (got.pick) {
+        var p = got.pick;
+        got.action = {
+          url: p.url, name: p.label || 'Link',
+          guess: { frame: frame, doc: doc, anchor: p.anchor, href: p.href, url: p.url, label: p.label },
+        };
+      }
+      return got;
+    } catch (e) {
+      // Past the budget, or anything unexpected (the sender's document is
+      // odd in a way nothing here foresaw): no pick, nothing half-built.
+      r.layout = true;
+      if (e === OVER) r.over = true; else r.error = true;
+      return r;
+    }
+  }
+
+  // stillPicked is null while the guess g still stands, else why not: the
+  // frame holds the same document, the anchor is in it, its href is the
+  // one picked, and it still shows (seen) with the same text.
+  function stillPicked(g) {
+    try { return standing(g); } catch (e) { return 'the link no longer shows'; }
+  }
+  function standing(g) {
+    var D = dom();
+    if (!g.frame || g.frame.contentDocument !== g.doc) return 'the message was redrawn';
+    if (!D.connected.call(g.anchor) || D.owner.call(g.anchor) !== g.doc) return 'the link is gone';
+    if (D.attr.call(g.anchor, 'href') !== g.href) return 'the link changed after it was picked';
+    var env = frameEnv(g.doc);
+    var c = env && candidate(g.anchor, env);
+    if (!c) return 'the link no longer shows';
+    if (c.url !== g.url || c.label !== g.label) return 'the link changed after it was picked';
+    return null;
+  }
+
+  // mark highlights a guess's link from this document, never by styling
+  // inside the frame (the sender's CSS comes after ours there): a layer the
+  // size of the frame's viewport in holder (the frame's positioned
+  // container), so the frame's box clips it, it scrolls with the pane, and
+  // the app's sticky chrome, the key bar and dialogs stack above it. It
+  // follows the link as the frame resizes or scrolls sideways, re-checking
+  // the guess g (stillPicked) each time, and hides when the link has no
+  // box or the guess no longer stands. While it shows it is re-validated
+  // every 250ms (a timer, which runs only while the layer is drawn and
+  // displayed): if the link moved with no resize or scroll to follow, or
+  // the guess no longer stands, it hides until the next of those. The
+  // caller calls sync() when the layer may have started or stopped
+  // showing (the cursor moved, the message expanded or collapsed): it
+  // stops the timer, or re-validates and starts it. Anything that throws
+  // hides it and schedules nothing. {el, update(), sync(), stop(),
+  // timing() (whether the timer is pending)}.
+  function mark(holder, frame, anchor, g) {
+    var layer = el('div', 'cta-mark');
+    layer.setAttribute('aria-hidden', 'true');
+    var box = el('span');
+    layer.appendChild(box);
+    holder.appendChild(layer);
+    var doc = frame.contentDocument, stopped = false, drawn = null, timer = 0;
+    function stop() {
+      if (stopped) return;
+      stopped = true;
+      ro.disconnect();
+      rest();
+      window.removeEventListener('resize', update);
+      if (doc) doc.removeEventListener('scroll', update, true);
+      layer.remove();
+    }
+    function rest() { if (timer) { clearTimeout(timer); timer = 0; } }
+    function where() {
+      return frame.contentDocument === doc && dom().connected.call(anchor) ? largestRect(anchor) : null;
+    }
+    function stands() { return !g || stillPicked(g) === null; }
+    // showing: drawn and displayed (the cursor message, expanded).
+    function showing() { return !layer.hidden && layer.getClientRects().length > 0; }
+    // arm keeps the re-validation timer running exactly while it shows.
+    function arm() {
+      if (!stopped && showing()) { if (!timer) timer = setTimeout(tick, 250); } else rest();
+    }
+    function update() {
+      if (stopped) return;
+      if (!layer.isConnected) { stop(); return; } // the thread went
+      try {
+        var r = where();
+        if (r && !stands()) r = null;
+        drawn = r;
+        layer.hidden = !r;
+        if (r) {
+          layer.style.left = (frame.offsetLeft + frame.clientLeft) + 'px';
+          layer.style.top = (frame.offsetTop + frame.clientTop) + 'px';
+          layer.style.width = frame.clientWidth + 'px';
+          layer.style.height = frame.clientHeight + 'px';
+          box.style.left = r.left + 'px';
+          box.style.top = r.top + 'px';
+          box.style.width = (r.right - r.left) + 'px';
+          box.style.height = (r.bottom - r.top) + 'px';
+        }
+      } catch (e) {
+        drawn = null; // anything unexpected: no highlight
+        layer.hidden = true;
+      }
+      arm();
+    }
+    // tick re-validates what shows; hidden or not displayed, the timer
+    // stops until update or sync starts it again. A throw hides it, and
+    // nothing is rescheduled.
+    function tick() {
+      timer = 0;
+      if (stopped) return;
+      if (!layer.isConnected) { stop(); return; }
+      if (!showing()) return;
+      try {
+        var r = where();
+        var moved = !r || !drawn || ['left', 'top', 'right', 'bottom'].some(function (k) { return Math.abs(r[k] - drawn[k]) > 0.5; });
+        if (moved || !stands()) layer.hidden = true;
+      } catch (e) {
+        layer.hidden = true;
+      }
+      arm();
+    }
+    // sync: the layer may have started or stopped showing (the cursor
+    // moved, the message expanded or collapsed): stop the timer, or
+    // re-validate and start it.
+    function sync() {
+      if (stopped) return;
+      if (!layer.isConnected) { stop(); return; }
+      if (holder.getClientRects().length) update();
+      else rest();
+    }
+    var ro = new ResizeObserver(update);
+    update();
+    ro.observe(frame);
+    window.addEventListener('resize', update);
+    if (doc) doc.addEventListener('scroll', update, true);
+    return { el: layer, update: update, sync: sync, stop: stop, timing: function () { return !!timer; } };
+  }
+
+  A.guess = guess;
+  A.stillPicked = stillPicked;
+  A.mark = mark;
 
   // ---- link hints -------------------------------------------------------
   // Labels are drawn in this document, over the frame, never inside it (the

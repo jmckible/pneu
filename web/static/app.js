@@ -41,10 +41,12 @@
     if (!c.items.length) return;
     i = Math.max(0, Math.min(c.items.length - 1, i));
     if (c === T && i !== c.sel) cancelActions(); // the cursor moved
-    if (c.items[c.sel]) c.items[c.sel].classList.remove('selected');
+    var was = c.items[c.sel];
+    if (was) was.classList.remove('selected');
     c.sel = i;
     var el = c.items[i];
     el.classList.add('selected');
+    if (c === T) { syncMark(was); syncMark(el); } // the highlight shows on the cursor only
     if (c === L) storage(function (s) {
       s.setItem(selKey(), el.dataset.thread || '');
       s.setItem(selKey() + ':i', String(i));
@@ -253,12 +255,55 @@
     });
     mail.frame = built.frame;
     mail.colors = built.colors;
+    // A declared action is the chip; without one, the button heuristic
+    // guesses once the new document has laid out (its load, below).
+    mail.declared = built.action;
+    setGuess(article, mail, null);
     setChip(article, built.action);
+    if (!mail.onLoad) {
+      mail.onLoad = function () { if (!mail.declared) guessLink(article, mail); };
+      mail.frame.addEventListener('load', mail.onLoad);
+    }
     return built;
   }
 
-  // setChip puts the message's declared action (mailframe.js, from its
-  // JSON-LD) in its header as the o chip, or takes an old one away.
+  // guessLink runs the button heuristic (actions.js guess) on mail's laid
+  // out frame and shows its pick, if any, as a chip marked as a guess, with
+  // the link highlighted over the frame (the cursor message's only, by
+  // app.css). A frame with no layout yet (its message collapsed before it
+  // loaded) is tried again when the message expands.
+  function guessLink(article, mail) {
+    if (!Pneu.actions || !Pneu.actions.guess || mail.declared || !mail.frame) return;
+    var g = Pneu.actions.guess(mail.frame);
+    mail.guessPending = !g.layout;
+    setGuess(article, mail, g.action);
+    setChip(article, g.action);
+  }
+
+  // setGuess replaces the highlight of mail's guessed link.
+  function setGuess(article, mail, action) {
+    if (mail.mark) { mail.mark.stop(); mail.mark = null; }
+    var div = article.querySelector('.body[data-kind=html]');
+    if (action && action.guess && div) {
+      try { mail.mark = Pneu.actions.mark(div, mail.frame, action.guess.anchor, action.guess); } catch (e) { mail.mark = null; }
+    }
+  }
+
+  function mailOf(article) {
+    var div = article && article.querySelector('.body[data-kind=html]');
+    return div && div.__mail;
+  }
+
+  // syncMark: article's highlight may have started or stopped showing (the
+  // cursor, a collapse); its re-validation timer runs only while it shows.
+  function syncMark(article) {
+    var m = mailOf(article);
+    if (m && m.mark) m.mark.sync();
+  }
+
+  // setChip puts the message's action in its header as the o chip, or
+  // takes an old one away: the declared one (mailframe.js, from its
+  // JSON-LD), or a guess (guessLink).
   function setChip(article, action) {
     var header = article.querySelector(':scope > header');
     if (!header || !Pneu.actions) return;
@@ -361,7 +406,11 @@
 
   function toggle(article) {
     article.classList.toggle('collapsed');
-    if (!article.classList.contains('collapsed')) renderBody(article);
+    syncMark(article);
+    if (article.classList.contains('collapsed')) return;
+    renderBody(article);
+    var div = article.querySelector('.body[data-kind=html]'), m = div && div.__mail;
+    if (m && m.guessPending) guessLink(article, m);
   }
 
   // initThread drives root: the page's own thread, or one fetched into the
@@ -369,6 +418,12 @@
   // listeners went with its element.
   function initThread(root) {
     cancelActions(); // the thread re-renders
+    // The previous thread's highlights go with it, timers and all.
+    (T.items || []).forEach(function (a) {
+      if (root.contains(a)) return;
+      var m = mailOf(a);
+      if (m && m.mark) { m.mark.stop(); m.mark = null; }
+    });
     if (T.abort) T.abort.abort();
     T.abort = window.AbortController ? new AbortController() : null;
     T.root = root;
@@ -1389,7 +1444,13 @@
       r = Pneu.actions.openAction(c);
     }
     if (r.ok) flash('Opened ' + Pneu.actions.destination(r.url));
-    else flash('Refused for safety: ' + r.reason, 'error');
+    else if (r.stale) {
+      // A guess that no longer stands opens nothing; guess again, so the
+      // chip shows what the body holds now.
+      flash('Not opened: ' + r.reason, 'error');
+      var div = article.querySelector('.body[data-kind=html]'), m = div && div.__mail;
+      if (m) guessLink(article, m);
+    } else flash('Refused for safety: ' + r.reason, 'error');
   }
 
   // paneBounds is what of the thread pane shows: its rect ∩ the viewport,
