@@ -26,12 +26,10 @@ func NewHub() *Hub {
 // buffer is full is dropped rather than stalling everyone; its EventSource
 // reconnects and the page re-renders from notmuch anyway.
 func (h *Hub) Broadcast(name string, payload any) {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		log.Printf("sse: marshal %s: %v", name, err)
+	msg := encodeEvent(name, payload)
+	if msg == nil {
 		return
 	}
-	msg := fmt.Appendf(nil, "event: %s\ndata: %s\n\n", name, data)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for c := range h.clients {
@@ -42,6 +40,16 @@ func (h *Hub) Broadcast(name string, payload any) {
 			close(c)
 		}
 	}
+}
+
+// encodeEvent is one SSE event, nil if payload doesn't marshal.
+func encodeEvent(name string, payload any) []byte {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("sse: marshal %s: %v", name, err)
+		return nil
+	}
+	return fmt.Appendf(nil, "event: %s\ndata: %s\n\n", name, data)
 }
 
 // Close ends every stream; register it with http.Server.RegisterOnShutdown
@@ -73,18 +81,21 @@ func (h *Hub) unsubscribe(c chan []byte) {
 	h.mu.Unlock()
 }
 
-func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+// serve streams c, already subscribed (Server.subscribe): subscribed
+// before the preamble, so once the client sees ": open" no broadcast can be
+// missed. first, the stream's hello, goes out ahead of anything queued.
+func (h *Hub) serve(w http.ResponseWriter, r *http.Request, c chan []byte, first []byte) {
+	defer h.unsubscribe(c)
 	rc := http.NewResponseController(w)
 	hdr := w.Header()
 	hdr.Set("Content-Type", "text/event-stream")
 	hdr.Set("Cache-Control", "no-store")
 	hdr.Set("X-Accel-Buffering", "no")
-	// Subscribe before the preamble: once the client sees ": open", no
-	// broadcast can be missed.
-	c := h.subscribe()
-	defer h.unsubscribe(c)
 	w.WriteHeader(http.StatusOK)
-	if _, err := fmt.Fprint(w, ": open\n\n"); err != nil || rc.Flush() != nil {
+	if _, err := fmt.Fprint(w, ": open\n\n"); err != nil {
+		return
+	}
+	if _, err := w.Write(first); err != nil || rc.Flush() != nil {
 		return
 	}
 	tick := time.NewTicker(h.Heartbeat)

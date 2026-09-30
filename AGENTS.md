@@ -62,6 +62,13 @@ and build order; this file is the working contract. Read PLAN.md before touching
 - Mutations are POST with Host and Origin checks. localhost is not a boundary:
   the default browser is also the daily browser, so every open tab can reach
   this port.
+- A write that changes what a list or thread shows bumps the view
+  generation once it has written anything (`viewChanged`, view.go; SPEC.md
+  "Other windows"), naming the threads it wrote as the database says, not
+  as the page does. `X-Pneu-Window` (`from`) is a hint for skipping one
+  page's own refresh; nothing may authorize or trust anything on it.
+  `/events` subscribes and snapshots `hello` under the locks that order
+  `view` and `account`: keep new state events behind the same locks.
 - Nothing writes to an account whose first pull hasn't completed
   (`Server.readOnly`): no tags, undo, mark-read or send. Its closing lastmod
   would swallow the write, and a resumed pull's label refresh would revert it.

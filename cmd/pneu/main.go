@@ -158,8 +158,10 @@ func serve(args []string) error {
 		// brought more than the labels they pushed: a keystroke's own push
 		// must not reload the list out from under the row it just removed.
 		// Every sync's end is broadcast — the line must leave Checking… on
-		// a pull that brought nothing, or failed — but only `changed` makes
-		// the client re-render the list.
+		// a pull that brought nothing, or failed. Only `changed` bumps the
+		// view generation (SSE `view`, no threads), which re-renders every
+		// page's list and open thread; a tag write bumps it itself, so the
+		// other windows see it without its push.
 		OnStart: func(account string, op gmi.Op) {
 			if op == gmi.OpSync {
 				srv.Hub.Broadcast("syncing", map[string]any{"account": account})
@@ -174,6 +176,9 @@ func serve(args []string) error {
 		OnSynced: func(account string, r gmi.Result) {
 			if r.Op == gmi.OpSync || r.Op == gmi.OpPull || (r.Op == gmi.OpPush && r.Changed) {
 				srv.Hub.Broadcast("sync", map[string]any{"account": account, "op": r.Op, "changed": r.Changed, "at": r.Started.Add(r.Duration)})
+				if r.Changed {
+					srv.ViewChanged()
+				}
 			}
 			srv.StatusChanged()
 			srv.AccountChanged(account)

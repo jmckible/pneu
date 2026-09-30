@@ -103,10 +103,12 @@ them here if they're wrong.
   `failures` and `error`, and the line reads its stale threshold from the
   sync period (`data-every`), so the first paint is right; SSE `account`
   keeps them current: sent when a sync is queued, starts and ends.
-  `syncing`/`sync` still bracket each sync, and only an end that pulled
-  something re-renders the list, without moving the cursor. A queued or
-  running flag with no news for 11 minutes (its end lost across an SSE
-  reconnect; a sync is bounded at 10) is ignored.
+  `syncing`/`sync` still bracket each sync, for the line only; a sync that
+  pulled something is also a `view` (below), which re-renders. Every
+  `/events` stream opens with `hello`, carrying every account's view, so a
+  reconnect puts the line right at once. A queued or running flag with no
+  news for 11 minutes (its end lost while the stream stayed down; a sync
+  is bounded at 10) is ignored.
   Clicking the line opens its details (Esc or a click closes it), and the
   `?` overlay leads with the same: per account, the last sync as a time
   and an age, whether it's checking now or queued, failures and the last
@@ -120,6 +122,32 @@ them here if they're wrong.
   not a click into a mail frame; at most every 20s) asks the same. The
   phone buzzes on Gmail's push, and an idle sync is about a second, so
   the mail is there by the time you look. *default*
+- **Other windows.** Two windows (or a stale tab) stay in step through the
+  server's view generation (docs/client.md "Changes from other windows"):
+  `(epoch, gen)`, the epoch random per server start, gen bumped once by
+  every write that changes what a list or thread shows (a tag write, undo,
+  mark-read, a send, a mailto unsubscribe, a sync that pulled something).
+  Each bump is an SSE `view {epoch, gen, from, threads}`: `threads` the
+  `(account, thread)` pairs written, none for a sync (anything may have
+  changed); `from` the writing page's `X-Pneu-Window`, a random id per page
+  load sent on every write. Every page is labeled with the pair as of
+  before its query (`data-epoch`/`data-gen` on body), and every stream
+  opens with `hello {epoch, gen, accounts}`, as of subscribing; no event
+  the hello already counts follows it. On `view`, or a `hello` that
+  differs from a pane's label, the list re-renders in place when quiet
+  (the sync rule above: never under typing or a write in flight, cursor
+  kept), and an open thread the event names (any, for a sync or a hello)
+  is fetched again in place, keeping the cursor message, folds and
+  scroll, without marking anything read. While you're in the middle of
+  something there (a dialog, an unsubscribe, link hints, a text selection)
+  its title says `changed elsewhere` instead, and it re-renders when
+  you're done. A window skips only its own write's event, and only once
+  it has applied that write's answer (the answer carries its gen); while
+  its writes are in flight the event waits for them, and one never
+  applied reconciles like any other. `from` saves a refresh, nothing more.
+  An undo whose thread another window wrote since says so in its toast,
+  `changed elsewhere · z undoes yours anyway`; z still undoes yours (last
+  writer wins).
 - **Theme.** Everything references a CSS variable; nothing hardcodes a color.
   Verify against three Omarchy themes (one light) before merge. *default*
 

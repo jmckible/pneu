@@ -30,11 +30,13 @@ const (
 	maxQuery = 64 << 10
 )
 
-// tagOp is one notmuch tag write: changes applied to exactly ids.
+// tagOp is one notmuch tag write: changes applied to exactly ids, which
+// Threads hold (for `view`; nil: unknown).
 type tagOp struct {
 	Account string
 	Changes []string
 	IDs     []string
+	Threads []threadRef
 }
 
 // tagActions maps an action to its tag changes and their exact inverse.
@@ -56,6 +58,10 @@ type tagResponse struct {
 	IDs     []string `json:"ids"` // url.QueryEscape'd, as data-msgids carries them
 	Changes []string `json:"changes"`
 	Undid   string   `json:"undid,omitempty"` // undo only: the action reverted
+	// The generation this write made (view.go): the page skips the `view`
+	// event carrying it. Absent when nothing was written.
+	Epoch string `json:"epoch,omitempty"`
+	Gen   uint64 `json:"gen,omitempty"`
 }
 
 type tagError struct {
@@ -99,6 +105,7 @@ func (s *Server) tag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var ids []string
+	var threads []threadRef // known when resolved from thread:X
 	if strings.TrimSpace(f.Get("ids")) == "" && thread != "" && (action == "archive" || action == "trash") {
 		// A thread past maxTagIDs can't be sent as ids; the page sends
 		// thread= alone and this is the one write that resolves thread:X.
@@ -114,6 +121,7 @@ func (s *Server) tag(w http.ResponseWriter, r *http.Request) {
 			tagFail(w, http.StatusBadRequest, "no such thread")
 			return
 		}
+		threads = []threadRef{{acct.Name, thread}}
 	} else {
 		var err error
 		if ids, err = parseIDs(f.Get("ids")); err != nil {
@@ -151,14 +159,21 @@ func (s *Server) tag(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if !s.applyTag(w, tagOp{acct.Name, act.do, ids}) {
+	// The threads come from the database, not the page's thread=: `view`
+	// must name what was written.
+	if threads == nil {
+		threads = s.threadsOf(acct, ids)
+	}
+	at, ok := s.applyTag(w, r, tagOp{acct.Name, act.do, ids, threads})
+	if !ok {
 		return
 	}
 	var id string
 	if action != "read" { // read-on-open is what looking did, not an action: z never undoes it
-		id = s.undo.push(action, tagOp{acct.Name, act.undo, ids})
+		id = s.undo.push(action, tagOp{acct.Name, act.undo, ids, threads})
 	}
-	tagJSON(w, http.StatusOK, tagResponse{OK: true, Action: action, ID: id, Account: acct.Name, IDs: escapeIDs(ids), Changes: act.do})
+	tagJSON(w, http.StatusOK, tagResponse{OK: true, Action: action, ID: id, Account: acct.Name, IDs: escapeIDs(ids), Changes: act.do,
+		Epoch: at.Epoch, Gen: at.Gen})
 }
 
 // undoTag reverts the action named by id, or the most recent one.
@@ -172,35 +187,41 @@ func (s *Server) undoTag(w http.ResponseWriter, r *http.Request, id string) {
 		tagFail(w, http.StatusConflict, readOnlyMsg(e.inverse.Account))
 		return
 	}
-	if !s.applyTag(w, e.inverse) {
+	at, ok := s.applyTag(w, r, e.inverse)
+	if !ok {
 		return // entry stays: a locked undo can be retried
 	}
 	s.undo.remove(e.id)
 	tagJSON(w, http.StatusOK, tagResponse{OK: true, Action: "undo", ID: e.id, Account: e.inverse.Account,
-		IDs: escapeIDs(e.inverse.IDs), Changes: e.inverse.Changes, Undid: e.action})
+		IDs: escapeIDs(e.inverse.IDs), Changes: e.inverse.Changes, Undid: e.action, Epoch: at.Epoch, Gen: at.Gen})
 }
 
-// applyTag writes op in batches of at most maxTagIDs ids and requests a
-// push, or answers the failure itself. A failure part-way leaves the earlier
-// batches written (and pushed); the action isn't recorded for undo.
-func (s *Server) applyTag(w http.ResponseWriter, op tagOp) bool {
+// applyTag writes op in batches of at most maxTagIDs ids, requests a push
+// and bumps the view generation (once, `view` from r's window), or answers
+// the failure itself. A failure part-way leaves the earlier batches written
+// (and pushed, and announced: other pages must see them); the action isn't
+// recorded for undo.
+func (s *Server) applyTag(w http.ResponseWriter, r *http.Request, op tagOp) (viewLabel, bool) {
 	acct := s.byName[op.Account]
 	for start := 0; start < len(op.IDs); start += maxTagIDs {
 		batch := op.IDs[start:min(start+maxTagIDs, len(op.IDs))]
 		if err := s.tagBatch(acct, op.Changes, batch); err != nil {
-			s.written(op.Account, op.Changes, op.IDs[:start])
+			if start > 0 {
+				s.written(op.Account, op.Changes, op.IDs[:start])
+				s.viewChanged(windowFrom(r), op.Threads)
+			}
 			log.Printf("tag %s %v: %v", op.Account, op.Changes, err)
 			if errors.Is(err, notmuch.ErrLocked) {
 				w.Header().Set("Retry-After", "2")
 				tagFail(w, http.StatusServiceUnavailable, "locked")
-				return false
+				return viewLabel{}, false
 			}
 			tagFail(w, http.StatusInternalServerError, "notmuch failed")
-			return false
+			return viewLabel{}, false
 		}
 	}
 	s.written(op.Account, op.Changes, op.IDs)
-	return true
+	return s.viewChanged(windowFrom(r), op.Threads), true
 }
 
 func (s *Server) tagBatch(acct notmuch.Account, changes, ids []string) error {

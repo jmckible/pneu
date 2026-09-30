@@ -1018,10 +1018,11 @@
     var token = s.preview.token;
     // One POST per token: the phase below has no keys until it answers.
     phase({ title: 'Unsubscribing…', body: [note('Waiting for the answer.')], actions: [] }, e);
+    var headers = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' };
     fetch('/unsubscribe', {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+      headers: Pneu.writeHeaders ? Pneu.writeHeaders(headers) : headers, // app.js: the window id
       body: new URLSearchParams({ token: token }).toString(),
     }).then(function (res) {
       return res.json().catch(function () { return null; }).then(function (data) {

@@ -18,6 +18,32 @@
     try { return fn(window.sessionStorage); } catch (e) { return null; }
   }
 
+  // windowId names this page load to the server (X-Pneu-Window on every
+  // write), which echoes it as a `view` event's from: the one event this
+  // page may skip, its own write. A hint only; the server trusts nothing
+  // on it.
+  var windowId = (function () {
+    var b = new Uint8Array(16), out = '';
+    window.crypto.getRandomValues(b);
+    for (var i = 0; i < b.length; i++) out += (b[i] < 16 ? '0' : '') + b[i].toString(16);
+    return out;
+  })();
+
+  // writeHeaders adds the window id to a write's headers.
+  function writeHeaders(h) {
+    h = h || {};
+    h['X-Pneu-Window'] = windowId;
+    return h;
+  }
+  Pneu.writeHeaders = writeHeaders; // actions.js: POST /unsubscribe
+
+  // pageLabel is where in the view generation doc's panes were rendered
+  // (base.html data-epoch/data-gen, read before the query).
+  function pageLabel(doc) {
+    var b = doc && doc.body;
+    return b && Pneu.triage ? Pneu.triage.viewLabel(b.dataset.epoch, b.dataset.gen) : null;
+  }
+
   // ---- panes and cursors --------------------------------------------------
   // A page holds up to two panes inside #panes: L, the thread list, and T,
   // the open thread. Below the split width only the one the URL names
@@ -27,8 +53,11 @@
   // own page (fetchMain). initList/initThread take the element to drive and
   // drop whatever they drove before.
 
-  var L = { root: document.querySelector('main.list'), items: [], sel: -1, url: location.pathname + location.search, title: document.title };
-  var T = { root: document.querySelector('main.thread'), items: [], sel: -1, url: null, pending: null, abort: null };
+  // label: the view generation a pane was rendered at; need: what it must
+  // be at least, from hello and `view` (onView). A pane behind its need is
+  // fetched again.
+  var L = { root: document.querySelector('main.list'), items: [], sel: -1, url: location.pathname + location.search, title: document.title, label: null, need: null };
+  var T = { root: document.querySelector('main.thread'), items: [], sel: -1, url: null, pending: null, abort: null, label: null, need: null };
   var primary = T.root ? 'thread' : L.root ? 'list' : null;
   var focus = primary;
   var split = false;
@@ -547,7 +576,7 @@
       var doc = new DOMParser().parseFromString(html, 'text/html');
       var main = doc.querySelector('main.' + kind);
       if (!main) throw new Error('no ' + kind + ' in the page');
-      return { main: document.adoptNode(main), title: doc.title };
+      return { main: document.adoptNode(main), title: doc.title, label: pageLabel(doc) };
     });
   }
 
@@ -602,6 +631,10 @@
     }
     if (T.root && T.url === url) { T.pending = null; leaving = false; after(); return; }
     T.pending = url;
+    // A new thread: what the old one had to catch up on is moot, and this
+    // fetch starts after every event so far. One arriving before it lands
+    // sets need (onView).
+    T.need = null;
     fetchMain(url, 'thread').then(function (got) {
       if (seq !== showSeq) return;
       T.pending = null;
@@ -609,12 +642,14 @@
       if (T.root) T.root.replaceWith(got.main);
       else panes.appendChild(got.main);
       T.url = url;
+      T.label = got.label;
       initThread(got.main);
       var id = rowId(got.main.dataset.account, got.main.dataset.thread);
       if (noRead[id]) delete noRead[id];
       else readOnOpen();
       if (got.title) document.title = got.title;
       after();
+      if (tri.behind(T.label, T.need)) threadChanged();
     }).catch(function (err) {
       if (seq !== showSeq) return;
       T.pending = null;
@@ -649,6 +684,7 @@
     T.items = [];
     T.sel = -1;
     T.url = null;
+    T.label = T.need = null;
     syncKeybar();
     setFocus('list');
     setURL(L.url, false);
@@ -671,12 +707,15 @@
       if (L.root) L.root.replaceWith(got.main);
       else panes.insertBefore(got.main, panes.firstChild);
       L.url = url;
+      L.label = got.label;
       if (got.title) L.title = got.title;
       markNav(url);
       initList(got.main, want, false);
       got.main.scrollTop = top;
       var row = cur(L);
       if (row) row.scrollIntoView({ block: 'nearest' });
+      // Rendered before a change this window has since heard of: again.
+      if (tri.behind(L.label, L.need)) refreshList();
     }).catch(function (err) {
       if (seq === listSeq) fail('Loading the list', err);
     });
@@ -854,7 +893,7 @@
         return fetch('/tag', {
           method: 'POST',
           credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+          headers: writeHeaders({ 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }),
           body: body,
         }).then(function (res) {
           return res.json().catch(function () { return null; }).then(function (data) {
@@ -870,12 +909,26 @@
       return attempt(false);
     }).then(function (data) {
       storage(function (s) { s.setItem(GEN_KEY, String((parseInt(s.getItem(GEN_KEY), 10) || 0) + 1)); });
+      if (data.epoch && data.gen) applied(data.epoch, data.gen);
       return data;
     }).finally(function () {
       inflight--;
       lastTag = Date.now();
       storage(function (s) { s.setItem(LAST_TAG_KEY, String(lastTag)); });
+      if (!inflight) settleViews();
     });
+  }
+
+  // appliedGens: the writes this page made whose answers it applied, by
+  // tri.appliedKey; their `view` events are skipped (onView). Bounded:
+  // an event comes within moments of its answer.
+  var appliedGens = {};
+  var appliedOrder = [];
+  function applied(epoch, gen) {
+    var k = tri.appliedKey(epoch, gen);
+    appliedGens[k] = true;
+    appliedOrder.push(k);
+    if (appliedOrder.length > 200) delete appliedGens[appliedOrder.shift()];
   }
 
   function gen() { return storage(function (s) { return s.getItem(GEN_KEY); }); }
@@ -885,10 +938,12 @@
 
   // remember records an action the server can undo (resp.id is absent when
   // nothing was written, e.g. unstar with nothing flagged).
+  // epoch and gen place the entry for undoConflicts.
   function remember(resp, account, thread, prev) {
     if (!resp.id) return false;
     saveStack(tri.push(loadStack(), {
       id: resp.id, action: resp.action, account: account, thread: thread, prev: prev, at: Date.now(),
+      epoch: resp.epoch, gen: resp.gen,
     }));
     return true;
   }
@@ -909,6 +964,7 @@
     // Link hints own the line while up; anything else that writes it ends
     // them first, so Enter is never armed for a destination not shown.
     if (Pneu.actions && Pneu.actions.yieldStatus) Pneu.actions.yieldStatus();
+    undoShown = false;
     if (!statusEl) {
       statusEl = document.createElement('div');
       statusEl.id = 'status';
@@ -951,8 +1007,18 @@
     statusKind = '';
   }
 
+  var undoShown = false; // the line shows an undo toast (done)
+
   function done(action, undoable) {
     flash(tri.label(action) + (undoable ? ' · z to undo' : ''), '', undoable ? { label: 'Undo', run: undo } : null);
+    undoShown = undoable;
+  }
+
+  // undoConflict: another window wrote the thread z would undo. z still
+  // undoes this window's action (last writer wins); the toast says so.
+  function undoConflict() {
+    flash('changed elsewhere · z undoes yours anyway', '', { label: 'Undo', run: undo });
+    undoShown = true;
   }
 
   function fail(what, err) {
@@ -1581,7 +1647,7 @@
   // word on it (lineAsked).
   function postSync() {
     lineAsk();
-    return fetch('/sync', { method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/json' } })
+    return fetch('/sync', { method: 'POST', credentials: 'same-origin', headers: writeHeaders({ Accept: 'application/json' }) })
       .then(function (res) {
         return res.json().catch(function () { return null; }).then(function (data) {
           if (!res.ok || !data || !data.ok) throw new Error((data && data.error) || 'HTTP ' + res.status);
@@ -1727,21 +1793,144 @@
   document.addEventListener('keydown', function (e) { onKey(e); });
   document.addEventListener('keyup', actionKeyup);
 
-  // ---- sync ---------------------------------------------------------------
-  // A list page reloads when a sync lands, unless you were typing or a tag
-  // request was in flight or answered in the last two seconds; then it waits
-  // for a quiet moment. Selection and the status line survive the reload.
-  // In the split the list pane re-renders in place instead (loadList): the
-  // cursor stays on its thread, or its slot, and the open thread is left
-  // alone. main.go broadcasts `syncing` when an account's sync starts and
-  // `sync` when it ends, failures included (`changed` false), never for a
-  // push; the op check below is belt and braces should that ever change,
-  // since a push changes nothing local.
+  // ---- changes: view generation -------------------------------------------
+  // Every write that changes what lists or threads show, from any window, a
+  // send, or a sync that pulled something, is a `view` event (view.go); each
+  // /events stream opens with `hello`, where the server is now. A list
+  // reloads when either says it is behind, unless you were typing or a tag
+  // request was in flight or answered in the last two seconds; then it
+  // waits for a quiet moment. Selection and the status line survive the
+  // reload. In the split the list pane re-renders in place instead
+  // (loadList): the cursor stays on its thread, or its slot. The open
+  // thread is fetched again when the event names it, in place, keeping its
+  // cursor, folds and scroll, or, while you are in the middle of something
+  // in it, marked "changed elsewhere" until you're done. This window's own
+  // write, once applied from its answer, is skipped: the row it just
+  // removed doesn't come back under the cursor. `syncing`/`sync` only
+  // drive the status line.
 
-  // One connection per page, every page: `sync` refreshes a list (the others
-  // ignore it), `theme` restyles whatever is showing.
+  // One connection per page, every page: `view` and `hello` refresh what is
+  // showing, `theme` restyles it.
   var events = null;
   var reloadTimer = 0;
+  var heldViews = []; // this window's own events, waiting on its writes (onView)
+
+  // openRef is the thread the pane shows, or is opening.
+  function openRef() {
+    var m = T.pending && /^\/t\/([^/]+)\/([^/?#]+)/.exec(T.pending);
+    if (m) return { account: tri.decodeId(m[1]), thread: m[2] };
+    return T.root ? { account: T.root.dataset.account, thread: T.root.dataset.thread } : null;
+  }
+
+  function onView(ev) {
+    // A thread z would undo was written elsewhere since.
+    var stack = loadStack();
+    var marked = tri.undoConflicts(stack, ev, windowId);
+    if (marked !== stack) {
+      saveStack(marked);
+      var top = marked[marked.length - 1];
+      if (top && top.conflict && !stack[stack.length - 1].conflict && undoShown && statusEl && statusEl.classList.contains('show')) undoConflict();
+    }
+    var d = tri.viewDecision(ev, { id: windowId, applied: appliedGens, pending: inflight, open: openRef() });
+    if (d.act === 'hold') { heldViews.push(ev); return; }
+    if (d.act === 'skip') {
+      L.label = tri.advance(L.label, ev);
+      T.label = tri.advance(T.label, ev);
+      return;
+    }
+    var at = { epoch: ev.epoch, gen: ev.gen };
+    needList(at);
+    if (d.thread) needThread(at);
+  }
+
+  // settleViews decides the held events once this window's writes settle.
+  function settleViews() {
+    var evs = heldViews;
+    heldViews = [];
+    evs.forEach(onView);
+  }
+
+  function onHello(h) {
+    heldViews = []; // hello counts them
+    (h.accounts || []).forEach(accountEvent);
+    var at = tri.viewLabel(h.epoch, h.gen);
+    if (!at) return;
+    needList(at);
+    if (openRef()) needThread(at);
+  }
+
+  // needList: the list must show at least at; reload it if it doesn't.
+  // One still loading beside a thread checks when it lands (loadList).
+  function needList(at) {
+    if (!L.need || tri.behind(L.need, at)) L.need = at;
+    if (L.root && tri.behind(L.label, L.need)) reloadWhenQuiet();
+  }
+
+  // needThread: the same for the open thread. One still opening checks
+  // when it lands (show).
+  function needThread(at) {
+    if (!T.need || tri.behind(T.need, at)) T.need = at;
+    if (!T.pending && T.root && tri.behind(T.label, T.need)) threadChanged();
+  }
+
+  // threadBusy: you are in the middle of something in the thread (a
+  // dialog, an unsubscribe, link hints, a text selection) that a re-render
+  // would take away.
+  function threadBusy() {
+    if (Pneu.actions && Pneu.actions.active && Pneu.actions.active()) return true;
+    if (document.querySelector('dialog[open]')) return true;
+    var sel = window.getSelection && window.getSelection();
+    return !!(sel && !sel.isCollapsed && T.root && sel.anchorNode && T.root.contains(sel.anchorNode));
+  }
+
+  // threadChanged refetches the open thread now, or marks it changed
+  // elsewhere and refetches once you're done.
+  var changedTimer = 0;
+  function threadChanged() {
+    if (!T.root) return;
+    if (!threadBusy()) { refetchThread(); return; }
+    T.root.dataset.changed = '';
+    clearInterval(changedTimer);
+    changedTimer = setInterval(function () {
+      if (!T.root || !('changed' in T.root.dataset)) { clearInterval(changedTimer); return; }
+      if (!threadBusy()) { clearInterval(changedTimer); refetchThread(); }
+    }, 1000);
+  }
+
+  // refetchThread renders the open thread again in place: new messages
+  // come in, tags change, the cursor message, its folds and the scroll stay.
+  // An open (show) wins over it. No read-on-open: a message marked unread
+  // elsewhere stays unread.
+  var refetchSeq = 0;
+  function refetchThread() {
+    var root = T.root, url = T.url;
+    if (!root || !url || T.pending) return;
+    var seq = ++refetchSeq, shownAt = showSeq;
+    fetchMain(url, 'thread').then(function (got) {
+      if (seq !== refetchSeq || shownAt !== showSeq || T.root !== root || T.pending) return;
+      if (threadBusy()) { threadChanged(); return; } // something started meanwhile
+      var open = {};
+      T.items.forEach(function (a) { open[a.dataset.msgid] = !a.classList.contains('collapsed'); });
+      var at = cur(T) && cur(T).dataset.msgid;
+      var scroller = split ? root : document.scrollingElement;
+      var top = scroller ? scroller.scrollTop : 0;
+      Array.prototype.forEach.call(got.main.querySelectorAll('article.message'), function (a) {
+        if (Object.prototype.hasOwnProperty.call(open, a.dataset.msgid)) a.classList.toggle('collapsed', !open[a.dataset.msgid]);
+      });
+      root.replaceWith(got.main);
+      T.label = got.label;
+      initThread(got.main);
+      for (var i = 0; i < T.items.length; i++) {
+        if (T.items[i].dataset.msgid === at) { select(T, i, false); break; }
+      }
+      scroller = split ? got.main : document.scrollingElement;
+      if (scroller) scroller.scrollTop = top;
+      if (tri.behind(T.label, T.need)) threadChanged();
+    }).catch(function () {
+      // Gone, or the server is: say so, and try again on the next change.
+      if (seq === refetchSeq && T.root === root) root.dataset.changed = '';
+    });
+  }
 
   function reloadWhenQuiet() {
     clearTimeout(reloadTimer);
@@ -1811,7 +2000,7 @@
 
   function acctPost(name, what) {
     return fetch('/accounts/' + encodeURIComponent(name) + '/' + what, {
-      method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/json' },
+      method: 'POST', credentials: 'same-origin', headers: writeHeaders({ Accept: 'application/json' }),
     }).then(function (res) {
       return res.json().catch(function () { return null; }).then(function (data) {
         if (!res.ok || !data || !data.ok) throw tagError(res, data);
@@ -1924,8 +2113,9 @@
   // An account is failing at the bar's threshold (BarWidget.qml
   // accountSick): any failure.
   var SICK_FAILURES = 1;
-  // A queued or running flag with no news this long lost its end event
-  // across an SSE reconnect; a sync is bounded by gmi's own 10m timeout.
+  // A queued or running flag with no news this long lost its end event: a
+  // reconnect's hello brings every account's view, so only a stream that
+  // stays down gets here. A sync is bounded by gmi's own 10m timeout.
   var LINE_STUCK = 11 * 60 * 1000;
   // A request with no answer this long (the server never said queued)
   // stops showing Checking….
@@ -2106,19 +2296,29 @@
 
   function openEvents() {
     if (events || !window.EventSource) return;
+    // Reconnects are the browser's; each new stream opens with hello.
     events = new EventSource('/events');
+    events.addEventListener('hello', whenReady(function (e) {
+      var h = null;
+      try { h = JSON.parse(e.data); } catch (err) { return; }
+      if (h) onHello(h);
+    }));
+    events.addEventListener('view', whenReady(function (e) {
+      var ev = null;
+      try { ev = JSON.parse(e.data); } catch (err) { return; }
+      if (ev && typeof ev.epoch === 'string' && typeof ev.gen === 'number') onView(ev);
+    }));
     events.addEventListener('syncing', function (e) {
       var d = null;
       try { d = JSON.parse(e.data); } catch (err) { return; }
       syncEvent(d.account, true);
     });
+    // A sync's end, for the status line; one that pulled something is
+    // also a `view`, which refreshes.
     events.addEventListener('sync', function (e) {
       var d = null;
-      try { d = JSON.parse(e.data); } catch (err) { /* reload anyway */ }
-      if (d && d.op === 'push' && !d.changed) return;
+      try { d = JSON.parse(e.data); } catch (err) { return; }
       if (d && d.op !== 'push') syncEvent(d.account, false);
-      if (d && d.changed === false) return; // ended, but pulled nothing (or failed)
-      reloadWhenQuiet();
     });
     events.addEventListener('theme', reloadTheme);
     events.addEventListener('account', function (e) {
@@ -2146,8 +2346,9 @@
 
   setPrimary(primary); // also shows the footer's keys
   if (primary === 'list') storage(function (s) { s.setItem(VIEW_KEY, L.url); });
-  if (L.root) initList(L.root);
+  if (L.root) { L.label = pageLabel(document); initList(L.root); }
   if (T.root) {
+    T.label = pageLabel(document);
     T.url = location.pathname;
     initThread(T.root);
     readOnOpen();

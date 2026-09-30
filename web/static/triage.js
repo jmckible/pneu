@@ -216,12 +216,87 @@
 
   function verb(action) { return VERBS[action] || action; }
 
+  // ---- view generation (docs/client.md "Changes from other windows") -----
+  // A label is {epoch, gen}: where a pane's render, a write or an event sits
+  // in the server's view generation (view.go).
+
+  // viewLabel reads one from a page's data-epoch/data-gen or an event; null
+  // if it isn't one.
+  function viewLabel(epoch, gen) {
+    var g = typeof gen === 'number' ? gen : parseInt(gen, 10);
+    if (typeof epoch !== 'string' || !epoch || !(g >= 0)) return null;
+    return { epoch: epoch, gen: g };
+  }
+
+  // behind says a pane showing label must be fetched again to be at least
+  // need (a hello, or an event that touched it). need is always of the
+  // current epoch, so a label of another epoch is behind it.
+  function behind(label, need) {
+    if (!need) return false;
+    if (!label || label.epoch !== need.epoch) return true;
+    return label.gen < need.gen;
+  }
+
+  // advance: a pane at ev's previous gen that applied ev itself (its own
+  // write) is now at ev's.
+  function advance(label, ev) {
+    if (label && label.epoch === ev.epoch && label.gen === ev.gen - 1) return { epoch: ev.epoch, gen: ev.gen };
+    return label;
+  }
+
+  // names says ev touches ref ({account, thread}); an event without
+  // threads (a sync) may have touched anything.
+  function names(ev, ref) {
+    if (!ref) return false;
+    var ts = ev && Array.isArray(ev.threads) ? ev.threads : [];
+    if (!ts.length) return true;
+    return ts.some(function (t) { return !!t && t.account === ref.account && t.thread === ref.thread; });
+  }
+
+  function appliedKey(epoch, gen) { return epoch + ' ' + gen; }
+
+  // viewDecision is what a `view` event does to this window. w: id (this
+  // page load's X-Pneu-Window), applied (appliedKey -> true for each write
+  // whose successful response this page applied), pending (its writes in
+  // flight), open ({account, thread} the thread pane shows or is opening,
+  // or null). `from` only ever saves a refresh: the event is skipped only
+  // if it is this window's own write, already applied. While writes are in
+  // flight it is held and decided again once they settle (pending 0), so a
+  // failed or lost write reconciles. Anything else reconciles: the list
+  // reloads, and the open thread too if the event names it.
+  // {act: 'skip'|'hold'|'reload', thread}.
+  function viewDecision(ev, w) {
+    if (ev.from && ev.from === w.id) {
+      if (w.applied && w.applied[appliedKey(ev.epoch, ev.gen)]) return { act: 'skip', thread: false };
+      if (w.pending > 0) return { act: 'hold', thread: false };
+    }
+    return { act: 'reload', thread: names(ev, w.open) };
+  }
+
+  // undoConflicts marks the undo entries whose thread another window (or
+  // a send) wrote after them: z still undoes them, last writer wins, but
+  // the toast says so. An entry of another epoch predates a restart and
+  // can't be compared. Pure: a new stack.
+  function undoConflicts(stack, ev, id) {
+    stack = Array.isArray(stack) ? stack : [];
+    if (!ev || ev.from === id || !Array.isArray(ev.threads) || !ev.threads.length) return stack;
+    return stack.map(function (e) {
+      if (e.conflict || e.epoch !== ev.epoch || !(ev.gen > e.gen) || !names(ev, e)) return e;
+      var c = {};
+      Object.keys(e).forEach(function (k) { c[k] = e[k]; });
+      c.conflict = true;
+      return c;
+    });
+  }
+
   var T = {
     UNDO_CAP: UNDO_CAP, MAX_IDS: MAX_IDS, body: body, removeArgs: removeArgs, splitIds: splitIds, decodeId: decodeId,
     nextIndex: nextIndex, push: push, pop: pop, parse: parse, removes: removes, skip: skip,
     retryAfter: retryAfter, label: label, verb: verb, position: position,
     SPLIT_CH: SPLIT_CH, pathKind: pathKind, listURL: listURL, historyOp: historyOp, restoreIndex: restoreIndex,
     paneView: paneView, refreshStale: refreshStale, rgbHex: rgbHex, cycle: cycle,
+    viewLabel: viewLabel, behind: behind, advance: advance, names: names, appliedKey: appliedKey,
+    viewDecision: viewDecision, undoConflicts: undoConflicts,
   };
   if (typeof module === 'object' && module.exports) module.exports = T;
   else (root.Pneu = root.Pneu || {}).triage = T;

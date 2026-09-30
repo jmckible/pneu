@@ -994,7 +994,96 @@ body { margin: 0; font: 13px monospace; }
     } catch (e) { tfails.push('harness error: ' + (e && e.stack || e)); }
     results.push({ id: 'page-narrow-guess-throw', pass: tfails.length === 0, fails: tfails });
     T2.frame.remove();
+
+    const plain = { '/body/personal/h2@hostile.test': { html, cids: {} } };
+    for (const layout of ['narrow', 'split']) results.push(await viewChecks(pageHTML, plain, layout));
     return results;
+  }
+
+  // viewChecks: the page's side of the view generation (app.js onView,
+  // docs/client.md "Changes from other windows"). The page is labeled
+  // epoch e1, gen 1; events are dispatched on its stream, and its thread
+  // URL answers with the same page, labeled at W.__serverGen.
+  async function viewChecks(pageHTML, bodies, layout) {
+    const fails = [];
+    const id = 'page-' + layout + '-view';
+    out.textContent = 'pending: ' + id;
+    // The thread's own URL, which a srcdoc page's is: srcdoc.
+    const epoch = '00000000000000e1', thread = '00000000000000a1', url = 'srcdoc';
+    const named = [{ account: 'personal', thread }];
+    const other = 'fedcba9876543210fedcba9876543210';
+    const P = await threadPage(pageHTML, layout, bodies, {
+      pages: { [url]: pageHTML },
+      tag: { ok: true, action: 'star', id: 'ab12', account: 'personal', ids: ['h2%40hostile.test'], changes: ['+flagged'], epoch, gen: 7 },
+      noChip: true,
+    });
+    try {
+      if (P.error) throw new Error(P.error);
+      const { W, D } = P;
+      const refetches = () => W.__fetches.filter((f) => f.url === url).length;
+      const send = (name, data) => W.__es.listeners[name]({ data: JSON.stringify(data) });
+      const view = (gen, from, threads) => { W.__serverGen = gen; send('view', { epoch, gen, from, threads }); };
+      const press = (target, key) => {
+        const o = { key, code: 'Key' + key.toUpperCase(), bubbles: true, cancelable: true };
+        target.dispatchEvent(new W.KeyboardEvent('keydown', o));
+        target.dispatchEvent(new W.KeyboardEvent('keyup', o));
+      };
+      if (!W.__es || !W.__es.listeners.view || !W.__es.listeners.hello) throw new Error('no view/hello listeners');
+
+      send('hello', { epoch, gen: 1, accounts: [] });
+      await sleep(100);
+      if (refetches()) fails.push('hello at the page\'s own label refetched the thread');
+
+      // Another window's write naming the open thread: fetched again in
+      // place, the cursor message kept.
+      const before = D.querySelector('main.thread');
+      view(2, other, named);
+      await sleep(400);
+      const pane = D.querySelector('main.thread');
+      if (refetches() !== 1) fails.push('refetches after a view naming the thread: ' + refetches());
+      if (pane === before) fails.push('the thread was not re-rendered');
+      const sel = pane.querySelector('article.message.selected');
+      if (!sel || sel.dataset.msgid !== 'h2@hostile.test') fails.push('cursor after the refetch: ' + (sel && sel.dataset.msgid));
+
+      // One naming another thread: the thread stays.
+      view(3, other, [{ account: 'work', thread }]);
+      await sleep(200);
+      if (refetches() !== 1) fails.push('refetched for another thread');
+
+      // This window's own write, applied from its answer: skipped. The
+      // write carried the window id.
+      press(pane, 's');
+      await sleep(200);
+      const post = W.__fetches.find((f) => f.url === '/tag');
+      const wid = post && post.headers['X-Pneu-Window'];
+      if (!/^[0-9a-f]{32}$/.test(wid || '')) fails.push('POST /tag without a window id: ' + wid);
+      view(7, wid, named);
+      await sleep(200);
+      if (refetches() !== 1) fails.push('refetched for its own applied write');
+      // Its own id on a write it never applied: reconciled.
+      view(8, wid, named);
+      await sleep(400);
+      if (refetches() !== 2) fails.push('own id, unapplied write: refetches ' + refetches());
+
+      // In the middle of something (a dialog): marked, then refetched once
+      // it closes. The undo toast says another window wrote the thread.
+      press(D.querySelector('main.thread'), '?');
+      const help = D.getElementById('keys');
+      if (!help || !help.open) throw new Error('? opened no dialog');
+      view(9, other, named);
+      await sleep(200);
+      if (refetches() !== 2) fails.push('refetched under an open dialog');
+      if (!('changed' in D.querySelector('main.thread').dataset)) fails.push('not marked changed elsewhere');
+      const status = D.getElementById('status').textContent;
+      if (!status.startsWith('changed elsewhere · z undoes yours anyway')) fails.push('undo toast: ' + status);
+      help.close();
+      await sleep(1500);
+      if (refetches() !== 3) fails.push('no refetch once the dialog closed: ' + refetches());
+      if ('changed' in D.querySelector('main.thread').dataset) fails.push('still marked after the refetch');
+      if (W.__errors.length) fails.push('page errors: ' + W.__errors.join(' | '));
+    } catch (e) { fails.push('harness error: ' + (e && e.stack || e)); }
+    P.frame.remove();
+    return { id, pass: fails.length === 0, fails };
   }
 
   // threadPage loads app-thread.html into a same-origin frame of the
@@ -1003,7 +1092,7 @@ body { margin: 0; font: 13px monospace; }
   async function threadPage(html, layout, bodies, options) {
     const f = document.createElement('iframe');
     f.style.cssText = 'position:fixed;left:0;top:0;z-index:20;border:0;background:#fff;height:560px;width:' + (layout === 'split' ? 1400 : 700) + 'px';
-    const shim = '<script>(' + pageShim.toString() + ')(' + JSON.stringify(bodies).replace(/</g, '\\u003c') + ', ' + JSON.stringify(options || {}) + ')<\/script>';
+    const shim = '<script>(' + pageShim.toString() + ')(' + JSON.stringify(bodies).replace(/</g, '\\u003c') + ', ' + JSON.stringify(options || {}).replace(/</g, '\\u003c') + ')<\/script>';
     if (!html.includes('<head>')) return { frame: f, error: 'app-thread.html has no <head>' };
     f.srcdoc = html.replace('<head>', '<head>' + shim);
     const loaded = new Promise((r) => { f.addEventListener('load', r, { once: true }); setTimeout(r, 3000); });
@@ -1045,14 +1134,30 @@ body { margin: 0; font: 13px monospace; }
     }
     window.__opens = [];
     window.open = function (url, target, features) { window.__opens.push([String(url), target, features]); return null; };
+    // The page's event stream: the harness dispatches to its listeners.
     window.EventSource = function () {
-      this.addEventListener = function () {};
+      var on = this.listeners = {};
+      window.__es = this;
+      this.addEventListener = function (name, fn) { on[name] = fn; };
       this.close = function () {};
     };
-    window.fetch = function (url) {
+    // Every request, with its headers. options.pages: our own pages, as
+    // text/html, labeled at window.__serverGen; options.tag: POST /tag's
+    // answer.
+    window.__fetches = [];
+    window.fetch = function (url, init) {
       var u = String(url);
+      window.__fetches.push({ url: u, headers: (init && init.headers) || {} });
       if (Object.prototype.hasOwnProperty.call(bodies, u)) {
         return Promise.resolve(new Response(JSON.stringify(bodies[u]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
+      var pages = options && options.pages;
+      if (pages && Object.prototype.hasOwnProperty.call(pages, u)) {
+        var html = pages[u].replace(/data-gen="\d+"/, 'data-gen="' + (window.__serverGen || 0) + '"');
+        return Promise.resolve(new Response(html, { status: 200, headers: { 'Content-Type': 'text/html' } }));
+      }
+      if (options && options.tag && u === '/tag') {
+        return Promise.resolve(new Response(JSON.stringify(options.tag), { status: 200, headers: { 'Content-Type': 'application/json' } }));
       }
       return Promise.resolve(new Response('not in the harness', { status: 404 }));
     };

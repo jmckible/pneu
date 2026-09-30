@@ -417,7 +417,10 @@ The client holds **one** upstream SSE stream and fans it out to its own
   the view generation, and sends `hello` with `(epoch, generation)`,
   protocol, account set, status doc and running syncs. Events queued
   behind it carry their generation, and anything at or below the
-  snapshot's generation is dropped. `epoch` is random per server start, so
+  snapshot's generation is dropped. (Server mode, built: `/events`
+  subscribes inside that lock, and inside `account`'s, so nothing at or
+  below the snapshot is ever queued; the client's upstream reader still
+  drops by generation, since it can't hold dell's locks.) `epoch` is random per server start, so
   a restart can't reuse a generation an old page is holding. The client's
   local `/events` does the same for each browser connection, from its own
   state.

@@ -479,6 +479,18 @@ body.split main.list .pane-title { background: var(--bg); }
 body.split main.thread > h1 { max-width: none; margin: -4px -2ch 8px; background: var(--raised); }
 body.split #panes[data-focus=list] main.list .pane-title,
 body.split #panes[data-focus=thread] main.thread > h1 { color: var(--accent-hot); border-bottom-color: var(--accent-hot); }
+/* Another window changed the open thread while you were in the middle of
+   something in it (app.js threadChanged): said at the title's right end,
+   ahead of the subject so its ellipsis can't cut it; it re-renders when
+   you're done. */
+main.thread[data-changed] > h1::before {
+  content: "changed elsewhere";
+  float: right;
+  margin-left: 2ch;
+  font-size: 12px;
+  font-weight: normal;
+  color: var(--muted);
+}
 /* Cursor moves land below the sticky title. */
 body.split main.list .row { scroll-margin-top: 28px; }
 body.split article.message { scroll-margin-top: 36px; }

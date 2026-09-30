@@ -273,6 +273,19 @@ func (a Account) ThreadOf(ctx context.Context, messageID string) (string, error)
 	return strings.TrimPrefix(out[0], "thread:"), nil
 }
 
+// Threads returns the thread ids of the messages query matches, excluded
+// tags included: a write names its ids explicitly, trash and spam alike.
+func (a Account) Threads(ctx context.Context, query string) ([]string, error) {
+	var out []string
+	if err := a.runJSON(ctx, &out, "search", "--format=json", "--output=threads", "--exclude=false", "--", query); err != nil {
+		return nil, err
+	}
+	for i, t := range out {
+		out[i] = strings.TrimPrefix(t, "thread:")
+	}
+	return out, nil
+}
+
 // UserName is the database config's user.name ("" when unset).
 func (a Account) UserName(ctx context.Context) (string, error) {
 	out, err := a.run(ctx, nil, "config", "get", "user.name")

@@ -110,7 +110,7 @@ func TestInbox(t *testing.T) {
 	s := serverFor(t, env.Accounts)
 	body := getOK(t, s, "/")
 	for _, want := range []string{
-		`<body data-origin="http://pneu.localhost:7317">`,
+		`<body data-origin="http://pneu.localhost:7317" data-epoch="` + s.view.epoch + `" data-gen="0">`,
 		`<link rel="stylesheet" href="/static/app.css">`,
 		`<script src="/static/purify.min.js"></script>`,
 		`<script src="/static/app.js" defer></script>`,
@@ -606,7 +606,7 @@ func TestHoldImages(t *testing.T) {
 			t.Errorf("%v: HoldImages = %v", c.tags, v.HoldImages)
 		}
 		w := httptest.NewRecorder()
-		s.render(w, http.StatusOK, "thread", threadPage{Page: s.page("x", ""), Account: acct.Name, Messages: []messageView{v}})
+		s.render(w, http.StatusOK, "thread", threadPage{Page: s.page("x", "", viewLabel{}), Account: acct.Name, Messages: []messageView{v}})
 		if got := strings.Contains(w.Body.String(), ` data-remote-images="click"></div>`); got != c.hold {
 			t.Errorf("%v: data-remote-images present = %v", c.tags, got)
 		}

@@ -176,6 +176,9 @@ func (s *Server) unsubExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res := s.runUnsub(context.WithoutCancel(r.Context()), act)
+	if act.offer.Method == unsub.MethodMailto && res.State == "ok" && res.Category == unsub.CatOK {
+		s.viewChanged(windowFrom(r), nil) // its sent copy is in Sent, in a thread of its own
+	}
 	s.unsubTokens.Finish(tok, res)
 	log.Printf("unsubscribe %s %s %s", act.account, act.offer.Method, res.Category)
 	tagJSON(w, http.StatusOK, res)

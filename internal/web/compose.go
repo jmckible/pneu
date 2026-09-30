@@ -155,7 +155,7 @@ func (s *Server) renderCompose(w http.ResponseWriter, r *http.Request, status in
 	if data.InReplyTo != "" {
 		title = data.Subject
 	}
-	data.Page = s.page(title, "")
+	data.Page = s.page(title, "", s.viewLabel()) // no list or thread to reconcile; labeled all the same
 	data.Accounts = s.composeAccounts(r.Context(), data.Account)
 	// The middleware's no-referrer policy makes Chromium send "Origin: null" on
 	// a form-navigation POST, which Auth rightly refuses (sandboxed frames send
@@ -406,6 +406,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dest := "/"
+	var threads []threadRef // a new message's thread is new: unknown, so every page refreshes
 	if data.InReplyTo != "" {
 		// lieer stores the sent copy itself, so it is usually in the thread
 		// already; the original's thread is the one to show either way.
@@ -414,8 +415,11 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 			log.Printf("send %s: thread of %s: %v", acct.Name, orig, err)
 		} else if t != "" {
 			dest = "/t/" + url.PathEscape(acct.Name) + "/" + url.PathEscape(t)
+			threads = []threadRef{{acct.Name, t}}
 		}
 	}
+	// The sent copy is in the database now: Sent and the thread show it.
+	s.viewChanged(windowFrom(r), threads)
 	s.outbox.finish(data.MessageID, dest)
 	http.Redirect(w, r, dest+sentFragment, http.StatusSeeOther)
 }

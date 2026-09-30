@@ -15,7 +15,7 @@
 <script src="/static/compose.js"></script>
 <script src="/static/app.js" defer></script>
 </head>
-<body data-origin="{{.Origin}}">
+<body data-origin="{{.Origin}}" data-epoch="{{.Label.Epoch}}" data-gen="{{.Label.Gen}}">
 <header>
 <svg class="mark" role="img" aria-label="pneu" viewBox="0 0 15 15">{{template "mark"}}</svg>
 <nav>{{range .Nav}}<a href="{{.Href}}"{{if .Active}} class="active" aria-current="page"{{end}}><kbd>{{.Key}}</kbd>{{.Name}}</a>{{end}}</nav>

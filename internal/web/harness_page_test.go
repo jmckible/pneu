@@ -37,6 +37,7 @@ func TestHarnessThreadPage(t *testing.T) {
 			Origin:   "http://pneu.localhost:7317",
 			Title:    "Your pull request was reviewed",
 			Accounts: template.HTMLAttr(`data-accounts="` + template.HTMLEscapeString(string(acct)) + `"`),
+			Label:    viewLabel{Epoch: "00000000000000e1", Gen: 1},
 		},
 		Account: "personal",
 		Thread:  "00000000000000a1",

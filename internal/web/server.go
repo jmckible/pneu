@@ -69,6 +69,10 @@ type Server struct {
 	unsubHTTP   *unsub.Client
 	// unsubSlots bounds concurrent previews (DKIM is CPU work) server-wide.
 	unsubSlots chan struct{}
+	// view is the view generation (view.go).
+	view viewGen
+	// onLabel runs right after a page reads its label; tests only.
+	onLabel func()
 }
 
 // New wires routes. host is the exact Host header to accept
@@ -97,6 +101,7 @@ func New(accounts []notmuch.Account, host, token string) (*Server, error) {
 		unsubDKIM:  unsub.NewVerifier(),
 		unsubHTTP:  unsub.NewClient(),
 		unsubSlots: make(chan struct{}, unsubPreviews),
+		view:       viewGen{epoch: newEpoch()},
 	}
 	for i, a := range accounts {
 		s.byName[a.Name] = a
@@ -106,7 +111,7 @@ func New(accounts []notmuch.Account, host, token string) (*Server, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /open", s.Auth.Open)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
-	mux.Handle("GET /events", s.Hub)
+	mux.HandleFunc("GET /events", s.events)
 	mux.HandleFunc("GET /theme.css", s.theme)
 	mux.HandleFunc("GET /{$}", s.list("inbox", "Inbox", "tag:inbox"))
 	mux.HandleFunc("GET /starred", s.list("starred", "Starred", "tag:flagged"))
@@ -180,6 +185,9 @@ type Page struct {
 	// SyncEvery is the sync period in seconds (0: unknown), the status
 	// line's stale threshold.
 	SyncEvery int
+	// Label is the view generation the page was rendered at, read before
+	// its query (viewLabel); app.js compares it with hello and `view`.
+	Label viewLabel
 }
 
 // NavLink is one header nav entry.
@@ -209,8 +217,9 @@ func (p Page) Nav() []NavLink {
 	return out
 }
 
-func (s *Server) page(title, query string) Page {
-	return Page{Origin: s.Auth.Origin, Title: title, Query: query, Accounts: s.accountsJSON(), SyncEvery: int(s.SyncInterval / time.Second)}
+// page is base.html's data; at is the label read before the page's query.
+func (s *Server) page(title, query string, at viewLabel) Page {
+	return Page{Origin: s.Auth.Origin, Title: title, Query: query, Accounts: s.accountsJSON(), SyncEvery: int(s.SyncInterval / time.Second), Label: at}
 }
 
 func (s *Server) render(w http.ResponseWriter, status int, page string, data any) {

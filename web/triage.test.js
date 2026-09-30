@@ -194,3 +194,60 @@ test('position: count alone on one page, range and total when paged (read.go pos
   assert.equal(T.position(1000, 49, -1, true), '1,001–1,049');
   assert.equal(T.position(50, 0, 50, true), '0');
 });
+
+const me = '0123456789abcdef0123456789abcdef';
+const other = 'fedcba9876543210fedcba9876543210';
+const ev = (gen, from, threads) => ({ epoch: 'e1', gen, from, threads });
+const kitchen = { account: 'personal', thread: '00000000000000a1' };
+
+test('viewDecision: only this window\'s own applied write is skipped', () => {
+  const applied = { [T.appliedKey('e1', 7)]: true };
+  const w = { id: me, applied, pending: 0, open: kitchen };
+  assert.deepEqual(T.viewDecision(ev(7, me, [kitchen]), w), { act: 'skip', thread: false });
+  // Another window's write, a sync, a send from a form: reconcile, and the
+  // open thread only when named (a sync names nothing: anything).
+  assert.deepEqual(T.viewDecision(ev(8, other, [kitchen]), w), { act: 'reload', thread: true });
+  assert.deepEqual(T.viewDecision(ev(8, other, [{ account: 'work', thread: kitchen.thread }]), w), { act: 'reload', thread: false });
+  assert.deepEqual(T.viewDecision(ev(8, '', undefined), w), { act: 'reload', thread: true });
+  assert.deepEqual(T.viewDecision(ev(8, '', []), { ...w, open: null }), { act: 'reload', thread: false });
+  // Our own id on a write we never applied: in flight, held; settled (failed,
+  // or its answer lost), reconciled. The same gen of another epoch is not ours.
+  assert.deepEqual(T.viewDecision(ev(9, me, [kitchen]), { ...w, pending: 1 }), { act: 'hold', thread: false });
+  assert.deepEqual(T.viewDecision(ev(9, me, [kitchen]), w), { act: 'reload', thread: true });
+  assert.deepEqual(T.viewDecision({ ...ev(7, me, [kitchen]), epoch: 'e2' }, w), { act: 'reload', thread: true });
+  // An empty from never matches, even a window with no id.
+  assert.equal(T.viewDecision(ev(7, '', [kitchen]), { ...w, id: '' }).act, 'reload');
+});
+
+test('behind and advance: labels against what a pane must show', () => {
+  const l = T.viewLabel('e1', '5');
+  assert.deepEqual(l, { epoch: 'e1', gen: 5 });
+  assert.equal(T.viewLabel('', '5'), null);
+  assert.equal(T.viewLabel('e1', 'x'), null);
+  assert.equal(T.behind(l, null), false);
+  assert.equal(T.behind(l, { epoch: 'e1', gen: 5 }), false);
+  assert.equal(T.behind(l, { epoch: 'e1', gen: 6 }), true);
+  assert.equal(T.behind(l, { epoch: 'e2', gen: 0 }), true); // the server restarted
+  assert.equal(T.behind(null, { epoch: 'e1', gen: 0 }), true);
+  assert.deepEqual(T.advance(l, ev(6, me)), { epoch: 'e1', gen: 6 });
+  assert.equal(T.advance(l, ev(7, me)), l); // missed 6: stays behind
+  assert.equal(T.advance(l, { ...ev(6, me), epoch: 'e2' }), l);
+});
+
+test('undoConflicts: another window writing the thread after the entry', () => {
+  const stack = [
+    { id: 'a1', action: 'archive', account: 'personal', thread: kitchen.thread, epoch: 'e1', gen: 4 },
+    { id: 'b2', action: 'star', account: 'work', thread: 'b2', epoch: 'e1', gen: 5 },
+  ];
+  const got = T.undoConflicts(stack, ev(6, other, [kitchen]), me);
+  assert.equal(got[0].conflict, true);
+  assert.equal(got[1].conflict, undefined);
+  assert.equal(stack[0].conflict, undefined); // pure
+  // Our own write, an older write, a sync (no threads), another epoch: no conflict.
+  assert.equal(T.undoConflicts(stack, ev(6, me, [kitchen]), me), stack);
+  assert.equal(T.undoConflicts(stack, ev(3, other, [kitchen]), me)[0].conflict, undefined);
+  assert.equal(T.undoConflicts(stack, ev(6, other, []), me), stack);
+  assert.equal(T.undoConflicts(stack, { ...ev(6, other, [kitchen]), epoch: 'e2' }, me)[0].conflict, undefined);
+  // An entry parse kept from storage survives the round trip with its mark.
+  assert.equal(T.parse(JSON.stringify(got))[0].conflict, true);
+});

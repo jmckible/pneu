@@ -166,6 +166,9 @@ func TestUnsubscribeMailto(t *testing.T) {
 	if code != http.StatusOK || res.State != "ok" {
 		t.Fatalf("execute %d %+v", code, res)
 	}
+	if g := genOf(f.s); g != 1 { // the sent copy is in Sent
+		t.Errorf("gen %d after a sent unsubscribe", g)
+	}
 	m := lastSent(t, f.sync, "personal")
 	if got := m.Header.Get("To"); got != "leave+robin@news.example" {
 		t.Errorf("To %q", got)
@@ -205,6 +208,9 @@ func TestUnsubscribeMailto(t *testing.T) {
 	if _, res := execute(t, f.s, p2.Token); res.State != "failed" || res.Fallback {
 		t.Errorf("failed send: %+v", res)
 	}
+	if g := genOf(f.s); g != 1 {
+		t.Errorf("gen %d after a failed unsubscribe", g)
+	}
 }
 
 func TestUnsubscribeReadOnly(t *testing.T) {
@@ -236,6 +242,9 @@ func TestUnsubscribeOneClick(t *testing.T) {
 	}
 	if _, res := execute(t, f.s, p.Token); res.State != "ok" || res.Category != "ok" || f.hits.Load() != 1 {
 		t.Fatalf("execute %+v hits %d", res, f.hits.Load())
+	}
+	if g := genOf(f.s); g != 0 { // nothing local changed
+		t.Errorf("gen %d after a one-click", g)
 	}
 
 	// A transport failure offers the next item as a new preview.
