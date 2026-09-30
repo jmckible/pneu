@@ -86,8 +86,8 @@ boundary: it doesn't prove a click happened in QML, and it doesn't need to.
 - `launch`, from `pneu open`. Queues a sync (R13, below). This is separate
   from the page's own `POST /sync` (`R` and focus), which stays a normal
   browser request.
-- `peers-reload <generation>`, from `pneu peer add|remove` on the server.
-  Answered only after that generation is live (R8).
+- `peers-reload <generation> <hash>`, from `pneu peer add|remove` on the
+  server. Answered only after that generation is live (R8).
 - `agent <situation>` and `update`, from the bar widget via `pneu client
   agent|update` (R1).
 
@@ -965,6 +965,92 @@ Where the code differs from the plan above:
   - Mailto unsubscribes go through the same log, keyed by account, message
     and exactly what the mailto sends: a second preview of the same one is
     the same send, across restarts; `unknown` answers `maybe-sent`.
+
+## As built: step 4
+
+Where the code differs from the plan above, or settles what it left open:
+
+- **Registration waits for the whole handshake.** Go calls
+  `VerifyConnection` *before* it checks the client's CertificateVerify, so
+  at that point the client has shown the paired certificate (which is
+  public) but not proved it holds the key. `VerifyConnection` checks the pin
+  and runs whois; the connection is registered (under the lock a reload
+  takes, the peer checked again) only once the handshake has finished. So
+  the listener does its own handshakes, off the accept loop (at most 32 at
+  once per address, 10s each), and hands net/http only connections that
+  are done and registered. A test shows a paired certificate with the wrong
+  key is never registered.
+- **Which routes the peer listener serves** comes from the table:
+  everything but `Local` routes, so `/theme.css` goes as well as `/open`.
+  `/events` is `Local` (the client answers browsers itself) but also
+  `Upstream`: the client daemon's one upstream stream reads it from the
+  server. `/peer/hello` is `PeerOnly`. It answers `{protocol, name,
+  revision, modified, epoch, gen}`; `name` is the hostname.
+- **`peers-reload <generation> <hash>`**, not just the generation; the ack
+  is `ok <generation> <hash>`. Both ends allow it 5s (`ReloadTimeout`), the
+  daemon's own wait for closing connections 4s. A daemon without a peer
+  listener answers `error peers off`, which the CLI reports as
+  "next start". A removal is acknowledged once the peer's connections have
+  left net/http (`ConnState` closed) **and** every handler on them has
+  returned (an SSE stream, a download blocked on flow control); past 4s it
+  answers an error, and the CLI says pending. A connection stays in the
+  registry until it's finished in both senses, however it closed: a client
+  that started a `/tag` or `/send` and hung up before the removal has a
+  closed connection whose handler still runs (tag writes and sends outlive
+  their request's cancellation), and the reload waits for it too. A reload
+  that timed out leaves them registered, so the next one waits again.
+  HTTP/2's serve loop doesn't wait for its handler goroutines, so a handler
+  that starts after its connection is finished is refused before it runs.
+- **No peer listener without the control socket.** Without it no removal
+  could be acknowledged. The socket starts before the peer server loads
+  `peers.json`, and a reload before `Start` just loads the file, so a
+  `pneu peer add|remove` that races the daemon's start is either answered
+  or finds no socket ("next start") and is loaded at start. A reload never
+  goes back a generation.
+- **CLI.** `pneu peer add --stdin` needs the `peer` block (its port goes in
+  the answer) and tailscaled `Running` (its StableID does too). It refuses
+  this machine's own node and key. Its stdout JSON carries one more field,
+  `applied`: `live`, `next-start` or `pending`; it exits 0 in all three,
+  since the file was written, and the client decides. `remove` exits 1 when
+  pending. No `XDG_RUNTIME_DIR` (an SSH session without pam_systemd) means
+  no socket to ask: pending, not "next start", since a daemon may be
+  running.
+- **Shapes.** Peer names are lowercase DNS labels of at most 32; nodes are
+  alphanumeric, at most 64. The add request is read token by token:
+  exactly the keys `name`, `node`, `origin`, `cert`, lowercase, once each,
+  string values (encoding/json would keep the last of a duplicate and match
+  `Name` to `name`). The certificate, trimmed, must be one PEM block with no
+  headers, starting the input, with one `-----BEGIN ` in all: pem.Decode
+  skips an unreadable block to a later one. `peers.json` is
+  `{generation, hash, peers}`, the hash SHA-256 over the JSON of
+  `{generation, peers}`; a file whose hash doesn't match, or that isn't
+  exactly 0600 and ours, loads as an error: at start that means no peers.
+  The server's key and certificate are one file, `peer/server.pem`, so one
+  link creates both.
+- **Leases.** Each connection has its own timer set to its expiry, so it
+  closes at 60s without a renewal, not at the next sweep. The first lease
+  runs from the handshake's whois, not from registration: a client holding
+  the key could otherwise stall its CertificateVerify up to the 10s
+  handshake deadline and stretch the bound to 70s. A renewal whois
+  that *answers* and fails the predicate closes the connection at once; one
+  that errs or times out leaves it to the timer. Reconcile closes the
+  connections on an address that's gone (all of them when tailscaled isn't
+  `Running`), not only the listener.
+- **LocalAPI.** `GET /localapi/v0/status?peers=false` (`BackendState`,
+  `Self.ID` (the StableID; `NodeID` is the numeric one), `Self.UserID`,
+  `Self.TailscaleIPs`) and `GET /localapi/v0/whois?addr=<ip:port>`
+  (`Node.StableID`, `Node.Addresses` as prefixes, `Node.Tags`,
+  `Node.Sharer`, `UserProfile.ID`; 404 for no match). Checked against
+  tailscale 1.102.4: tailscaled refuses any Host but
+  `local-tailscaled.sock` (403); these GETs don't need `Sec-Tailscale:
+  localapi`, which is sent anyway. `Tags` and `Sharer` are omitted when
+  empty. Answers are capped at 1 MiB. The socket must be root's and a
+  socket (`Lstat`) before every call.
+- **Reauth over the link** (`POST /accounts/{a}/reauth`) already answers
+  `409 reauth-on-server`, ahead of step 8.
+- **Config.** `server` is parsed and kept as written (so `pneu account
+  add` round-trips it) and refused: with `accounts`, as both; alone, as
+  not built yet (step 5).
 
 ## Review status
 

@@ -123,7 +123,7 @@ func (s *Server) renderCompose(w http.ResponseWriter, r *http.Request, status in
 	if data.InReplyTo != "" {
 		title = data.Subject
 	}
-	data.Page = s.page(title, "", s.viewLabel()) // no list or thread to reconcile; labeled all the same
+	data.Page = s.page(r, title, "", s.viewLabel()) // no list or thread to reconcile; labeled all the same
 	data.Accounts = s.composeAccounts(r.Context(), data.Account)
 	// The app's no-referrer policy makes Chromium send "Origin: null" on a
 	// form-navigation POST, which Auth rightly refuses (sandboxed frames send

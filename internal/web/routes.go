@@ -24,8 +24,15 @@ type Route struct {
 	// Handler is the server's handler for the route.
 	Handler func(*Server) http.Handler
 	// Local routes are answered by the client daemon itself, never
-	// forwarded: its own launch, theme and event stream.
+	// forwarded: its own launch, theme and event stream. The peer listener
+	// doesn't serve them, unless Upstream.
 	Local bool
+	// Upstream: a Local route the client daemon itself reads from the
+	// server over the link (/events, its one upstream stream), so the peer
+	// listener serves it; the client still never forwards a browser's.
+	Upstream bool
+	// PeerOnly routes exist only on the peer listener (/peer/hello).
+	PeerOnly bool
 	// Types are the policy classes the route may answer with, each with
 	// the parsed media types allowed under it. anyInert is any type /part
 	// may serve (never an active one; SVG only per Dest).
@@ -109,7 +116,7 @@ var Routes = []Route{
 	{Method: "GET", Pattern: "/static/", Cache: CacheRevalidate,
 		Types:   map[Policy][]string{PolicyData: {"text/css", "text/javascript", "application/javascript", "text/plain"}, PolicyStaticSVG: {"image/svg+xml"}},
 		Handler: func(s *Server) http.Handler { return s.static }},
-	{Method: "GET", Pattern: "/events", Local: true, Cache: CacheNoStore,
+	{Method: "GET", Pattern: "/events", Local: true, Upstream: true, Cache: CacheNoStore,
 		Types: map[Policy][]string{PolicyData: {"text/event-stream", "text/plain"}}, Handler: handler((*Server).events)},
 	{Method: "GET", Pattern: "/theme.css", Local: true, Cache: CacheNoStore,
 		Types: map[Policy][]string{PolicyData: {"text/css", "text/plain"}}, Handler: handler((*Server).theme)},
@@ -143,24 +150,35 @@ var Routes = []Route{
 	{Method: "POST", Pattern: "/accounts/{account}/pull", Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).retryPull)},
 	{Method: "POST", Pattern: "/accounts/{account}/reauth", Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).reauth)},
 	{Method: "POST", Pattern: "/accounts/{account}/reauth/cancel", Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).reauthCancel)},
+	{Method: "GET", Pattern: "/peer/hello", PeerOnly: true, Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).peerHello)},
 }
+
+// onLoopback and onPeer say which listener serves a route.
+func onLoopback(rt *Route) bool { return !rt.PeerOnly }
+func onPeer(rt *Route) bool     { return rt.PeerOnly || !rt.Local || rt.Upstream }
 
 // routeMux builds a ServeMux from the table, each route served by h(route).
 // The client proxy builds its matcher the same way, so matching (escaped
 // segments, {$}, GET-implies-HEAD) is the same code on both sides.
-func routeMux(table []Route, h func(rt *Route) http.Handler) *http.ServeMux {
+func routeMux(table []Route, keep func(rt *Route) bool, h func(rt *Route) http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	for i := range table {
 		rt := &table[i]
-		mux.Handle(rt.Method+" "+rt.Pattern, h(rt))
+		if keep(rt) {
+			mux.Handle(rt.Method+" "+rt.Pattern, h(rt))
+		}
 	}
 	return mux
 }
 
-// serveRoutes is the server's mux: each table handler, told its route so
-// the response gets the route's cache rule and is checked against it.
-func (s *Server) serveRoutes() *http.ServeMux {
-	return routeMux(Routes, func(rt *Route) http.Handler {
+// serveRoutes is the server's loopback mux, and peerRoutes the peer
+// listener's: each table handler, told its route so the response gets the
+// route's cache rule and is checked against it.
+func (s *Server) serveRoutes() *http.ServeMux { return s.routesFor(onLoopback) }
+func (s *Server) peerRoutes() *http.ServeMux  { return s.routesFor(onPeer) }
+
+func (s *Server) routesFor(keep func(*Route) bool) *http.ServeMux {
+	return routeMux(Routes, keep, func(rt *Route) http.Handler {
 		next := rt.Handler(s)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if pw := findPolicyWriter(w); pw != nil {

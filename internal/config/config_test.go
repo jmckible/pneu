@@ -34,3 +34,45 @@ func TestLoad(t *testing.T) {
 		t.Fatal("duplicate names should error")
 	}
 }
+
+func TestPeerAndServer(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.json")
+	acct := `"accounts":[{"name":"a","email":"a@x","notmuchConfig":"/n","gmiDir":"/g"}]`
+	cases := map[string]string{
+		`{` + acct + `}`:                                    "",
+		`{` + acct + `,"peer":{"port":7320}}`:               "",
+		`{` + acct + `,"peer":{"port":0}}`:                  "bad peer port",
+		`{` + acct + `,"peer":{"port":70000}}`:              "bad peer port",
+		`{` + acct + `,"peer":{"port":7317}}`:               "bad peer port",
+		`{` + acct + `,"server":{"ssh":"dell"}}`:            "both accounts and server",
+		`{"server":{"ssh":"dell","node":"n1","port":7320}}`: "isn't built yet",
+	}
+	for body, want := range cases {
+		os.WriteFile(p, []byte(body), 0o600)
+		c, err := Load(p)
+		switch {
+		case want == "" && err != nil:
+			t.Errorf("%s: %v", body, err)
+		case want != "" && (err == nil || !strings.Contains(err.Error(), want)):
+			t.Errorf("%s: %v, want %q", body, err, want)
+		case want == "" && strings.Contains(body, "peer") && (c.Peer == nil || c.Peer.Port != 7320):
+			t.Errorf("%s: peer %+v", body, c.Peer)
+		case want == "" && !strings.Contains(body, "peer") && c.Peer != nil:
+			t.Errorf("%s: peer %+v without a block", body, c.Peer)
+		}
+	}
+	// ReadRaw and Write keep both blocks as written.
+	os.WriteFile(p, []byte(`{"port":7317,"peer":{"port":7320},"server":{"ssh":"dell"}}`), 0o600)
+	raw, err := ReadRaw(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(p, raw); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(p)
+	if !strings.Contains(string(b), `"ssh": "dell"`) || !strings.Contains(string(b), `"port": 7320`) {
+		t.Fatalf("round trip lost a block: %s", b)
+	}
+}

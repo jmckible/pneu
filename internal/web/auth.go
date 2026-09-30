@@ -172,7 +172,9 @@ func (a *Auth) Open(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-// stateDir is $XDG_STATE_HOME/pneu, default ~/.local/state/pneu.
+// StateDir is $XDG_STATE_HOME/pneu, default ~/.local/state/pneu.
+func StateDir() (string, error) { return stateDir() }
+
 func stateDir() (string, error) {
 	dir := os.Getenv("XDG_STATE_HOME")
 	if dir == "" || !filepath.IsAbs(dir) {

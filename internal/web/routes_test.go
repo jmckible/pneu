@@ -242,7 +242,11 @@ func TestRouteTable(t *testing.T) {
 		}
 		seen[key] = true
 		r := httptest.NewRequest(rt.Method, samplePath(rt.Pattern), nil)
-		if _, pat := mux.Handler(r); pat != key {
+		m := mux
+		if rt.PeerOnly {
+			m = s.peerRoutes() // TestPeerRoutes: only there
+		}
+		if _, pat := m.Handler(r); pat != key {
 			t.Errorf("%s: %s matched %q", key, r.URL.Path, pat)
 		}
 		if rt.Handler == nil || len(rt.Types) == 0 || rt.Cache == "" {
@@ -269,6 +273,9 @@ func TestRouteTable(t *testing.T) {
 		}
 		if rt.Local != slices.Contains([]string{"/open", "/theme.css", "/events"}, rt.Pattern) {
 			t.Errorf("%s: Local %v", key, rt.Local)
+		}
+		if rt.Upstream != (rt.Pattern == "/events") || rt.PeerOnly != (rt.Pattern == "/peer/hello") {
+			t.Errorf("%s: Upstream %v, PeerOnly %v", key, rt.Upstream, rt.PeerOnly)
 		}
 	}
 	for _, p := range []string{"/sw.js", "/client/x", "/t/personal", "/part/a/b", "/favicon.ico"} {

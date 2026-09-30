@@ -5,6 +5,7 @@
 //	pneu open [-config path]
 //	pneu gmi [-config path] <account> <gmi args...>
 //	pneu account add|auth|status ...
+//	pneu peer add --stdin | list | remove <name>
 package main
 
 import (
@@ -29,6 +30,8 @@ import (
 	"github.com/jmckible/pneu/internal/control"
 	"github.com/jmckible/pneu/internal/gmi"
 	"github.com/jmckible/pneu/internal/notmuch"
+	"github.com/jmckible/pneu/internal/peer"
+	"github.com/jmckible/pneu/internal/tailscale"
 	"github.com/jmckible/pneu/internal/web"
 )
 
@@ -54,8 +57,10 @@ func main() {
 		err = runGmi(args)
 	case "account":
 		err = account(args)
+	case "peer":
+		err = peerCmd(args)
 	default:
-		err = usageError{fmt.Sprintf("unknown command %q; usage: pneu [serve|open|gmi|account] ...", cmd)}
+		err = usageError{fmt.Sprintf("unknown command %q; usage: pneu [serve|open|gmi|account|peer] ...", cmd)}
 	}
 	if err != nil {
 		log.Print("pneu: ", err)
@@ -214,10 +219,22 @@ func serve(args []string) error {
 	syncDone := make(chan struct{})
 	go func() { syncer.Run(ctx); close(syncDone) }()
 
-	// Before Serve: `pneu open` sends `launch` once HTTP answers.
-	ctl := listenControl(srv)
+	// Before Serve: `pneu open` sends `launch` once HTTP answers. The peer
+	// server exists before the socket, so a `pneu peer add|remove` that
+	// lands while we start is answered, and starts after it: without the
+	// socket no removal could be acknowledged, so no peer listener.
+	ps := newPeerServer(cfg, srv)
+	ctl := listenControl(srv, ps)
 	if ctl != nil {
 		defer ctl.Close() // an early return; Close again is harmless
+	}
+	if ps != nil {
+		if ctl == nil {
+			log.Printf("pneu: no peer listener: it needs the control socket, which acknowledges pneu peer remove")
+		} else {
+			ps.Start()
+			defer ps.Close()
+		}
 	}
 	// Bound, so a launcher that reads the nonce now will find a server.
 	if err := srv.Auth.StartLaunch(launchPath); err != nil {
@@ -240,6 +257,9 @@ func serve(args []string) error {
 	if ctl != nil {
 		ctl.Close() // a stopping server takes no launches
 	}
+	if ps != nil {
+		ps.Close() // peer connections go with the listener
+	}
 	<-statusDone
 	if serveErr != nil {
 		return serveErr
@@ -256,16 +276,47 @@ func serve(args []string) error {
 	return nil
 }
 
+// newPeerServer is the peer listener when the config has a peer block
+// (docs/client.md, "The listener"), not yet started; nil without one, or
+// when its key pair can't be had (logged: the loopback server runs on).
+func newPeerServer(cfg config.Config, srv *web.Server) *peer.Server {
+	if cfg.Peer == nil {
+		return nil
+	}
+	state, err := web.StateDir()
+	if err != nil {
+		log.Printf("pneu: no peer listener: %v", err)
+		return nil
+	}
+	host, _ := os.Hostname()
+	id, err := peer.LoadOrCreateServer(filepath.Join(state, "peer"), host)
+	if err != nil {
+		log.Printf("pneu: no peer listener: %v", err)
+		return nil
+	}
+	return peer.New(peer.Config{
+		API:      tailscale.NewLocal(),
+		Port:     cfg.Peer.Port,
+		Identity: id,
+		Store:    peer.Store{Dir: state},
+		Handler:  func(g *peer.Server) http.Handler { return srv.PeerHandler(g) },
+	})
+}
+
 // listenControl starts the control socket (docs/client.md). Without it the
 // server still runs; `pneu open` then opens the window without its sync
 // and says why.
-func listenControl(srv *web.Server) *control.Server {
+func listenControl(srv *web.Server, ps *peer.Server) *control.Server {
 	path, err := control.SocketPath()
 	if err != nil {
 		log.Printf("pneu: no control socket: %v; pneu open won't sync on launch", err)
 		return nil
 	}
-	ctl, err := control.Listen(path, control.Handler{Launch: srv.Launch})
+	h := control.Handler{Launch: srv.Launch}
+	if ps != nil {
+		h.PeersReload = ps.Reload
+	}
+	ctl, err := control.Listen(path, h)
 	if err != nil {
 		log.Printf("pneu: no control socket: %v; pneu open won't sync on launch", err)
 		return nil

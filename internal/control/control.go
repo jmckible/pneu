@@ -5,7 +5,9 @@
 // SO_PEERCRED and by the socket directory's owner and mode.
 //
 // One request line per connection, one reply line. Commands are a fixed
-// set with no arguments (docs/client.md, "The control socket").
+// set; the only arguments are peers-reload's decimal generation and hex
+// hash, validated to exactly that shape (docs/client.md, "The control
+// socket").
 package control
 
 import (
@@ -22,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -36,6 +39,9 @@ const (
 	Launch Command = "launch"
 	// Status answers the daemon's build and instance (Info).
 	Status Command = "status"
+	// PeersReload, as "peers-reload <generation> <hash>", asks the daemon to
+	// make that generation of peers.json live (ReloadPeers).
+	PeersReload Command = "peers-reload"
 )
 
 const (
@@ -43,6 +49,9 @@ const (
 	MaxLine = 1024
 	// Timeout is each connection's deadline, at both ends.
 	Timeout = 2 * time.Second
+	// ReloadTimeout is peers-reload's, at both ends: the daemon answers once
+	// the generation is live and a removed peer's connections are closed.
+	ReloadTimeout = 5 * time.Second
 )
 
 // ErrNoRuntimeDir: XDG_RUNTIME_DIR isn't set, so there is no socket.
@@ -87,9 +96,12 @@ func Self() Info {
 }
 
 // Handler is what the commands do. Launch must be quick: it runs before the
-// reply, so `pneu open` returns only once the sync is queued.
+// reply, so `pneu open` returns only once the sync is queued. PeersReload
+// (nil: no peer listener) returns once gen is live, or an error; it must
+// return well inside ReloadTimeout.
 type Handler struct {
-	Launch func()
+	Launch      func()
+	PeersReload func(gen uint64, hash string) error
 }
 
 // Server accepts commands on the socket until Close.
@@ -216,12 +228,28 @@ func (s *Server) handle(c *net.UnixConn) {
 	case err != nil:
 		return
 	default:
+		if strings.HasPrefix(line, string(PeersReload)+" ") {
+			c.SetDeadline(time.Now().Add(ReloadTimeout))
+		}
 		reply = s.answer(Command(line))
 	}
 	io.WriteString(c, reply+"\n")
 }
 
 func (s *Server) answer(cmd Command) string {
+	if args, ok := strings.CutPrefix(string(cmd), string(PeersReload)+" "); ok {
+		gen, hash, ok := parseReload(args)
+		switch {
+		case !ok:
+			return "error bad peers-reload"
+		case s.h.PeersReload == nil:
+			return "error " + peersOff
+		}
+		if err := s.h.PeersReload(gen, hash); err != nil {
+			return "error " + oneLine(err.Error())
+		}
+		return reloadAck(gen, hash)
+	}
 	switch cmd {
 	case Launch:
 		if s.h.Launch != nil {
@@ -237,6 +265,122 @@ func (s *Server) answer(cmd Command) string {
 	default:
 		return "error unknown command"
 	}
+}
+
+// peersOff is the reply when the daemon runs no peer listener.
+const peersOff = "peers off"
+
+var (
+	// ErrNotRunning: nothing answers on the socket, so no daemon has a peer
+	// listener up (it won't run one without this socket); the file applies
+	// at the next start.
+	ErrNotRunning = errors.New("control: pneu isn't running")
+	// ErrPeersOff: the daemon runs without a peer listener.
+	ErrPeersOff = errors.New("control: the running pneu has no peer listener")
+)
+
+func reloadAck(gen uint64, hash string) string { return fmt.Sprintf("ok %d %s", gen, hash) }
+
+// parseReload reads "<generation> <hash>": a decimal uint64 with no sign
+// or leading zero, and 64 lowercase hex digits. Nothing else passes.
+func parseReload(args string) (uint64, string, bool) {
+	g, hash, ok := strings.Cut(args, " ")
+	if !ok || !validGen(g) || !ValidHash(hash) {
+		return 0, "", false
+	}
+	gen, err := strconv.ParseUint(g, 10, 64)
+	if err != nil || gen == 0 {
+		return 0, "", false
+	}
+	return gen, hash, true
+}
+
+func validGen(g string) bool {
+	if g == "" || len(g) > 20 || g[0] == '0' {
+		return false
+	}
+	for i := 0; i < len(g); i++ {
+		if g[i] < '0' || g[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// ValidHash reports whether h is 64 lowercase hex digits (a SHA-256).
+func ValidHash(h string) bool {
+	if len(h) != 64 {
+		return false
+	}
+	for i := 0; i < len(h); i++ {
+		if c := h[i]; !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// oneLine keeps an error on the reply's one line, within MaxLine.
+func oneLine(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if r < ' ' || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, s)
+	if len(s) > 512 {
+		s = s[:512]
+	}
+	return s
+}
+
+// ReloadPeers asks the daemon at path to make generation gen (content hash
+// hash) of peers.json live, and waits up to ReloadTimeout for the ack that
+// names both. ErrNotRunning when nothing answers; ErrPeersOff when the
+// daemon runs no peer listener; any other error means the outcome is
+// unknown: pending, never done.
+func ReloadPeers(path string, gen uint64, hash string) error {
+	return reloadPeers(path, gen, hash, os.Getuid())
+}
+
+func reloadPeers(path string, gen uint64, hash string, uid int) error {
+	if gen == 0 || !ValidHash(hash) {
+		return errors.New("control: bad generation or hash")
+	}
+	c, err := net.DialTimeout("unix", path, Timeout)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) {
+			return fmt.Errorf("%w (%v)", ErrNotRunning, err)
+		}
+		return err
+	}
+	defer c.Close()
+	uc := c.(*net.UnixConn)
+	uc.SetDeadline(time.Now().Add(ReloadTimeout))
+	peer, err := peerUID(uc)
+	if err != nil {
+		return fmt.Errorf("control: %w", err)
+	}
+	if peer != uid {
+		return fmt.Errorf("control: %s is answered by uid %d, not us", path, peer)
+	}
+	if _, err := fmt.Fprintf(uc, "%s %d %s\n", PeersReload, gen, hash); err != nil {
+		return err
+	}
+	reply, err := readLine(uc)
+	if err != nil {
+		return fmt.Errorf("control: no acknowledgment: %w", err)
+	}
+	if reply == "error "+peersOff {
+		return ErrPeersOff
+	}
+	if msg, ok := strings.CutPrefix(reply, "error "); ok {
+		return fmt.Errorf("control: peers-reload: %s", msg)
+	}
+	if reply != reloadAck(gen, hash) {
+		return fmt.Errorf("control: peers-reload: acknowledgment %q names another generation", reply)
+	}
+	return nil
 }
 
 var errTooLong = errors.New("control: line too long")

@@ -28,9 +28,11 @@ and build order; this file is the working contract. Read PLAN.md before touching
   launches or focuses the window through `omarchy-launch-or-focus-webapp`
   (pattern `pneu.localhost__open`, the class minus browser prefix and profile);
   `pneu gmi <account> <args>` is the manual lieer run (below);
-  `pneu account add|auth|status` sets an account up (INSTALL.md step 5). All
+  `pneu account add|auth|status` sets an account up (INSTALL.md step 5);
+  `pneu peer add --stdin|list|remove` pairs other machines' clients (below). All
   read `~/.config/pneu/config.json`; there are no built-in accounts, and
-  `pneu account add` is what writes it.
+  `pneu account add` is what writes it. A config with both `accounts` and
+  `server` (a client's, docs/client.md) is refused.
 
 ## Code rules
 
@@ -124,11 +126,42 @@ and build order; this file is the working contract. Read PLAN.md before touching
 - The control socket, `$XDG_RUNTIME_DIR/pneu/control` (`internal/control`,
   docs/client.md), is the only way a process outside the browser talks to
   the server, and no page can reach it: one command line per connection
-  from a fixed set (`launch`, `status`), both ends checking `SO_PEERCRED`
+  from a fixed set (`launch`, `status`, `peers-reload <gen> <hash>`, whose
+  only arguments are a decimal generation and 64 hex digits, validated
+  before any handler runs), both ends checking `SO_PEERCRED`
   for our uid, the directory 0700 and ours (`Lstat`, no symlink) or the
   server runs without it. `/open` starts no sync. A throwaway server
   (screenshots, the fixture server) sets its own `XDG_RUNTIME_DIR`, or a
   real `pneu open` could launch it.
+- The peer listener (`internal/peer`, docs/client.md "The link"; only with
+  `"peer": {"port": N}` in the config, and only with the control socket up)
+  binds this node's own tailnet addresses from tailscaled's LocalAPI
+  (`internal/tailscale`: the fixed root-owned socket, never a path from the
+  environment, 2s per call), reconciled every 10s, never a wildcard. TLS
+  1.3, HTTP/2 only, `RequireAnyClientCert`, no session tickets; the pin (SPKI
+  SHA-256 in the live generation of `peers.json`) and the whois predicate are
+  checked in `VerifyConnection`, and a connection is registered only after
+  its full handshake (Go checks the client's CertificateVerify after
+  VerifyConnection), under the lock a reload takes. Each connection holds a
+  60s whois lease, renewed by a 10s sweep whatever it carries, and is closed
+  with all its streams when the lease lapses or whois refuses. Every request
+  goes through `web.PeerHandler`: the peer is looked up afresh
+  (`Identify`), Host must be a listener address, there's no cookie, Origin
+  or nonce, `Page.Origin` is the peer record's (`Server.origin`, never a
+  header), and every answer carries `Pneu-Protocol`. Routes come from the
+  table: `Local` ones aren't served there unless `Upstream` (`/events`);
+  `PeerOnly` (`/peer/hello`) exists only there. Logs name peers and nodes,
+  never certificates or pins.
+- `peers.json` (`$XDG_STATE_HOME/pneu`, 0600, O_NOFOLLOW, a generation and
+  a hash over its content) is written only by `pneu peer add|remove` under
+  an flock on `peers.lock`, a file never replaced (N8), with temp + fsync +
+  rename + fsync dir. They hold the lock until the daemon acknowledges
+  (`control.ReloadPeers`, 5s) naming generation and hash; a removal is
+  acknowledged only once that peer's connections are closed and their
+  handlers returned, including connections that closed before it (a
+  connection leaves the registry only when finished). No daemon: "applies at next start". No ack: "pending",
+  never "done". The server's key pair is `peer/server.pem` (dir exactly
+  0700, file 0600, both checked on every load).
 - `~/.local/state/pneu/status.json` (0600, tmp+rename) is the bar widget's
   only input: unread inbox threads, five sender first names, per-account sync
   health, onboarding `state` and first-pull `progress`, `running`, `updated`. The server rewrites it at startup, after every

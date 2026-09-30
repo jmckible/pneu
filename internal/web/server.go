@@ -188,9 +188,11 @@ func (p Page) Nav() []NavLink {
 	return out
 }
 
-// page is base.html's data; at is the label read before the page's query.
-func (s *Server) page(title, query string, at viewLabel) Page {
-	return Page{Origin: s.Auth.Origin, Title: title, Query: query, Accounts: s.accountsJSON(), SyncEvery: int(s.SyncInterval / time.Second), Label: at}
+// page is base.html's data for r; at is the label read before the page's
+// query. Origin is the request's (Server.origin): a peer's pages run in the
+// client's origin.
+func (s *Server) page(r *http.Request, title, query string, at viewLabel) Page {
+	return Page{Origin: s.origin(r), Title: title, Query: query, Accounts: s.accountsJSON(), SyncEvery: int(s.SyncInterval / time.Second), Label: at}
 }
 
 func (s *Server) render(w http.ResponseWriter, status int, page string, data any) {

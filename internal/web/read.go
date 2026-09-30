@@ -99,7 +99,7 @@ func (s *Server) list(view, title, fixed string) http.HandlerFunc {
 			return
 		}
 
-		data := listPage{Page: s.page(title, userQuery, s.viewLabel()), Total: -1}
+		data := listPage{Page: s.page(r, title, userQuery, s.viewLabel()), Total: -1}
 		data.View = view
 		status := http.StatusOK
 		if strings.TrimSpace(query) != "" {
@@ -561,7 +561,7 @@ func (s *Server) thread(w http.ResponseWriter, r *http.Request) {
 		data.UnreadIDs = strings.Join(unread, " ")
 	}
 	data.MsgIDs = strings.Join(shown, " ")
-	data.Page = s.page(data.Subject, "", at)
+	data.Page = s.page(r, data.Subject, "", at)
 	s.render(w, http.StatusOK, "thread", data)
 }
 

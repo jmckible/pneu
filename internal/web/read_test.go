@@ -606,7 +606,7 @@ func TestHoldImages(t *testing.T) {
 			t.Errorf("%v: HoldImages = %v", c.tags, v.HoldImages)
 		}
 		w := httptest.NewRecorder()
-		s.render(w, http.StatusOK, "thread", threadPage{Page: s.page("x", "", viewLabel{}), Account: acct.Name, Messages: []messageView{v}})
+		s.render(w, http.StatusOK, "thread", threadPage{Page: s.page(httptest.NewRequest("GET", "/", nil), "x", "", viewLabel{}), Account: acct.Name, Messages: []messageView{v}})
 		if got := strings.Contains(w.Body.String(), ` data-remote-images="click"></div>`); got != c.hold {
 			t.Errorf("%v: data-remote-images present = %v", c.tags, got)
 		}

@@ -179,6 +179,12 @@ type Reauther interface {
 // and answer {url} for the page to open. Refused unless the account's token
 // has failed (gmi.ErrNoReauth).
 func (s *Server) reauth(w http.ResponseWriter, r *http.Request) {
+	// Consent waits on this machine's localhost:8080, which a peer's
+	// browser can't reach: `pneu account auth` on the server does it.
+	if _, ok := peerOf(r); ok {
+		tagFail(w, http.StatusConflict, "reauth-on-server")
+		return
+	}
 	acct, ok := s.account(r)
 	if !ok {
 		tagFail(w, http.StatusNotFound, "unknown account")

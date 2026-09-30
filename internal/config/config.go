@@ -22,6 +22,20 @@ type Account struct {
 type Config struct {
 	Port     int       `json:"port"`
 	Accounts []Account `json:"accounts"`
+	// Peer turns on the peer listener (docs/client.md, "The listener"):
+	// other machines' pneu clients reach this archive over the tailnet.
+	// Absent, nothing listens beyond loopback.
+	Peer *Peer `json:"peer,omitempty"`
+	// Server is a client's link to its server (build step 5). Kept as
+	// written so `pneu account add` round-trips it; Load refuses it for now,
+	// and always alongside accounts: a machine holds an archive or is a
+	// window onto one, never both.
+	Server json.RawMessage `json:"server,omitempty"`
+}
+
+// Peer is the peer listener's block.
+type Peer struct {
+	Port int `json:"port"`
 }
 
 // DefaultPort is used when the config names none.
@@ -118,6 +132,17 @@ func ValidName(name string) bool {
 func (c Config) normalize() (Config, error) {
 	if c.Port == 0 {
 		c.Port = DefaultPort
+	}
+	if len(c.Server) > 0 {
+		if len(c.Accounts) > 0 {
+			return Config{}, errors.New("config: both accounts and server; a machine is a server (accounts) or a client (server), not both")
+		}
+		return Config{}, errors.New("config: client mode (server) isn't built yet")
+	}
+	if c.Peer != nil {
+		if c.Peer.Port < 1 || c.Peer.Port > 65535 || c.Peer.Port == c.Port {
+			return Config{}, fmt.Errorf("config: bad peer port %d", c.Peer.Port)
+		}
 	}
 	if len(c.Accounts) == 0 {
 		return Config{}, errors.New("config: no accounts")

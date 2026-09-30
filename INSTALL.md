@@ -448,6 +448,13 @@ starts. After steps 3–5 for a new account, restart it:
 `systemctl --user restart pneu.service`. `pneu account add` reminds you
 when a server is running.
 
+**Other machines (optional).** A `"peer": {"port": 7320}` block in
+`config.json` turns on the peer listener, through which paired pneu clients
+on your tailnet reach this archive (docs/client.md). It binds only this
+machine's Tailscale addresses, admits only keys paired with `pneu peer add`
+(listed and revoked with `pneu peer list|remove`), and doesn't exist
+without the block. Client mode itself comes later; until then, leave it out.
+
 The server downloads each new account's mail itself; there is no separate
 first-pull step.
 
