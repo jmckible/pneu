@@ -108,7 +108,7 @@ type Keys struct {
 func NewKeys(t testing.TB) Keys {
 	t.Helper()
 	sdir := t.TempDir()
-	srv, err := peer.LoadOrCreateServer(filepath.Join(sdir, "peer"), "dell")
+	srv, err := peer.LoadOrCreateServer(filepath.Join(sdir, "peer"), "server")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func NewKeys(t testing.TB) Keys {
 	if _, err := peer.LoadOrCreateIdentity(cdir, peer.ClientKeyFile, "pneu mac"); err != nil {
 		t.Fatal(err)
 	}
-	pin := link.Pin{Name: "mac", SSH: "dell", Node: ServerNode, Port: 7320, SPKI: srv.SPKI, Cert: srv.PEM, Protocol: web.Protocol, Paired: time.Now().UTC().Truncate(time.Second)}
+	pin := link.Pin{Name: "mac", SSH: "server", Node: ServerNode, Port: 7320, SPKI: srv.SPKI, Cert: srv.PEM, Protocol: web.Protocol, Paired: time.Now().UTC().Truncate(time.Second)}
 	if err := link.WritePin(cdir, pin); err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ type Upstream struct {
 func DefaultHello(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(web.ProtocolHeader, strconv.Itoa(web.Protocol))
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"protocol":` + strconv.Itoa(web.Protocol) + `,"name":"dell","revision":"0123456789abcdef0123456789abcdef01234567","modified":false,"epoch":"abcd","gen":3,"accounts":[{"name":"personal","email":"me@example.com"}]}`))
+	w.Write([]byte(`{"protocol":` + strconv.Itoa(web.Protocol) + `,"name":"server","revision":"0123456789abcdef0123456789abcdef01234567","modified":false,"epoch":"abcd","gen":3,"accounts":[{"name":"personal","email":"me@example.com"}]}`))
 }
 
 // StartUpstream serves on 127.0.0.1 with id's key.

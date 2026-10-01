@@ -66,7 +66,7 @@ func testPeerEnv(t *testing.T) (*peerEnv, *bytes.Buffer, *bytes.Buffer) {
 		cfg:   config.Config{Port: 7317, Peer: &config.Peer{Port: 7320}},
 		store: peer.Store{Dir: state}, keyDir: filepath.Join(state, "peer"),
 		api: fakeTS{tailscale.Running}, socket: filepath.Join(sockBase, "pneu", "control"),
-		host: "dell", now: time.Now, stdout: &out, stderr: &errb,
+		host: "server", now: time.Now, stdout: &out, stderr: &errb,
 	}, &out, &errb
 }
 
@@ -102,7 +102,7 @@ func TestPeerAdd(t *testing.T) {
 	if err := dec.Decode(&res); err != nil || dec.More() {
 		t.Fatalf("stdout %q: %v", out, err)
 	}
-	id, err := peer.LoadOrCreateServer(e.keyDir, "dell")
+	id, err := peer.LoadOrCreateServer(e.keyDir, "server")
 	if err != nil {
 		t.Fatal(err)
 	}

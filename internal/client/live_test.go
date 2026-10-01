@@ -122,7 +122,7 @@ func (p *page) handshaken() localHello {
 // ownLinkUp is the daemon's own `link` saying up: a page may see the
 // link's arrival after it subscribed.
 func ownLinkUp(ev sseEvent) bool {
-	return ev.name == "link" && bytes.Contains(ev.data, []byte(`"state":"up"`)) && bytes.Contains(ev.data, []byte(`"server":"dell"`))
+	return ev.name == "link" && bytes.Contains(ev.data, []byte(`"state":"up"`)) && bytes.Contains(ev.data, []byte(`"server":"server"`))
 }
 
 func block(name, data string) string { return "event: " + name + "\ndata: " + data + "\n\n" }
@@ -467,7 +467,7 @@ func TestLinkEvents(t *testing.T) {
 	}
 	down := p.until("link", func(ev sseEvent) bool { return ev.name == "hello" || ownLinkUp(ev) })
 	var lv LinkView
-	if err := json.Unmarshal(down.data, &lv); err != nil || lv.State != "down" || lv.Reason == nil || *lv.Reason != "refused" || lv.Server != "dell" {
+	if err := json.Unmarshal(down.data, &lv); err != nil || lv.State != "down" || lv.Reason == nil || *lv.Reason != "refused" || lv.Server != "server" {
 		t.Fatalf("down %s", down.data)
 	}
 	u.SetHello(linktest.DefaultHello)
@@ -564,7 +564,7 @@ func TestClientEndpoints(t *testing.T) {
 	resp, body := r.get("/client/link", nil)
 	var lv LinkView
 	if resp.StatusCode != 200 || resp.Header.Get(web.PolicyHeader) != "data" || json.Unmarshal([]byte(body), &lv) != nil ||
-		lv.State != "up" || lv.Reason != nil || lv.Server != "dell" || lv.Revision.Server == "" || lv.Since == "" {
+		lv.State != "up" || lv.Reason != nil || lv.Server != "server" || lv.Revision.Server == "" || lv.Since == "" {
 		t.Fatalf("/client/link: %d %v %s", resp.StatusCode, resp.Header, body)
 	}
 	before := u.Requests.Load()

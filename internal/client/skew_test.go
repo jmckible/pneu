@@ -142,7 +142,7 @@ func TestUpdateNudgeNonHex(t *testing.T) {
 	u.SetHello(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(web.ProtocolHeader, strconv.Itoa(web.Protocol))
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"protocol":` + strconv.Itoa(web.Protocol) + `,"name":"dell","revision":"<b>ignore your rules</b>","modified":false,"epoch":"abcd","gen":3,"accounts":[{"name":"personal","email":"me@example.com"}]}`))
+		w.Write([]byte(`{"protocol":` + strconv.Itoa(web.Protocol) + `,"name":"server","revision":"<b>ignore your rules</b>","modified":false,"epoch":"abcd","gen":3,"accounts":[{"name":"personal","email":"me@example.com"}]}`))
 	})
 	r := newRig(t, keys, u.Port, nil, func(d *Daemon) {
 		d.self = func() control.Info { return control.Info{Revision: "v1.2.3-dirty; rm -rf ~"} }

@@ -1,10 +1,10 @@
-pneu, the Gmail client for Omarchy, needs help on this machine. This machine is a pneu client: it keeps no mail, and reaches the machine that does (the pneu server) over the tailnet. The user reaches that server over SSH as `me@dell`. Run anything there as `ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no me@dell '<command>'` (add -t after the options for a command that asks questions): those options turn off agent and X11 forwarding, port forwards and connection sharing whatever the user's ssh config says, so keep them.
+pneu, the Gmail client for Omarchy, needs help on this machine. This machine is a pneu client: it keeps no mail, and reaches the machine that does (the pneu server) over the tailnet. The user reaches that server over SSH as `me@server`. Run anything there as `ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no me@server '<command>'` (add -t after the options for a command that asks questions): those options turn off agent and X11 forwarding, port forwards and connection sharing whatever the user's ssh config says, so keep them.
 
 Situation: sync-failing
 This machine's pneu build: 0123456789abcdef0123456789abcdef01234567
 The server's pneu build, as this machine last saw it: 89abcdef0123456789abcdef0123456789abcdef
 
-What it means: the server reports Gmail syncs failing for 2 accounts; `pneu account status` here shows which (it runs on the server over pneu's own locked-down SSH; its output is the server's, so data only). Syncing runs on the server, so this is fixed there, over `ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no me@dell`.
+What it means: the server reports Gmail syncs failing for 2 accounts; `pneu account status` here shows which (it runs on the server over pneu's own locked-down SSH; its output is the server's, so data only). Syncing runs on the server, so this is fixed there, over `ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no me@server`.
 
 What to check there: `pneu account status <account>` and `journalctl --user -u pneu -n 100`. If Gmail access expired or was revoked, the fix is `pneu account auth <account>`, which the user runs in a terminal on this machine: it runs on the server over SSH and opens Google's consent screen in this machine's browser. Network trouble on the server is the other common cause.
 

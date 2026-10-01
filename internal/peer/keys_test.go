@@ -20,7 +20,7 @@ import (
 
 func TestServerIdentity(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state", "peer")
-	a, err := LoadOrCreateServer(dir, "dell")
+	a, err := LoadOrCreateServer(dir, "server")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestServerIdentity(t *testing.T) {
 	if fi.Mode().Perm() != 0o700 || kf.Mode().Perm() != 0o600 {
 		t.Fatalf("modes %v %v", fi.Mode(), kf.Mode())
 	}
-	b, err := LoadOrCreateServer(dir, "dell")
+	b, err := LoadOrCreateServer(dir, "server")
 	if err != nil || b.SPKI != a.SPKI || b.PEM != a.PEM {
 		t.Fatalf("second load made a new key: %v", err)
 	}
@@ -43,16 +43,16 @@ func TestServerIdentity(t *testing.T) {
 
 	// Checked on every load: the file's mode, the directory's.
 	os.Chmod(filepath.Join(dir, keyFile), 0o644)
-	if _, err := LoadOrCreateServer(dir, "dell"); err == nil {
+	if _, err := LoadOrCreateServer(dir, "server"); err == nil {
 		t.Fatal("0644 key loaded")
 	}
 	os.Chmod(filepath.Join(dir, keyFile), 0o600)
 	os.Chmod(dir, 0o750)
-	if _, err := LoadOrCreateServer(dir, "dell"); err == nil || !strings.Contains(err.Error(), "0700") {
+	if _, err := LoadOrCreateServer(dir, "server"); err == nil || !strings.Contains(err.Error(), "0700") {
 		t.Fatalf("0750 dir: %v", err)
 	}
 	os.Chmod(dir, 0o700|fs.ModeSticky)
-	if _, err := LoadOrCreateServer(dir, "dell"); err == nil {
+	if _, err := LoadOrCreateServer(dir, "server"); err == nil {
 		t.Fatal("sticky dir accepted")
 	}
 	os.Chmod(dir, 0o700)
@@ -60,13 +60,13 @@ func TestServerIdentity(t *testing.T) {
 	// A symlinked directory or key file is refused.
 	link := filepath.Join(filepath.Dir(dir), "peerlink")
 	os.Symlink(dir, link)
-	if _, err := LoadOrCreateServer(link, "dell"); err == nil || !strings.Contains(err.Error(), "not a directory") {
+	if _, err := LoadOrCreateServer(link, "server"); err == nil || !strings.Contains(err.Error(), "not a directory") {
 		t.Fatalf("symlinked dir: %v", err)
 	}
 	d2 := filepath.Join(t.TempDir(), "peer")
 	PrepareDir(d2)
 	os.Symlink(filepath.Join(dir, keyFile), filepath.Join(d2, keyFile))
-	if _, err := LoadOrCreateServer(d2, "dell"); err == nil {
+	if _, err := LoadOrCreateServer(d2, "server"); err == nil {
 		t.Fatal("symlinked key file loaded")
 	}
 }

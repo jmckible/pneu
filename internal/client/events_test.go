@@ -79,7 +79,7 @@ func TestHostileAccountName(t *testing.T) {
 	u.SetHello(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(web.ProtocolHeader, strconv.Itoa(web.Protocol))
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"protocol":1,"name":"dell","epoch":"abcd","gen":3,"accounts":[{"name":"personal","email":"me@example.com"},{"name":"pay‮latot","email":"x@example.com"}]}`)
+		io.WriteString(w, `{"protocol":1,"name":"server","epoch":"abcd","gen":3,"accounts":[{"name":"personal","email":"me@example.com"},{"name":"pay‮latot","email":"x@example.com"}]}`)
 	})
 	r := newRig(t, keys, u.Port, nil)
 	waitState(t, r.link, link.Protocol)

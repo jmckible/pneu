@@ -17,7 +17,7 @@ import (
 const statusJSON = `{
 	"Version": "1.102.4", "TUN": true, "BackendState": "Running", "HaveNodeKey": true,
 	"TailscaleIPs": ["100.121.74.67", "fd7a:115c:a1e0::2a01:4a5c"],
-	"Self": {"ID": "nxzXSZ2TfK11CNTRL", "NodeID": 2390029678764129, "HostName": "dell",
+	"Self": {"ID": "nxzXSZ2TfK11CNTRL", "NodeID": 2390029678764129, "HostName": "server",
 		"UserID": 131792011117475, "TailscaleIPs": ["100.121.74.67", "fd7a:115c:a1e0::2a01:4a5c"],
 		"Online": true, "CapMap": {"funnel": []}},
 	"User": {"131792011117475": {"ID": 131792011117475, "LoginName": "a@b.example"}}
@@ -164,7 +164,7 @@ const peersJSON = `{
 	"BackendState": "Running",
 	"Self": {"ID": "nMAC1CNTRL", "NodeID": 7, "UserID": 131792011117475, "TailscaleIPs": ["100.91.195.0"]},
 	"Peer": {
-		"nodekey:0378": {"ID": "nxzXSZ2TfK11CNTRL", "NodeID": 2390029678764129, "HostName": "dell", "DNSName": "dell.x.ts.net.",
+		"nodekey:0378": {"ID": "nxzXSZ2TfK11CNTRL", "NodeID": 2390029678764129, "HostName": "server", "DNSName": "server.x.ts.net.",
 			"UserID": 131792011117475, "TailscaleIPs": ["100.121.74.67", "fd7a:115c:a1e0::2a01:4a5c"],
 			"Online": true, "LastSeen": "0001-01-01T00:00:00Z", "Active": true},
 		"nodekey:a1b2": {"ID": "nTHnBkfDVn11CNTRL", "UserID": 7909936612895534, "Tags": ["tag:ingress"], "ShareeNode": true,
@@ -183,9 +183,9 @@ func TestLocalStatusPeers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dell, off := st.Peer["nodekey:0378"], st.Peer["nodekey:a1b2"]
-	if st.Self.StableID != "nMAC1CNTRL" || len(st.Peer) != 2 || dell.StableID != "nxzXSZ2TfK11CNTRL" || !dell.Online ||
-		len(dell.TailscaleIPs) != 2 || dell.TailscaleIPs[0] != netip.MustParseAddr("100.121.74.67") ||
+	server, off := st.Peer["nodekey:0378"], st.Peer["nodekey:a1b2"]
+	if st.Self.StableID != "nMAC1CNTRL" || len(st.Peer) != 2 || server.StableID != "nxzXSZ2TfK11CNTRL" || !server.Online ||
+		len(server.TailscaleIPs) != 2 || server.TailscaleIPs[0] != netip.MustParseAddr("100.121.74.67") ||
 		off.Online || off.LastSeen.IsZero() {
 		t.Fatalf("status %+v", st)
 	}

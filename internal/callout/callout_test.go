@@ -103,7 +103,7 @@ func TestPromptGolden(t *testing.T) {
 		cases["client-"+string(c)] = struct {
 			code Code
 			f    Facts
-		}{c, Facts{Client: true, Daemon: true, Link: string(c), Revision: rev, ServerRevision: remote, SSH: "me@dell", Failing: []string{"work", "personal"}}}
+		}{c, Facts{Client: true, Daemon: true, Link: string(c), Revision: rev, ServerRevision: remote, SSH: "me@server", Failing: []string{"work", "personal"}}}
 	}
 	for name, u := range map[string]struct {
 		code   Code
@@ -112,7 +112,7 @@ func TestPromptGolden(t *testing.T) {
 		cases[name] = struct {
 			code Code
 			f    Facts
-		}{u.code, Facts{Client: true, Daemon: true, Link: "up", Revision: rev, ServerRevision: remote, SSH: "me@dell", Update: u.update}}
+		}{u.code, Facts{Client: true, Daemon: true, Link: "up", Revision: rev, ServerRevision: remote, SSH: "me@server", Update: u.update}}
 	}
 	cases["server-sync-failing"] = struct {
 		code Code
@@ -121,7 +121,7 @@ func TestPromptGolden(t *testing.T) {
 	cases["client-reauth"] = struct {
 		code Code
 		f    Facts
-	}{Reauth, Facts{Client: true, Daemon: true, Link: "up", Revision: rev, ServerRevision: remote, SSH: "me@dell", Failing: []string{"work", "personal"}, Reauth: 1}}
+	}{Reauth, Facts{Client: true, Daemon: true, Link: "up", Revision: rev, ServerRevision: remote, SSH: "me@server", Failing: []string{"work", "personal"}, Reauth: 1}}
 	cases["server-reauth"] = struct {
 		code Code
 		f    Facts
@@ -175,7 +175,7 @@ func TestPromptHostile(t *testing.T) {
 	}
 	for _, code := range []Code{Unreachable, TailscaleDown, NodeOffline, NodeMismatch, Refused, PinMismatch, NotPaired, Protocol, SyncFailing, UpdateClient, UpdateServer, Reauth} {
 		for _, h := range hostile {
-			f := Facts{Client: true, Daemon: true, Link: string(code), Revision: h, ServerRevision: h, SSH: "dell", Failing: []string{h, "zebra7"}, Update: h, Reauth: 1}
+			f := Facts{Client: true, Daemon: true, Link: string(code), Revision: h, ServerRevision: h, SSH: "server", Failing: []string{h, "zebra7"}, Update: h, Reauth: 1}
 			got, err := Prompt(code, f)
 			if err != nil {
 				t.Fatal(err)
@@ -212,7 +212,7 @@ func TestPromptRefusals(t *testing.T) {
 	if _, err := Prompt(Refused, Facts{Client: true, SSH: "-oProxyCommand=x"}); err == nil {
 		t.Error("a bad ssh target made a prompt")
 	}
-	if _, err := Prompt(Code("made-up"), Facts{Client: true, SSH: "dell"}); err == nil {
+	if _, err := Prompt(Code("made-up"), Facts{Client: true, SSH: "server"}); err == nil {
 		t.Error("an unknown code made a prompt")
 	}
 }
@@ -220,11 +220,11 @@ func TestPromptRefusals(t *testing.T) {
 // A target with anything but [A-Za-z0-9@._:-] is shell-quoted in the
 // commands the prompt shows.
 func TestPromptQuotesTarget(t *testing.T) {
-	got, err := Prompt(Refused, Facts{Client: true, Daemon: true, Link: "refused", SSH: "me@dell;x"})
+	got, err := Prompt(Refused, Facts{Client: true, Daemon: true, Link: "refused", SSH: "me@server;x"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, "`"+config.SSHHint("me@dell;x", false)+"`") || !strings.Contains(got, "PermitLocalCommand=no 'me@dell;x'`") || strings.Contains(got, "me@dell;x ") {
+	if !strings.Contains(got, "`"+config.SSHHint("me@server;x", false)+"`") || !strings.Contains(got, "PermitLocalCommand=no 'me@server;x'`") || strings.Contains(got, "me@server;x ") {
 		t.Errorf("%s", got)
 	}
 }

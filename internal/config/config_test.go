@@ -45,13 +45,13 @@ func TestPeerAndServer(t *testing.T) {
 		`{` + acct + `,"peer":{"port":0}}`:                                       "bad peer port",
 		`{` + acct + `,"peer":{"port":70000}}`:                                   "bad peer port",
 		`{` + acct + `,"peer":{"port":7317}}`:                                    "bad peer port",
-		`{` + acct + `,"server":{"ssh":"dell"}}`:                                 "both accounts and server",
-		`{"server":{"ssh":"dell","node":"n1","port":7320}}`:                      "",
-		`{"server":{"ssh":"dell","node":"n1","port":7320},"peer":{"port":7321}}`: "both peer and server",
+		`{` + acct + `,"server":{"ssh":"server"}}`:                                 "both accounts and server",
+		`{"server":{"ssh":"server","node":"n1","port":7320}}`:                      "",
+		`{"server":{"ssh":"server","node":"n1","port":7320},"peer":{"port":7321}}`: "both peer and server",
 		`{"server":{"ssh":"-oProxyCommand=x","node":"n1","port":7320}}`:          "bad ssh target",
 		`{"server":{"ssh":"a b","node":"n1","port":7320}}`:                       "bad ssh target",
-		`{"server":{"ssh":"dell","node":"n-1","port":7320}}`:                     "bad node",
-		`{"server":{"ssh":"dell","node":"n1","port":0}}`:                         "bad port",
+		`{"server":{"ssh":"server","node":"n-1","port":7320}}`:                     "bad node",
+		`{"server":{"ssh":"server","node":"n1","port":0}}`:                         "bad port",
 	}
 	for body, want := range cases {
 		os.WriteFile(p, []byte(body), 0o600)
@@ -70,7 +70,7 @@ func TestPeerAndServer(t *testing.T) {
 		}
 	}
 	// ReadRaw and Write keep both blocks as written.
-	os.WriteFile(p, []byte(`{"port":7317,"peer":{"port":7320},"server":{"ssh":"dell"}}`), 0o600)
+	os.WriteFile(p, []byte(`{"port":7317,"peer":{"port":7320},"server":{"ssh":"server"}}`), 0o600)
 	raw, err := ReadRaw(p)
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestPeerAndServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(p)
-	if !strings.Contains(string(b), `"ssh": "dell"`) || !strings.Contains(string(b), `"port": 7320`) {
+	if !strings.Contains(string(b), `"ssh": "server"`) || !strings.Contains(string(b), `"port": 7320`) {
 		t.Fatalf("round trip lost a block: %s", b)
 	}
 }
@@ -99,7 +99,7 @@ func TestValidName(t *testing.T) {
 
 func TestShellWord(t *testing.T) {
 	for in, want := range map[string]string{
-		"dell": "dell", "me@dell.ts.net": "me@dell.ts.net", "host:22": "host:22",
+		"server": "server", "me@server.ts.net": "me@server.ts.net", "host:22": "host:22",
 		"a b": "'a b'", "$(id)": "'$(id)'", "it's": `'it'\''s'`, "x;y": "'x;y'",
 	} {
 		if got := ShellWord(in); got != want {

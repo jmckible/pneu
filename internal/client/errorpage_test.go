@@ -20,18 +20,18 @@ var navigate = map[string]string{"Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest":
 // trust the new key, and doesn't claim to be retrying.
 func TestExplain(t *testing.T) {
 	want := map[link.Reason][]string{
-		link.Starting:      {"Connecting to dell"},
+		link.Starting:      {"Connecting to server"},
 		link.TailscaleDown: {"Tailscale is off", "sudo tailscale up", "Fix with agent"},
-		link.NodeOffline:   {"dell is offline", "Fix with agent"},
+		link.NodeOffline:   {"server is offline", "Fix with agent"},
 		link.NodeMismatch:  {"another machine", "Fix with agent"},
-		link.Refused:       {"isn't answering", "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no dell systemctl --user status pneu", "Fix with agent"},
-		link.PinMismatch:   {"identity changed", "pneu client unpair", "pneu client pair dell", "Fix with agent", "Check again", "Not retrying"},
-		link.NotPaired:     {"doesn't know this machine", "pneu client unpair", "pneu client pair dell"},
-		link.Protocol:      {"different versions", "Update pneu", "Update dell"},
+		link.Refused:       {"isn't answering", "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no server systemctl --user status pneu", "Fix with agent"},
+		link.PinMismatch:   {"identity changed", "pneu client unpair", "pneu client pair server", "Fix with agent", "Check again", "Not retrying"},
+		link.NotPaired:     {"doesn't know this machine", "pneu client unpair", "pneu client pair server"},
+		link.Protocol:      {"different versions", "Update pneu", "Update server"},
 	}
 	for reason, words := range want {
 		var b bytes.Buffer
-		if err := errorTmpl.Execute(&b, explain(link.State{Reason: reason, Since: time.Now()}, "dell")); err != nil {
+		if err := errorTmpl.Execute(&b, explain(link.State{Reason: reason, Since: time.Now()}, "server")); err != nil {
 			t.Fatal(err)
 		}
 		page := b.String()
@@ -139,7 +139,7 @@ func TestSendPage(t *testing.T) {
 	form := map[string]string{"Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
 	resp, body := r.do(r.req("POST", "/send", "message_id=x", form))
 	if resp.StatusCode != 503 || resp.Header.Get(LinkHeader) != NotSent || resp.Header.Get(web.PolicyHeader) != "compose" ||
-		!strings.Contains(body, "Not sent: can&#39;t reach dell") || !strings.Contains(body, "draft is kept") ||
+		!strings.Contains(body, "Not sent: can&#39;t reach server") || !strings.Contains(body, "draft is kept") ||
 		!strings.Contains(body, `data-kind="send"`) || !strings.Contains(body, "Back to the draft") {
 		t.Fatalf("not-sent: %d %v\n%s", resp.StatusCode, resp.Header, body)
 	}

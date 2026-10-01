@@ -77,7 +77,7 @@ func TestUp(t *testing.T) {
 	l := start(t, linktest.NewAPI(), keys, u.Port, nil)
 	waitReason(t, l, link.Up)
 	h := l.Hello()
-	if h == nil || h.Name != "dell" || h.Epoch != "abcd" || h.Gen != 3 || len(h.Revision) != 40 {
+	if h == nil || h.Name != "server" || h.Epoch != "abcd" || h.Gen != 3 || len(h.Revision) != 40 {
 		t.Fatalf("hello %+v", h)
 	}
 	if e, ok := l.Email("personal"); !ok || e != "me@example.com" {

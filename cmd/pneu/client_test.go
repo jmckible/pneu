@@ -71,7 +71,7 @@ func serverAnswer(t *testing.T, id peer.Identity, name, applied string, protocol
 
 func serverID(t *testing.T) peer.Identity {
 	t.Helper()
-	id, err := peer.LoadOrCreateServer(filepath.Join(t.TempDir(), "peer"), "dell")
+	id, err := peer.LoadOrCreateServer(filepath.Join(t.TempDir(), "peer"), "server")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,9 +95,9 @@ func testClientEnv(t *testing.T, ssh string) (*clientEnv, *bytes.Buffer, *bytes.
 
 func TestClientPair(t *testing.T) {
 	srv := serverID(t)
-	bin, stdin, _ := fakeSSH(t, "dell", serverAnswer(t, srv, "mac", "live", web.Protocol), 0)
+	bin, stdin, _ := fakeSSH(t, "server", serverAnswer(t, srv, "mac", "live", web.Protocol), 0)
 	e, out, errb := testClientEnv(t, bin)
-	if err := e.pair("dell", ""); err != nil {
+	if err := e.pair("server", ""); err != nil {
 		t.Fatalf("%v\nstderr: %s", err, errb)
 	}
 	// What went over stdin is the request the server parses.
@@ -110,11 +110,11 @@ func TestClientPair(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.SPKI != creds.Identity.SPKI || creds.Pin.SPKI != srv.SPKI || creds.Pin.Node != "nSERVER1CNTRL" || creds.Pin.SSH != "dell" || creds.Pin.Name != "mac" {
+	if rec.SPKI != creds.Identity.SPKI || creds.Pin.SPKI != srv.SPKI || creds.Pin.Node != "nSERVER1CNTRL" || creds.Pin.SSH != "server" || creds.Pin.Name != "mac" {
 		t.Fatalf("creds %+v", creds.Pin)
 	}
 	cfg, err := config.Load(e.cfgPath)
-	if err != nil || cfg.Server == nil || *cfg.Server != (config.Server{SSH: "dell", Node: "nSERVER1CNTRL", Port: 7320}) {
+	if err != nil || cfg.Server == nil || *cfg.Server != (config.Server{SSH: "server", Node: "nSERVER1CNTRL", Port: 7320}) {
 		t.Fatalf("config %+v %v", cfg.Server, err)
 	}
 	if !strings.Contains(out.String(), "took it live") || !strings.Contains(errb.String(), "remote diagnostics") || !strings.Contains(errb.String(), "host key") {
@@ -127,14 +127,14 @@ func TestClientPair(t *testing.T) {
 	}
 
 	// Paired: refused until unpaired.
-	if err := e.pair("dell", ""); err == nil || !strings.Contains(err.Error(), "unpair") {
+	if err := e.pair("server", ""); err == nil || !strings.Contains(err.Error(), "unpair") {
 		t.Fatalf("second pair: %v", err)
 	}
 	out.Reset()
 	if err := e.unpair(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no dell '~/.local/bin/pneu peer remove mac'") || link.Paired(e.credDir) {
+	if !strings.Contains(out.String(), "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no server '~/.local/bin/pneu peer remove mac'") || link.Paired(e.credDir) {
 		t.Fatalf("unpair: %q", out)
 	}
 	if raw, _ := config.ReadRaw(e.cfgPath); raw.Server != nil || raw.Port != 7317 {
@@ -147,7 +147,7 @@ func TestClientPair(t *testing.T) {
 		t.Fatal("unpair twice")
 	}
 	// A new pairing has a new key.
-	if err := e.pair("dell", ""); err != nil {
+	if err := e.pair("server", ""); err != nil {
 		t.Fatal(err)
 	}
 	if c2, _ := link.LoadCreds(e.credDir); c2.Identity.SPKI == creds.Identity.SPKI {
@@ -161,12 +161,12 @@ func TestClientPairApplied(t *testing.T) {
 		"next-start": "applies when it starts",
 		"pending":    "XDG_RUNTIME_DIR",
 	} {
-		bin, _, _ := fakeSSH(t, "me@dell", serverAnswer(t, srv, "air", applied, web.Protocol), 0)
+		bin, _, _ := fakeSSH(t, "me@server", serverAnswer(t, srv, "air", applied, web.Protocol), 0)
 		e, out, _ := testClientEnv(t, bin)
-		if err := e.pair("me@dell", "air"); err != nil {
+		if err := e.pair("me@server", "air"); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(out.String(), want) || (applied == "pending" && !strings.Contains(out.String(), "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no me@dell '~/.local/bin/pneu peer list'")) {
+		if !strings.Contains(out.String(), want) || (applied == "pending" && !strings.Contains(out.String(), "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no me@server '~/.local/bin/pneu peer list'")) {
 			t.Errorf("%s: %q", applied, out)
 		}
 	}
@@ -212,12 +212,12 @@ func TestClientPairRefusals(t *testing.T) {
 		"other name":        {with("name", "air"), 0, "different name"},
 		"own node":          {with("node", "nCLIENT1CNTRL"), 0, "own node"},
 		"ssh failed":        {"", 255, "ssh failed"},
-		"no pneu there":     {"", 127, "couldn't find pneu (exit 127): build it into ~/.local/bin on dell"},
+		"no pneu there":     {"", 127, "couldn't find pneu (exit 127): build it into ~/.local/bin on server"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			bin, _, _ := fakeSSH(t, "dell", c.stdout, c.exit)
+			bin, _, _ := fakeSSH(t, "server", c.stdout, c.exit)
 			e, _, _ := testClientEnv(t, bin)
-			err := e.pair("dell", "")
+			err := e.pair("server", "")
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("%v, want %q", err, c.want)
 			}
@@ -244,18 +244,18 @@ func TestClientPairPreflight(t *testing.T) {
 		want             string
 	}{
 		"option target":  {target: "-oProxyCommand=touch /tmp/x", want: "bad ssh target"},
-		"space":          {target: "dell ls", want: "bad ssh target"},
-		"newline":        {target: "dell\nls", want: "bad ssh target"},
+		"space":          {target: "server ls", want: "bad ssh target"},
+		"newline":        {target: "server\nls", want: "bad ssh target"},
 		"empty":          {target: "", want: "bad ssh target"},
-		"bad hostname":   {target: "dell", setup: func(e *clientEnv) { e.host = "My_Laptop" }, want: "-name"},
-		"bad name":       {target: "dell", peerName: "Air", want: "-name"},
-		"tailscale down": {target: "dell", setup: func(e *clientEnv) { e.api = clientTS{"Stopped"} }, want: "tailscale is Stopped"},
-		"a server": {target: "dell", setup: func(e *clientEnv) {
+		"bad hostname":   {target: "server", setup: func(e *clientEnv) { e.host = "My_Laptop" }, want: "-name"},
+		"bad name":       {target: "server", peerName: "Air", want: "-name"},
+		"tailscale down": {target: "server", setup: func(e *clientEnv) { e.api = clientTS{"Stopped"} }, want: "tailscale is Stopped"},
+		"a server": {target: "server", setup: func(e *clientEnv) {
 			config.Write(e.cfgPath, config.Config{Port: 7317, Accounts: []config.Account{{Name: "a"}}})
 		}, want: "is a server"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			bin, _, ran := fakeSSH(t, "dell", serverAnswer(t, srv, "mac", "live", web.Protocol), 0)
+			bin, _, ran := fakeSSH(t, "server", serverAnswer(t, srv, "mac", "live", web.Protocol), 0)
 			e, _, _ := testClientEnv(t, bin)
 			if c.setup != nil {
 				c.setup(e)
@@ -275,9 +275,9 @@ func TestClientPairPreflight(t *testing.T) {
 // (not-paired), and nothing reconnects; only then do the files go.
 func TestClientUnpairRunning(t *testing.T) {
 	srv := serverID(t)
-	bin, _, _ := fakeSSH(t, "dell", serverAnswer(t, srv, "mac", "live", web.Protocol), 0)
+	bin, _, _ := fakeSSH(t, "server", serverAnswer(t, srv, "mac", "live", web.Protocol), 0)
 	e, out, _ := testClientEnv(t, bin)
-	if err := e.pair("dell", ""); err != nil {
+	if err := e.pair("server", ""); err != nil {
 		t.Fatal(err)
 	}
 	creds, err := link.LoadCreds(e.credDir)
@@ -351,7 +351,7 @@ func TestClientUnpairRunning(t *testing.T) {
 	if u.Conns.Load() != conns {
 		t.Fatalf("reconnected after unlink: %d -> %d", conns, u.Conns.Load())
 	}
-	if link.Paired(e.credDir) || !strings.Contains(out.String(), "dropped the link") || !strings.Contains(out.String(), "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no dell '~/.local/bin/pneu peer remove mac'") {
+	if link.Paired(e.credDir) || !strings.Contains(out.String(), "dropped the link") || !strings.Contains(out.String(), "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no server '~/.local/bin/pneu peer remove mac'") {
 		t.Fatalf("paired %v, out %q", link.Paired(e.credDir), out)
 	}
 }
@@ -362,10 +362,10 @@ func TestClientUnpairRunning(t *testing.T) {
 // in the middle.
 func TestClientUnpairLock(t *testing.T) {
 	srv := serverID(t)
-	bin, _, _ := fakeSSH(t, "dell", serverAnswer(t, srv, "mac", "live", web.Protocol), 0)
+	bin, _, _ := fakeSSH(t, "server", serverAnswer(t, srv, "mac", "live", web.Protocol), 0)
 	for _, noRuntime := range []bool{true, false} {
 		e, _, _ := testClientEnv(t, bin)
-		if err := e.pair("dell", ""); err != nil {
+		if err := e.pair("server", ""); err != nil {
 			t.Fatal(err)
 		}
 		if noRuntime {
@@ -402,7 +402,7 @@ func TestClientUnpairLock(t *testing.T) {
 // credentials, and won't run without either.
 func TestStartClient(t *testing.T) {
 	keys := linktest.NewKeys(t)
-	cfg := config.Config{Port: 7317, Server: &config.Server{SSH: "dell", Node: linktest.ServerNode, Port: 1}}
+	cfg := config.Config{Port: 7317, Server: &config.Server{SSH: "server", Node: linktest.ServerNode, Port: 1}}
 	auth := web.NewAuth("pneu.localhost:7317", strings.Repeat("ab", 32))
 	sockBase, _ := os.MkdirTemp("", "pneusc")
 	defer os.RemoveAll(sockBase)
@@ -447,9 +447,9 @@ func TestStartClient(t *testing.T) {
 // pairing to load.
 func TestUnpairTransaction(t *testing.T) {
 	srv := serverID(t)
-	bin, _, _ := fakeSSH(t, "dell", serverAnswer(t, srv, "mac", "live", web.Protocol), 0)
+	bin, _, _ := fakeSSH(t, "server", serverAnswer(t, srv, "mac", "live", web.Protocol), 0)
 	e, _, _ := testClientEnv(t, bin)
-	if err := e.pair("dell", ""); err != nil {
+	if err := e.pair("server", ""); err != nil {
 		t.Fatal(err)
 	}
 	// The old daemon: acks unlink (then, say, crashes and is restarted).
@@ -458,7 +458,7 @@ func TestUnpairTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ctl.Close()
-	cfg := config.Config{Port: 7317, Server: &config.Server{SSH: "dell", Node: "nSERVER1CNTRL", Port: 7320}}
+	cfg := config.Config{Port: 7317, Server: &config.Server{SSH: "server", Node: "nSERVER1CNTRL", Port: 7320}}
 	auth := web.NewAuth("pneu.localhost:7317", strings.Repeat("ab", 32))
 	sockBase, _ := os.MkdirTemp("", "pneutx")
 	defer os.RemoveAll(sockBase)
@@ -494,14 +494,14 @@ func TestUnpairTransaction(t *testing.T) {
 // pair.lock it writes nothing, and it commits once the lock is free.
 func TestPairTakesPairLock(t *testing.T) {
 	srv := serverID(t)
-	bin, _, _ := fakeSSH(t, "dell", serverAnswer(t, srv, "mac", "live", web.Protocol), 0)
+	bin, _, _ := fakeSSH(t, "server", serverAnswer(t, srv, "mac", "live", web.Protocol), 0)
 	e, _, _ := testClientEnv(t, bin)
 	held, err := link.PairLock(e.credDir, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
-	go func() { done <- e.pair("dell", "") }()
+	go func() { done <- e.pair("server", "") }()
 	select {
 	case err := <-done:
 		t.Fatalf("pair ran while pair.lock was held: %v", err)
@@ -548,10 +548,10 @@ func TestPairCommandFindsLocalBin(t *testing.T) {
 
 // A target outside [A-Za-z0-9@._:-] is quoted in commands printed to copy.
 func TestRemoteRemoveQuotes(t *testing.T) {
-	if got := remoteRemove("dell", "mac"); got != "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no dell '~/.local/bin/pneu peer remove mac'" {
+	if got := remoteRemove("server", "mac"); got != "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no server '~/.local/bin/pneu peer remove mac'" {
 		t.Error(got)
 	}
-	if got := remoteRemove("me@dell;x", "mac"); got != "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no 'me@dell;x' '~/.local/bin/pneu peer remove mac'" {
+	if got := remoteRemove("me@server;x", "mac"); got != "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no 'me@server;x' '~/.local/bin/pneu peer remove mac'" {
 		t.Error(got)
 	}
 }

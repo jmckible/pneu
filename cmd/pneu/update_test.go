@@ -94,7 +94,7 @@ func TestFindSource(t *testing.T) {
 // Without a recorded source pneu update refuses and says how to record it.
 func TestUpdateNeedsSource(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), "config.json")
-	os.WriteFile(cfg, []byte(`{"port":7317,"server":{"ssh":"dell","node":"nSERVER1CNTRL","port":7320}}`), 0o644)
+	os.WriteFile(cfg, []byte(`{"port":7317,"server":{"ssh":"server","node":"nSERVER1CNTRL","port":7320}}`), 0o644)
 	err := updateCmd([]string{"-config", cfg})
 	if err == nil || !strings.Contains(err.Error(), "pneu source set") {
 		t.Fatalf("%v", err)

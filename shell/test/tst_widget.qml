@@ -16,9 +16,9 @@ TestCase {
     w.bar = fakeBar
     var now = new Date().toISOString()
     w.apply(JSON.stringify({version: 2, updated: now, running: true, unread: 2, senders: ["<b>A</b>"], accounts: [],
-      server: {name: "dell", link: "down", linkSince: now, statusAt: now, reason: "refused", update: null}}), false)
+      server: {name: "server", link: "down", linkSince: now, statusAt: now, reason: "refused", update: null}}), false)
     compare(w.warning, true)
-    verify(w.tooltip.indexOf("Can't reach dell") === 0, w.tooltip)
+    verify(w.tooltip.indexOf("Can't reach server") === 0, w.tooltip)
     compare(w.menuItems.map(function (i) { return i.id }).join(","), "open,agent,reset")
     w.toggleMenu()
     w.act("agent")
@@ -48,12 +48,12 @@ TestCase {
     var now = new Date().toISOString()
     var doc = function (state) {
       return JSON.stringify({version: 2, updated: now, running: true, unread: 0, senders: [], accounts: [],
-        server: {name: "dell", link: "up", linkSince: now, statusAt: now, reason: null,
+        server: {name: "server", link: "up", linkSince: now, statusAt: now, reason: null,
           update: {state: state, client: "$(id)", server: "<b>x</b>"}}})
     }
     w.apply(doc("server-older"), false)
     compare(w.menuItems.map(function (i) { return i.id }).join(","), "open,updateServer,reset")
-    compare(w.menuItems[1].label, "Update dell")
+    compare(w.menuItems[1].label, "Update server")
     w.act("updateServer")
     compare(JSON.stringify(Util.calls[Util.calls.length - 1]), '["pneu","agent","-update"]')
     w.apply(doc("client-older"), false)

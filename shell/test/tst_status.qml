@@ -10,12 +10,12 @@ TestCase {
   function test_v2() {
     var now = Date.parse("2026-09-30T12:00:00Z")
     var raw = JSON.stringify({version: 2, updated: "2026-09-30T11:59:00Z", running: true, unread: 3, senders: ["A‮B"], accounts: [],
-      server: {name: "dell", link: "down", linkSince: "2026-09-30T11:50:00Z", statusAt: "2026-09-30T11:40:00Z", reason: "node-offline", update: null}})
+      server: {name: "server", link: "down", linkSince: "2026-09-30T11:50:00Z", statusAt: "2026-09-30T11:40:00Z", reason: "node-offline", update: null}})
     var m = Status.model(Status.parse(raw), false, now)
     compare(m.warning, true)
     var fmt = { clock: function (ms) { return Qt.formatDateTime(new Date(ms), "HH:mm") }, day: function (ms) { return "" } }
     var tip = Status.tooltip(m, fmt)
-    verify(tip.indexOf("Can't reach dell") >= 0, tip)
+    verify(tip.indexOf("Can't reach server") >= 0, tip)
     verify(tip.indexOf("AB") >= 0, tip)
     compare(Status.menu(m, false).map(function (i) { return i.id }).join(","), "open,agent,reset")
     compare(Status.argv("agent").join(" "), "pneu agent")
@@ -23,7 +23,7 @@ TestCase {
   }
   function test_update() {
     var raw = JSON.stringify({version: 2, updated: "2026-09-30T11:59:00Z", running: true, unread: 0, senders: [], accounts: [],
-      server: {name: "dell", link: "up", linkSince: "2026-09-30T11:50:00Z", statusAt: "2026-09-30T11:59:00Z", reason: null,
+      server: {name: "server", link: "up", linkSince: "2026-09-30T11:50:00Z", statusAt: "2026-09-30T11:59:00Z", reason: null,
         update: {state: "different", client: "unknown", server: "unknown"}}})
     var m = Status.model(Status.parse(raw), false, Date.parse("2026-09-30T12:00:00Z"))
     compare(Status.menu(m, false).map(function (i) { return i.id }).join(","), "open,update,reset")

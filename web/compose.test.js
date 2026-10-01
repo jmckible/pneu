@@ -134,7 +134,7 @@ test('drafts: parse, compare, prune to the newest', () => {
 });
 
 test('settle: only the send\'s own redirect drops the draft', () => {
-  const id = '<0123456789abcdef0123456789abcdef@pneu.dell>';
+  const id = '<0123456789abcdef0123456789abcdef@pneu.server>';
   const m = C.parseMarker(JSON.stringify({ key: 'pneu:draft:reply:personal:a@b', id, at: 1 }));
   assert.ok(m);
   const keep = { drop: null, clear: false, id: null };
@@ -155,7 +155,7 @@ test('settle: only the send\'s own redirect drops the draft', () => {
 });
 
 test('persistForSend: no send unless the id is in local storage', () => {
-  const id = '<0123456789abcdef0123456789abcdef@pneu.dell>';
+  const id = '<0123456789abcdef0123456789abcdef@pneu.server>';
   const key = 'pneu:draft:compose:personal';
   const draft = { to: 'a', cc: '', bcc: '', subject: 's', body: 'b', at: 5, id, idAt: 5, sent: true };
   const mem = () => {
@@ -187,7 +187,7 @@ test('submitDraft: pruning never costs the submitted draft', () => {
       removeItem: (k) => m.delete(k), key: (i) => [...m.keys()][i] ?? null, get length() { return m.size; }, m,
     };
   };
-  const id = '<0123456789abcdef0123456789abcdef@pneu.dell>';
+  const id = '<0123456789abcdef0123456789abcdef@pneu.server>';
   const base = { to: 'a', cc: '', bcc: '', subject: 's', body: 'b' };
   const key = 'pneu:draft:compose:personal';
   const now = 1000;
@@ -208,7 +208,7 @@ test('submitDraft: pruning never costs the submitted draft', () => {
 });
 
 test('draft ids: kept with the draft, dropped past the server\'s record', () => {
-  const id = '<0123456789abcdef0123456789abcdef@pneu.dell>';
+  const id = '<0123456789abcdef0123456789abcdef@pneu.server>';
   const base = { to: 'a', cc: '', bcc: '', subject: 's', body: 'b', at: 5 };
   const d = C.parseDraft(JSON.stringify({ ...base, id, idAt: 1000, sent: true }));
   assert.equal(d.id, id);
@@ -226,7 +226,7 @@ test('draft ids: kept with the draft, dropped past the server\'s record', () => 
   assert.equal(C.draftID(unsent, 999), null);
   assert.equal(C.ID_KEEP, 30 * 24 * 60 * 60 * 1000);
   // Anything that isn't a pneu id is no id.
-  for (const bad of ['<x@pneu.h>', '<0123456789ABCDEF0123456789ABCDEF@pneu.dell>', id + ' ', '<0123456789abcdef0123456789abcdef@evil>', 7]) {
+  for (const bad of ['<x@pneu.h>', '<0123456789ABCDEF0123456789ABCDEF@pneu.server>', id + ' ', '<0123456789abcdef0123456789abcdef@evil>', 7]) {
     const p = C.parseDraft(JSON.stringify({ ...base, id: bad, idAt: 1000 }));
     assert.equal(p.id, undefined, String(bad));
     assert.equal(C.draftID(p, 1000), null);

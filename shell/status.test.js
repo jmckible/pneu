@@ -16,7 +16,7 @@ const fmt = { clock: (ms) => new Date(ms).toISOString().slice(11, 16), day: (ms)
 
 const v1 = (over) => Object.assign({ version: 1, updated: ago(1), running: true, unread: 0, senders: [], accounts: [] }, over);
 const v2 = (server, over) => Object.assign(v1({ version: 2 }), {
-  server: Object.assign({ name: 'dell', link: 'up', linkSince: ago(30), statusAt: ago(1), reason: null, update: null }, server),
+  server: Object.assign({ name: 'server', link: 'up', linkSince: ago(30), statusAt: ago(1), reason: null, update: null }, server),
 }, over);
 const m = (doc, missing) => S.model(S.parse(JSON.stringify(doc)), !!missing, now);
 const ids = (mm, pending) => S.menu(mm, pending).map((i) => i.id);
@@ -103,7 +103,7 @@ test('version 2: counts go stale by statusAt or the link, not by updated', () =>
   assert.equal(quiet.stale, false);
   assert.equal(quiet.countsStale, true);
   assert.equal(quiet.warning, true);
-  assert.match(S.tooltip(quiet, fmt), /No word from dell since 11:35/);
+  assert.match(S.tooltip(quiet, fmt), /No word from server since 11:35/);
   assert.match(S.tooltip(quiet, fmt), /\(as of 11:35\)/);
   assert.deepEqual(ids(quiet), ['open', 'agent', 'reset']);
   // No status ever.
@@ -120,14 +120,14 @@ test('version 2: link down is a warning naming the server and the reason', () =>
   assert.equal(down.warning, true);
   assert.equal(down.linkDown, true);
   const tip = S.tooltip(down, fmt);
-  assert.match(tip, /^Can't reach dell since 11:50 · dell is offline$/m);
+  assert.match(tip, /^Can't reach server since 11:50 · server is offline$/m);
   assert.match(tip, /Right-click: Fix with agent/);
   assert.deepEqual(ids(down), ['open', 'agent', 'reset']);
   // A reason this build doesn't know is just "can't reach".
-  assert.match(S.tooltip(m(v2({ link: 'down', reason: 'brand-new', linkSince: ago(1) })), fmt), /^Can't reach dell since 11:59$/m);
+  assert.match(S.tooltip(m(v2({ link: 'down', reason: 'brand-new', linkSince: ago(1) })), fmt), /^Can't reach server since 11:59$/m);
   // A reason named like an Object.prototype member is just "can't reach".
   for (const r of ['__proto__', 'constructor', 'toString']) {
-    assert.match(S.tooltip(m(v2({ link: 'down', reason: r, linkSince: ago(1) })), fmt), /^Can't reach dell since 11:59$/m, r);
+    assert.match(S.tooltip(m(v2({ link: 'down', reason: r, linkSince: ago(1) })), fmt), /^Can't reach server since 11:59$/m, r);
   }
   // A protocol mismatch.
   assert.ok(ids(m(v2({ link: 'down', reason: 'protocol' }))).includes('agent'));
@@ -137,7 +137,7 @@ test('version 2: starting is neutral at first, then unreachable', () => {
   const starting = m(v2({ link: 'starting', reason: 'starting', linkSince: iso(now - 10000), statusAt: null }));
   assert.equal(starting.connecting, true);
   assert.equal(starting.warning, false);
-  assert.match(S.tooltip(starting, fmt), /^Connecting to dell…$/m);
+  assert.match(S.tooltip(starting, fmt), /^Connecting to server…$/m);
   assert.doesNotMatch(S.tooltip(starting, fmt), /as of/);
   assert.deepEqual(ids(starting), ['open', 'reset']);
   const long = m(v2({ link: 'starting', reason: 'starting', linkSince: iso(now - S.CONNECT_GRACE - 1000) }));
@@ -153,7 +153,7 @@ test('menu: Fix with agent for failing accounts in both versions; Reopen only af
   assert.deepEqual(ids(m(v2({}, { accounts: [sick] }))), ['open', 'agent', 'reset']);
   assert.deepEqual(ids(m(v1()), true), ['open', 'reopen', 'reset']);
   assert.match(S.accountLine(sick, m(v2())), /^work: 2 failed syncs · x$/);
-  assert.match(S.accountLine({ name: 'w', state: 'unauthorized' }, m(v2())), /pneu account auth w on dell\)$/);
+  assert.match(S.accountLine({ name: 'w', state: 'unauthorized' }, m(v2())), /pneu account auth w on server\)$/);
   assert.equal(S.accountLine({ name: 'w', state: 'reauth' }, m(v2())), 'w: Gmail access expired or was revoked (pneu account auth w here, or Fix with agent)');
   assert.equal(S.accountLine({ name: '$(id)', state: 'reauth' }, m(v2())), '$(id): Gmail access expired or was revoked (pneu account auth <account> here, or Fix with agent)');
   assert.equal(S.accountLine({ name: 'w', state: 'reauth' }, m(v1())), 'w: Gmail access expired or was revoked; reconnect in pneu');
@@ -215,7 +215,7 @@ test('menu: the update items by server.update', () => {
   assert.deepEqual(ids(up('client-older')), ['open', 'update', 'reset']);
   assert.deepEqual(ids(up('different')), ['open', 'update', 'reset']);
   assert.deepEqual(ids(up('server-older')), ['open', 'updateServer', 'reset']);
-  assert.equal(S.menu(up('server-older'), false)[1].label, 'Update dell');
+  assert.equal(S.menu(up('server-older'), false)[1].label, 'Update server');
   for (const bad of ['newer', '__proto__', 'toString', 'constructor', 'client-older\n', '', 1, null]) {
     assert.deepEqual(ids(up(bad)), ['open', 'reset'], String(bad));
   }
@@ -232,15 +232,15 @@ test('menu: the update items by server.update', () => {
   assert.deepEqual(S.argv('update'), ['omarchy-launch-floating-terminal-with-presentation', 'pneu', 'update']);
   assert.deepEqual(S.argv('updateServer'), ['pneu', 'agent', '-update']);
   // The tooltip says so; the revisions themselves never appear.
-  assert.match(S.tooltip(up('client-older'), fmt), /Update available: dell runs a newer pneu · right-click: Update pneu$/);
-  assert.match(S.tooltip(up('server-older'), fmt), /dell runs an older pneu · right-click: Update dell$/);
+  assert.match(S.tooltip(up('client-older'), fmt), /Update available: server runs a newer pneu · right-click: Update pneu$/);
+  assert.match(S.tooltip(up('server-older'), fmt), /server runs an older pneu · right-click: Update server$/);
   assert.ok(!S.tooltip(up('different'), fmt).includes('a'.repeat(40)));
 });
 
 test('word: a name in a suggested command, or <account>', () => {
   assert.equal(S.word('work'), 'work');
   for (const bad of ['$(id)', '`id`', 'a b', '', null, 'x'.repeat(33), '-x', '<b>']) assert.equal(S.word(bad), '<account>', String(bad));
-  assert.match(S.accountLine({ name: '$(id)', state: 'unauthorized' }, m(v2())), /pneu account auth <account> on dell\)$/);
+  assert.match(S.accountLine({ name: '$(id)', state: 'unauthorized' }, m(v2())), /pneu account auth <account> on server\)$/);
   assert.match(S.accountLine({ name: '$(id)', state: 'unconfigured' }, m(v1())), /pneu account add <account> <address>\)$/);
 });
 

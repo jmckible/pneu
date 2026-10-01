@@ -111,7 +111,7 @@ type harness struct {
 func newHarness(t *testing.T, h func(*Server) http.Handler, tune func(*Server)) *harness {
 	t.Helper()
 	dir := t.TempDir()
-	id, err := LoadOrCreateServer(filepath.Join(dir, "peer"), "dell")
+	id, err := LoadOrCreateServer(filepath.Join(dir, "peer"), "server")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -163,9 +163,9 @@ func TestAccountStdinStrict(t *testing.T) {
 	}
 	// A client's config refuses the server's side outright.
 	os.MkdirAll(filepath.Dir(cfg), 0o700)
-	os.WriteFile(cfg, []byte(`{"port":7317,"server":{"ssh":"dell","node":"nSERVER1CNTRL","port":7320}}`), 0o600)
+	os.WriteFile(cfg, []byte(`{"port":7317,"server":{"ssh":"server","node":"nSERVER1CNTRL","port":7320}}`), 0o600)
 	evs, err := stdinRun(t, "status", `{"name":""}`)
-	if !errors.As(err, new(reported)) || !strings.Contains(lastEvent(evs).Text, "client of dell") {
+	if !errors.As(err, new(reported)) || !strings.Contains(lastEvent(evs).Text, "client of server") {
 		t.Errorf("on a client: %v\n%s", err, texts(evs))
 	}
 }

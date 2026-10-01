@@ -64,7 +64,7 @@ func testActionEnv(t *testing.T, socket string, have ...string) (*actionEnv, *[]
 	return e, &calls, &out, &errb
 }
 
-var clientCfg = config.Config{Port: 7317, Server: &config.Server{SSH: "me@dell", Node: "nSERVER1CNTRL", Port: 7320}}
+var clientCfg = config.Config{Port: 7317, Server: &config.Server{SSH: "me@server", Node: "nSERVER1CNTRL", Port: 7320}}
 
 // Fix with agent on a client: the daemon names the situation; the prompt
 // goes to omarchy-agent-prompt as its one argument. Failing accounts are
@@ -101,7 +101,7 @@ func TestAgentHostileReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	prompt := (*calls)[0].args[0]
-	want, _ := callout.Prompt(callout.Unreachable, callout.Facts{Client: true, SSH: "me@dell", Revision: control.Self().Revision})
+	want, _ := callout.Prompt(callout.Unreachable, callout.Facts{Client: true, SSH: "me@server", Revision: control.Self().Revision})
 	if prompt != want {
 		t.Errorf("prompt isn't the unreachable template:\n%s", prompt)
 	}
@@ -183,7 +183,7 @@ func TestAgentExec(t *testing.T) {
 	}
 	b, _ := os.ReadFile(log)
 	n, prompt, _ := strings.Cut(string(b), "\n")
-	want, _ := callout.Prompt(callout.Unreachable, callout.Facts{Client: true, SSH: "me@dell", Revision: control.Self().Revision})
+	want, _ := callout.Prompt(callout.Unreachable, callout.Facts{Client: true, SSH: "me@server", Revision: control.Self().Revision})
 	if n != "1" || prompt != want {
 		t.Errorf("argc %s, prompt:\n%s", n, prompt)
 	}

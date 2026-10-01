@@ -14,7 +14,9 @@ Compatible with multiple mailboxes, both standard Gmail and Google Workspace acc
 
 Ask your agent to follow [INSTALL.md](INSTALL.md). It will walk you through the process and address any questions or concerns.
 
-Because lieer syncs via API, you'll need to create a Google application to use oauth credentials. The installer will guide you. This also ensures you'll have complete control of your authentication; nothing is shared with other users or me.
+pneu runs in one of two roles. A **server** holds your mail: it runs lieer, keeps the archive, and serves the app. A **client** keeps no mail at all; it shows a server's inbox over Tailscale, so a laptop can use the archive on your desktop without syncing its own copy. Most people start with one server; any other machine can be paired as a client later. The installer asks which you're setting up.
+
+Because lieer syncs via API, you'll need to create a Google application to use oauth credentials, on the server only. The installer will guide you. This also ensures you'll have complete control of your authentication; nothing is shared with other users or me.
 
 # Widget
 

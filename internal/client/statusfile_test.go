@@ -87,7 +87,7 @@ func TestStatusFileV2(t *testing.T) {
 	})
 	// Before any status: the link, no counts, statusAt null.
 	doc := waitV2(t, r.status, "the link up", func(d StatusV2) bool { return d.Server.Link == "up" })
-	if doc.Version != 2 || !doc.Running || doc.Server.StatusAt != nil || doc.Server.Name != "dell" || doc.Unread != 0 || len(doc.Accounts) != 0 {
+	if doc.Version != 2 || !doc.Running || doc.Server.StatusAt != nil || doc.Server.Name != "server" || doc.Unread != 0 || len(doc.Accounts) != 0 {
 		t.Fatalf("before a status: %+v", doc)
 	}
 	close(release)

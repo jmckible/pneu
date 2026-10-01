@@ -55,7 +55,7 @@ func newRig(t *testing.T, keys linktest.Keys, port int, api *linktest.API, opts 
 	theme := filepath.Join(dir, "theme.css")
 	os.WriteFile(theme, []byte(":root { --bg: #102030; }"), 0o600)
 	status := filepath.Join(dir, "status.json")
-	d := New(Config{Auth: auth, Link: l, Server: "dell", ThemePath: theme, StatusPath: status})
+	d := New(Config{Auth: auth, Link: l, Server: "server", ThemePath: theme, StatusPath: status})
 	d.themePoll = 20 * time.Millisecond
 	for _, f := range opts {
 		f(d)

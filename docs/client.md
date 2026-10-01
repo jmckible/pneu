@@ -1,6 +1,6 @@
 # Client mode: one archive, many windows
 
-One machine (the **server**, `dell`) holds the archive and runs lieer,
+One machine (the **server**) holds the archive and runs lieer,
 notmuch and the sync ticker. Other machines (**clients**) keep no mail. They
 run a small pneu daemon that proxies to the server over the tailnet, and
 they keep everything that belongs to the desk they sit at: the theme, the
@@ -34,7 +34,7 @@ owns every `gmi` run.
 ## Shape
 
 ```text
- laptop (client)                                   dell (server)
+ laptop (client)                                   server
  ─────────────────────────────                     ──────────────────────────────
  browser --app window                              browser --app window
    │ http://pneu.localhost:7317                      │ http://pneu.localhost:7317
@@ -57,13 +57,13 @@ optional peer listener) or the client daemon. The config refuses to have
 both `accounts` and `server`.
 
 ```json
-// server (dell): today's config plus an optional peer block
+// server: today's config plus an optional peer block
 { "port": 7317, "accounts": [ ... ],
   "peer": { "port": 7320 } }
 
 // client (laptop)
 { "port": 7317,
-  "server": { "ssh": "dell", "node": "nxzXSZ2TfK11CNTRL", "port": 7320 } }
+  "server": { "ssh": "server", "node": "nxzXSZ2TfK11CNTRL", "port": 7320 } }
 ```
 
 `server.ssh` is the SSH target the user typed at pairing. The server's
@@ -110,7 +110,7 @@ Why this and not a bearer token:
   client proxies HTML and JS into the `pneu.localhost` origin. A server
   impersonator can run script with pneu's origin on the laptop. With
   tailscaled down, packets to 100.x follow the default route, so on a
-  hostile network someone else can answer at dell's address. Pinned TLS
+  hostile network someone else can answer at the server's address. Pinned TLS
   makes that a handshake failure.
 - **A browser can't speak to the peer port.** A page can't present a client
   certificate it doesn't have, and it can't get past a pinned self-signed
@@ -204,11 +204,11 @@ Tailscale node identity (a full disk image), or traffic relayed through the
 paired laptop. That is a compromised laptop (T7).
 
 Tailnet ACLs are recommended in INSTALL.md (a grant so only your own
-devices reach `dell:7320`), but nothing depends on them.
+devices reach `server:7320`), but nothing depends on them.
 
 ### The listener
 
-- It binds **only dell's direct tailnet addresses** (v4 and v6, from
+- It binds **only the server's direct tailnet addresses** (v4 and v6, from
   LocalAPI), never `0.0.0.0`. The daemon reconciles every 10s: it binds
   addresses that have appeared and closes listeners on addresses that are
   gone, or all of them when the backend isn't `Running` (R17). The
@@ -237,7 +237,7 @@ s.peer  = s.PeerAuth(core)                // pin + lease + generation, per reque
 Pairing runs on the client, over SSH, and asks nothing of the browser:
 
 ```sh
-pneu client pair dell
+pneu client pair server
 ```
 
 1. The client makes its key pair and reads its own `StableID` from
@@ -248,7 +248,7 @@ pneu client pair dell
    ```sh
    ssh -T -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes \
        -o ControlPath=none -o PermitLocalCommand=no \
-       -- dell 'PATH="$HOME/.local/bin:$PATH" exec pneu peer add --stdin'
+       -- server 'PATH="$HOME/.local/bin:$PATH" exec pneu peer add --stdin'
    ```
 
    (The PATH prefix is fixed text too: a non-interactive SSH session reads
@@ -262,7 +262,7 @@ pneu client pair dell
    its own argument after `--`. Host-key checking is the user's normal
    setting. An unknown host is the user's TOFU decision, which `pair`
    points out and doesn't paper over.
-3. `pneu peer add` on dell takes an exclusive `flock` on
+3. `pneu peer add` on the server takes an exclusive `flock` on
    `peers.lock`, a file that's never replaced. Locking `peers.json`
    itself would be broken by the rename below (N8). Holding the lock, it
    reads `peers.json`, refuses a name, node or SPKI already present (a
@@ -273,13 +273,13 @@ pneu client pair dell
    names both generation and hash, still holding the lock (R8). If the
    daemon isn't running, the file is written and the command says the
    change applies at the next start. If the acknowledgment times out
-   (5s), it says the change is **pending** and never "done". It prints bounded JSON on stdout: dell's
-   certificate, dell's `StableID`, peer port, protocol version and name.
+   (5s), it says the change is **pending** and never "done". It prints bounded JSON on stdout: the server's
+   certificate, its `StableID`, peer port, protocol version and name.
    Diagnostics go to stderr only.
 4. The client parses stdout strictly (size cap, known fields, PEM
-   parses as one certificate), pins dell's key, and writes its config.
+   parses as one certificate), pins the server's key, and writes its config.
 
-`pneu peer list | remove <name>` on dell. `remove` goes through the same
+`pneu peer list | remove <name>` on the server. `remove` goes through the same
 lock, generation and acknowledgment. The server acknowledges only after
 the new generation is live **and** every connection from that peer is
 closed. Registering a connection and removing a peer share a lock, so a
@@ -377,7 +377,7 @@ boundary:
   `Cache-Control: no-store`, as today. `/static/` gets `no-cache`: the
   browser revalidates on every load, and the client answers the
   revalidation by forwarding it and passing back only a 304 or a fresh
-  200. It never passes upstream freshness lifetimes. A compromised dell
+  200. It never passes upstream freshness lifetimes. A compromised server
   can't pin a hostile `app.js` in the laptop's cache beyond its own
   repair: the next load after the repair gets the repaired file.
 - **`Location`** (N4) is resolved against the local origin. It's allowed if
@@ -385,12 +385,12 @@ boundary:
   authority, no backslash and no control character in the original value.
   The one off-origin exception is `/gmail/{account}/{thread}`, whose
   redirect must pass a shared `validGmailURL`. The Gmail message ID
-  comes from dell's file lookup, so the client can't rebuild the URL
+  comes from the server's file lookup, so the client can't rebuild the URL
   itself. It checks the exact shape `gmailURL` produces instead: `https`,
   host exactly `mail.google.com`, the fixed path, `authuser` equal to the
   account's address, a hex message ID, and nothing else. A redirect that
   doesn't match becomes a 502.
-- `Set-Cookie` never passes. (Script from a compromised dell can still set
+- `Set-Cookie` never passes. (Script from a compromised server can still set
   non-HttpOnly cookies on the origin itself. That can't touch the session
   cookie, which is HttpOnly, and it's covered by T6.)
 
@@ -427,7 +427,7 @@ The client holds **one** upstream SSE stream and fans it out to its own
   snapshot's generation is dropped. (Server mode, built: `/events`
   subscribes inside that lock, and inside `account`'s, so nothing at or
   below the snapshot is ever queued; the client's upstream reader still
-  drops by generation, since it can't hold dell's locks.) `epoch` is random per server start, so
+  drops by generation, since it can't hold the server's locks.) `epoch` is random per server start, so
   a restart can't reuse a generation an old page is holding. The client's
   local `/events` does the same for each browser connection, from its own
   state.
@@ -457,20 +457,20 @@ owns completely (R14):
 ```json
 { "version": 2, "updated": "...", "running": true, "unread": 3,
   "senders": [...], "accounts": [...],
-  "server": { "name": "dell", "link": "up", "linkSince": "...",
+  "server": { "name": "server", "link": "up", "linkSince": "...",
               "statusAt": "...", "reason": null, "update": null } }
 ```
 
 - `updated` and `running` describe **this machine's daemon**. `statusAt`
-  is when the last valid status arrived from dell. The widget treats the
+  is when the last valid status arrived from the server. The widget treats the
   counts as stale when `statusAt` is old or `link` isn't `up`, even though
   `updated` keeps ticking (R12).
 - `link`, `reason` and `update` are computed locally from **local reason
   codes** (an enum). No text from the server goes into them. Account
-  names and sender names *are* dell's text, bounded and plain (N14).
+  names and sender names *are* the server's text, bounded and plain (N14).
 - **Writes are coalesced** (N14): at most one `status.json` write per
   second, the latest status wins, and at most one decoded status is held
-  pending. A dell flooding valid events costs a parse each, not a disk
+  pending. A server flooding valid events costs a parse each, not a disk
   write each.
 - The widget must render every one of these strings as `Text.PlainText`
   (R14). That's the case today in the installed bar's tooltip; this makes
@@ -489,7 +489,7 @@ browser. They show up only when relevant (R1):
   agent`, which asks the daemon over the control socket.
 - **Update pneu**, when `update` is set. Runs `pneu update` in a floating
   terminal.
-- **Update dell**, when dell is the older side. Runs `pneu agent
+- **Update server**, when the server is the older side. Runs `pneu agent
   -update`, which picks `update-server` (as built: step 7).
 - **Reset window data** (R4, below).
 
@@ -497,7 +497,7 @@ The agent prompt is a fixed template per situation. Its only
 interpolated values are the local reason code, this binary's own
 revision, the SSH target from local config, and the remote revision **if
 it matches `^[0-9a-f]{40}$`** (otherwise the word "unknown"). The prompt
-says outright that output from dell over SSH is untrusted data.
+says outright that output from the server over SSH is untrusted data.
 
 The page can't launch anything. `/client/*` on the local HTTP side is
 read-only link state and `retry`. The error page and the status line
@@ -518,7 +518,7 @@ send triggers it. The `OnLaunch` hook on `/open` goes away.
 
 **This fixes today's server mode too.**
 
-The page then renders dell's database as of its last sync. What's on
+The page then renders the server's database as of its last sync. What's on
 screen is the source; what may be behind is the source relative to Gmail. Two
 minutes is the healthy polling target. During failures or a first pull it
 isn't a freshness bound (R13), and the status line says so.
@@ -538,7 +538,7 @@ line:
 | fresh | `Updated just now` → `Updated 3m ago`, muted | idle; age of the oldest account's last successful sync |
 | stale | `Updated 14m ago` in `--accent-hot` | idle and older than 3 ticks |
 | account error | `work: sync failing` in `--accent-hot` | failures ≥ the bar's threshold |
-| link down | `Can't reach dell · retrying` in `--accent-hot` | client only |
+| link down | `Can't reach server · retrying` in `--accent-hot` | client only |
 | update | `Update available`, muted, appended | version nudge pending |
 
 - **First paint is right** (R13). `data-accounts` gains `lastSync` and
@@ -555,7 +555,7 @@ line:
 ### Changes from other windows (R11)
 
 Today a label-only push deliberately doesn't broadcast `sync`, so the
-window that archived isn't reloaded under itself. With two windows (dell
+window that archived isn't reloaded under itself. With two windows (the server
 and the laptop), the other one would never see the archive. The server
 keeps a **view generation**, bumped on every successful tag write, undo,
 mark-read and changing sync, and broadcasts `view {epoch, gen, from, threads}`. `threads` lists the
@@ -563,7 +563,7 @@ mark-read and changing sync, and broadcasts `view {epoch, gen, from, threads}`. 
 sends with each write (`X-Pneu-Window`, random per page load).
 
 - **`from` is only a hint for skipping a refresh; it never authorizes
-  anything** (N11). A compromised dell can spoof it; a hostile page on
+  anything** (N11). A compromised server can spoof it; a hostile page on
   another origin can't set it through the mutation guard. A window skips
   its own `view` only when it has **already applied** that write's
   successful response. If the write is still pending or its outcome is
@@ -586,11 +586,11 @@ When the link isn't up, page requests get a local page (with
 | Reason | Detected by | Says | Bar menu |
 |---|---|---|---|
 | `tailscale-down` | LocalAPI unreachable or `BackendState` ≠ Running | Tailscale is off on this machine | Fix with agent |
-| `node-offline` | the server's peer is `Online: false` | dell is offline (last seen …) | Fix with agent |
-| `refused` / timeout | dial | dell is up but pneu isn't answering | Fix with agent |
-| `pin-mismatch` | TLS verify | dell's identity changed; not connecting | Fix with agent (re-pair steps). **Never** a "trust anyway" |
-| `not-paired` | TLS alert | dell doesn't know this laptop | `pneu client pair dell` |
-| `protocol` | hello | client and server protocols differ | Update pneu / Update dell |
+| `node-offline` | the server's peer is `Online: false` | server is offline (last seen …) | Fix with agent |
+| `refused` / timeout | dial | server is up but pneu isn't answering | Fix with agent |
+| `pin-mismatch` | TLS verify | server's identity changed; not connecting | Fix with agent (re-pair steps). **Never** a "trust anyway" |
+| `not-paired` | TLS alert | server doesn't know this laptop | `pneu client pair server` |
+| `protocol` | hello | client and server protocols differ | Update pneu / Update server |
 
 - The daemon retries with backoff (1s → 30s cap), and right away on
   `launch`, focus, or `R`. `pin-mismatch` is never retried in the
@@ -604,11 +604,11 @@ apart, and the toast says which:
 - **Not sent**: the failure provably happened before dispatch: no
   connection could be made (the link was already down, the dial failed,
   or the TLS handshake failed) before any request byte was written. `Not
-  sent: can't reach dell.` Safe to press again.
+  sent: can't reach server.` Safe to press again.
 - **Outcome unknown**: everything else, **including an error while
-  writing the request** (N6). Bytes may have reached dell before the
+  writing the request** (N6). Bytes may have reached the server before the
   error surfaced.
-  `dell didn't answer; checking when it's back.` The tag write may well
+  `server didn't answer; checking when it's back.` The tag write may well
   have landed (`tag.go` finishes writes on purpose after the request is
   cancelled). On reconnect the `hello` generation reloads the list, which
   shows the truth. No mutation is ever retried automatically.
@@ -643,7 +643,7 @@ apart, and the toast says which:
 
 ### What skews
 
-HTML, JS, CSS and templates all come from **dell's** binary, so the UI is
+HTML, JS, CSS and templates all come from the **server's** binary, so the UI is
 always the server's version. The client's version covers the proxy, the
 link protocol, the status file, the theme watcher, the bar widget, and
 `pneu open`. So skew mostly needs a nudge.
@@ -697,11 +697,11 @@ branch recorded at install** (`"source"` in config) (R15):
 
 ## Server work from a client
 
-A client with no archive refers server work to dell over SSH, with the
+A client with no archive refers server work to the server over SSH, with the
 same fixed options as pairing (R7):
 
 - `pneu account add|auth|status` on a client prints what it will run,
-  then runs `ssh -T … -- dell 'pneu account <verb> --stdin'`, where
+  then runs `ssh -T … -- server 'pneu account <verb> --stdin'`, where
   `<verb>` comes from a fixed enum and the arguments go as JSON on stdin.
   The arguments are never joined into the remote command line. No PTY:
   the remote side speaks line-delimited JSON events on stdout (progress,
@@ -709,7 +709,7 @@ same fixed options as pairing (R7):
   PTY would mix echo and framing into that channel.
 - **Consent through a relay, not a forward** (R9; the forward design
   first planned here was dropped in review, Y1 in "As built: step 8"). lieer's
-  consent flow waits for Google's redirect on dell's `localhost:8080`, but
+  consent flow waits for Google's redirect on the server's `localhost:8080`, but
   the Google page opens on the laptop. No SSH forward carries it: a
   preflight `ssh -G` can't see every forward the real session gets (a
   config's `ClearAllForwardings yes` that our `no` turns back on, a
@@ -718,16 +718,16 @@ same fixed options as pairing (R7):
   account auth` from a client:
   1. binds the laptop's `127.0.0.1:8080` and `[::1]:8080` itself (both, or
      it refuses) before ssh runs;
-  2. passes `consentOpen: "print"`, so dell sends the consent URL as an
-     event instead of running `xdg-open` on dell's screen;
+  2. passes `consentOpen: "print"`, so the server sends the consent URL as an
+     event instead of running `xdg-open` on the server's screen;
   3. validates the URL with the same Google-only rule `consentOpener`
      uses, notes its `state`, and opens it in the laptop's browser;
   4. answers Google's redirect itself: one `GET /` whose query has only
      Google's callback keys and this consent's `state`, with a fixed
      "close this tab" page; anything else gets a fixed 400 and it keeps
      waiting;
-  5. sends that query to dell as one more line on the session's stdin,
-     and dell replays it to lieer on its own loopback.
+  5. sends that query to the server as one more line on the session's stdin,
+     and the server replays it to lieer on its own loopback.
 
   The listener lives until the callback, the result, 10 minutes, or the
   end of the session. A page in the laptop's browser can reach it
@@ -743,7 +743,7 @@ same fixed options as pairing (R7):
 either machine, script that runs in the pneu origin could register a
 root-scoped service worker. A worker outlives the page and the fix,
 intercepts future requests, and could replace the local error page. In
-client mode dell's HTML runs in the laptop's origin, so a compromised dell
+client mode the server's HTML runs in the laptop's origin, so a compromised server
 could leave one behind.
 
 - `AppCSP` gains `worker-src 'none'` (both modes; the hostile corpus
@@ -778,9 +778,9 @@ could leave one behind.
 
 - **T1: hostile page on the laptop → local daemon.** Existing Auth. No
   change. `/client/*` is read-only apart from `retry`.
-- **T2: hostile page on the laptop → dell's peer port.** The TLS
+- **T2: hostile page on the laptop → the server's peer port.** The TLS
   handshake fails. No HTTP is parsed.
-- **T3: impersonating dell** (tailscaled down, hostile LAN answering on
+- **T3: impersonating the server** (tailscaled down, hostile LAN answering on
   100.x, MagicDNS spoofing). The pin fails in `VerifyConnection`. The
   client also refuses to dial unless tailscaled is `Running` and whois
   matches.
@@ -789,7 +789,7 @@ could leave one behind.
 - **T5: stolen client key.** Bound to its node's `StableID`, revoked by
   `peer remove` (acknowledged, connections closed). A key plus the node's
   Tailscale identity is T7.
-- **T6: compromised dell.** It has the mail already. It controls the HTML
+- **T6: compromised server.** It has the mail already. It controls the HTML
   in the laptop's origin, which means it runs arbitrary same-origin script
   there. **It can't:** launch anything on the laptop (R1); put text into
   agent prompts (local enums, validated revisions); set status fields
@@ -803,11 +803,11 @@ could leave one behind.
   bursts of 2 MiB and 200; past it the stream is closed and reopened with
   backoff; status writes coalesced to one a second),
   and stream unbounded bodies into the browser. The browser tab's memory
-  is dell's to exhaust, just as it is when dell's own app JS runs there
+  is the server's to exhaust, just as it is when the server's own app JS runs there
   (N14). The daemon's memory is bounded: one upstream connection,
   streamed bodies, capped events.
 - **T7: compromised laptop.** Full mail access until `peer remove`.
-  Accepted, the same as a compromised dell.
+  Accepted, the same as a compromised server.
 - **T8: trust in headers.** The only upstream identity is the TLS peer,
   re-checked per request. The rendering origin comes from the peer
   record.
@@ -829,8 +829,8 @@ could leave one behind.
 - **`data-origin` must be the client's**, or the local Origin check
   refuses every POST from the laptop. That's why the origin is stored at
   pairing.
-- **Unsubscribe runs on dell.** The DKIM checks and the one-click POST
-  come from dell's network. That's fine: it's the same Gmail identity.
+- **Unsubscribe runs on the server.** The DKIM checks and the one-click POST
+  come from the server's network. That's fine: it's the same Gmail identity.
 - **Same port on both machines,** so `pneu open`, the desktop entry and
   the window class stay the same.
 - **The route table is shared code.** A server route the client doesn't
@@ -848,12 +848,12 @@ INSTALL.md forks after the audit and the build:
   machines in* step: add `peer` to the config, restart, and point to the
   ACL recommendation.
 - **Client path:** confirm Tailscale is up on both machines and that `ssh
-  dell` works (with host-key verification), run `pneu client pair dell`,
+  server` works (with host-key verification), run `pneu client pair server`,
   then service, `pneu open`. No Google steps at all.
 
 New audit items: the peer listener binds only tailnet addresses (`ss
 -ltnp`); a connection with no certificate fails the handshake (`curl -k
-https://<dell tailnet ip>:7320/`); and the tests cover a wrong-node peer,
+https://<server tailnet ip>:7320/`); and the tests cover a wrong-node peer,
 a removed peer on a live connection, resumption, the 103→200 header path,
 and markup in a sender name reaching the widget.
 
@@ -863,7 +863,7 @@ Each step works on its own. Codex review happens at the steps marked ◆.
 
 1. **Launch and freshness (server mode):** the control socket, `pneu open
    → launch`, `data-accounts` with `lastSync`/queued, and the status line.
-   It fixes the reopen-without-sync bug on dell today.
+   It fixes the reopen-without-sync bug on the server today.
 2. **View generation:** `view` events and `X-Pneu-Window`, plus the
    `hello` snapshot on `/events`. Needed as soon as two windows exist, and
    useful on one machine with a stale tab.
@@ -915,7 +915,7 @@ Where the code differs from the plan above:
   client strips `If-None-Match`, `If-Modified-Since`, `If-Match`,
   `If-Unmodified-Since` and `If-Range` from `/static/` requests and `ETag`
   and `Last-Modified` from the answers, and always fetches the body (the
-  assets are small). Otherwise a compromised dell could serve a hostile
+  assets are small). Otherwise a compromised server could serve a hostile
   `app.js` under the clean file's known ETag, and after the repair the
   honest server's 304 would keep the hostile bytes running. Check doesn't
   carry this: it validates what the server sends, and the stripping is
@@ -1610,7 +1610,7 @@ four findings, fixed:
   says the rule, `config.NameRule`), a server's `/peer/hello`, a client's
   event account set and status doc. G1's graphic-text rule let a server
   name an account `$(id)`, which the widget then put in a suggested
-  `pneu account auth $(id) on dell`. Suggested commands (the widget's
+  `pneu account auth $(id) on server`. Suggested commands (the widget's
   `word()`, app.js through `link.js`'s `accountWord`) also substitute
   `<account>` for any name that fails the rule, should one ever get
   through. A client's agent prompt names no account at all: it says how
@@ -2076,13 +2076,13 @@ and reauth from the UI on a client.
   that `ssh -G -- <target>` didn't see what the session would get: a
   config's `ClearAllForwardings yes` hides its `RemoteForward` from `-G`,
   and the session's own `ClearAllForwardings=no` turns it back on (a
-  laptop port opened to dell); a `Match command "*account auth*"` adds a
+  laptop port opened to the server); a `Match command "*account auth*"` adds a
   forward only when the real command is there; `Match exec` can answer
   differently between the two runs. So the `-G` preflight, the `-L`s and
   `ClearAllForwardings=no` are gone; every pneu ssh uses pairing's options,
   and the consent's callback goes through the relay above.
 - **Y2: printed ssh commands carry the safe options.** A hint like `ssh
-  dell '~/.local/bin/pneu account status'` runs with whatever the user's
+  server '~/.local/bin/pneu account status'` runs with whatever the user's
   ssh config adds (agent forwarding, forwards, a shared master).
   `config.SSHHint(target, tty)` is `ssh -o ForwardAgent=no -o
   ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o

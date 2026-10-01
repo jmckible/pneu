@@ -171,18 +171,18 @@ func lines(evs ...remote.Event) string {
 // Non-consent verbs: pairing's options (ClearAllForwardings=yes), no
 // ssh -G, no port check; the request on stdin, the events rendered.
 func TestRemoteStatus(t *testing.T) {
-	f := newFakeAccountSSH(t, "status", "me@dell", lines(
+	f := newFakeAccountSSH(t, "status", "me@server", lines(
 		remote.Event{Kind: remote.Progress, Text: "work         ready"},
 		remote.Event{Kind: remote.Progress, Text: "(from the running server)"},
 		remote.Event{Kind: remote.Result}), "", 0)
-	r := newTestRemote(t, f, "me@dell")
+	r := newTestRemote(t, f, "me@server")
 	if err := r.run(remote.Status, remote.StatusRequest{Name: "work"}); err != nil {
 		t.Fatalf("%v\n%s%s", err, r.out.String(), r.errb.String())
 	}
 	if f.stdin() != `{"name":"work"}` || f.log() != "-T" || r.listened != 0 {
 		t.Errorf("stdin %q, runs %q, relays %d", f.stdin(), f.log(), r.listened)
 	}
-	want := "This runs on me@dell: " + f.bin + ` -T -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no -- me@dell 'PATH="$HOME/.local/bin:$PATH" exec pneu account status --stdin'` + "\n  work         ready\n  (from the running server)\n"
+	want := "This runs on me@server: " + f.bin + ` -T -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no -- me@server 'PATH="$HOME/.local/bin:$PATH" exec pneu account status --stdin'` + "\n  work         ready\n  (from the running server)\n"
 	if r.out.String() != want {
 		t.Errorf("output:\n%s\nwant:\n%s", r.out.String(), want)
 	}
@@ -192,10 +192,10 @@ func TestRemoteStatus(t *testing.T) {
 // read and cleaned here, only its validated fields sent.
 func TestRemoteAddFromClient(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), "config.json")
-	os.WriteFile(cfg, []byte(`{"port":7317,"server":{"ssh":"dell","node":"nSERVER1CNTRL","port":7320}}`), 0o600)
+	os.WriteFile(cfg, []byte(`{"port":7317,"server":{"ssh":"server","node":"nSERVER1CNTRL","port":7320}}`), 0o600)
 	secret := filepath.Join(t.TempDir(), "client.json")
 	os.WriteFile(secret, []byte(strings.Replace(clientJSON, `"client_secret":"s"`, `"client_secret":"s","redirect_uris":["http://evil.example"]`, 1)), 0o600)
-	f := newFakeAccountSSH(t, "add", "dell", lines(remote.Event{Kind: remote.Progress, Text: "Setting up work"}, remote.Event{Kind: remote.Result}), "", 0)
+	f := newFakeAccountSSH(t, "add", "server", lines(remote.Event{Kind: remote.Progress, Text: "Setting up work"}, remote.Event{Kind: remote.Result}), "", 0)
 	var r *testRemote
 	orig := newRemoteEnv
 	newRemoteEnv = func(target string) *remoteEnv { r = newTestRemote(t, f, target); return r.remoteEnv }
@@ -234,11 +234,11 @@ func TestRemoteAddFromClient(t *testing.T) {
 func TestRemoteAuthRelay(t *testing.T) {
 	const value = "c0dev4lue"
 	query := "state=abc&code=" + value + "&scope=https%3A%2F%2Fmail.google.com%2F&authuser=0"
-	f := newFakeAuthSSH(t, "auth", "dell", lines(
+	f := newFakeAuthSSH(t, "auth", "server", lines(
 		remote.Event{Kind: remote.Progress, Text: "Opening Google's consent screen for work."},
 		remote.Event{Kind: remote.Consent, URL: consentURL}),
 		lines(remote.Event{Kind: remote.Progress, Text: "Authorized: Gmail answers for me@work.example."}, remote.Event{Kind: remote.Result}), "", 0)
-	r := newTestRemote(t, f, "dell")
+	r := newTestRemote(t, f, "server")
 	var problems []string
 	r.browse = func() {
 		v4 := "http://127.0.0.1:" + strconv.Itoa(r.port)
@@ -345,8 +345,8 @@ func TestRemoteAuthRefusals(t *testing.T) {
 	for _, l := range lns {
 		l.Close()
 	}
-	f := newFakeAccountSSH(t, "auth", "dell", lines(remote.Event{Kind: remote.Result}), "", 0)
-	r := newTestRemote(t, f, "dell")
+	f := newFakeAccountSSH(t, "auth", "server", lines(remote.Event{Kind: remote.Result}), "", 0)
+	r := newTestRemote(t, f, "server")
 	r.listenErr = errors.New("[::1]:8080 is in use here")
 	if err := r.run(remote.Auth, remote.AuthRequest{Name: "work", ConsentOpen: remote.ConsentPrint}); err == nil || !strings.Contains(err.Error(), "[::1]:8080") || f.log() != "" {
 		t.Errorf("port taken: %v, runs %q", err, f.log())
@@ -363,7 +363,7 @@ func TestSSHClearsConfiguredForwards(t *testing.T) {
 		t.Skip("no ssh")
 	}
 	cfg := filepath.Join(t.TempDir(), "config")
-	os.WriteFile(cfg, []byte(`Host dell
+	os.WriteFile(cfg, []byte(`Host server
   LocalForward 5555 localhost:22
   RemoteForward 9000 localhost:9000
   DynamicForward 1080
@@ -375,13 +375,13 @@ Match command "*pneu*"
   RemoteForward 9001 localhost:9001
   LocalForward 9002 localhost:9002
 `), 0o600)
-	e := &remoteEnv{target: "dell"}
+	e := &remoteEnv{target: "server"}
 	var argvs [][]string
 	for _, v := range []remote.Verb{remote.Add, remote.Auth, remote.Status} {
 		a, _ := e.argv(v)
 		argvs = append(argvs, a)
 	}
-	argvs = append(argvs, append(append(append([]string{}, sshOptions...), "--", "dell"), pairCommand))
+	argvs = append(argvs, append(append(append([]string{}, sshOptions...), "--", "server"), pairCommand))
 	resolve := func(argv []string) string {
 		out, err := exec.Command(ssh, append([]string{"-G", "-F", cfg}, argv...)...).CombinedOutput()
 		if err != nil {
@@ -439,11 +439,11 @@ func TestRemoteHostileStreams(t *testing.T) {
 		"not found":          {"", 127, "exit 127", 0},
 		"ssh failed":         {"", 255, "exit 255", 0},
 		"result then failed": {result, 3, "ssh failed", 0},
-		"error event":        {`{"event":"error","text":"no account \"x\"\u001b[2J‮"}` + "\n", 1, `on dell: no account "x"[2J`, 0},
+		"error event":        {`{"event":"error","text":"no account \"x\"\u001b[2J‮"}` + "\n", 1, `on server: no account "x"[2J`, 0},
 	}
 	for name, c := range cases {
-		f := newFakeAccountSSH(t, "auth", "dell", c.stdout, "", c.exit)
-		r := newTestRemote(t, f, "dell")
+		f := newFakeAccountSSH(t, "auth", "server", c.stdout, "", c.exit)
+		r := newTestRemote(t, f, "server")
 		err := r.run(remote.Auth, remote.AuthRequest{Name: "work", ConsentOpen: remote.ConsentPrint})
 		if err == nil || !strings.Contains(err.Error(), c.want) || r.openedN() != c.opened {
 			t.Errorf("%s: %v (want %q), opened %d", name, err, c.want, r.openedN())
@@ -456,8 +456,8 @@ func TestRemoteHostileStreams(t *testing.T) {
 
 // A consent URL is taken only from auth, which has a relay.
 func TestRemoteConsentOnlyForAuth(t *testing.T) {
-	f := newFakeAccountSSH(t, "status", "dell", lines(remote.Event{Kind: remote.Consent, URL: consentURL}, remote.Event{Kind: remote.Result}), "", 0)
-	r := newTestRemote(t, f, "dell")
+	f := newFakeAccountSSH(t, "status", "server", lines(remote.Event{Kind: remote.Consent, URL: consentURL}, remote.Event{Kind: remote.Result}), "", 0)
+	r := newTestRemote(t, f, "server")
 	if err := r.run(remote.Status, remote.StatusRequest{}); err == nil || !strings.Contains(err.Error(), "runs no consent") || r.openedN() != 0 {
 		t.Errorf("%v, opened %d", err, r.openedN())
 	}
@@ -466,10 +466,10 @@ func TestRemoteConsentOnlyForAuth(t *testing.T) {
 // Display text from the server, stdout or stderr, reaches the terminal
 // only plain.
 func TestRemoteCleansText(t *testing.T) {
-	f := newFakeAccountSSH(t, "status", "dell",
+	f := newFakeAccountSSH(t, "status", "server",
 		`{"event":"progress","text":"a\u001b]0;pwned\u0007b‮c"}`+"\n"+string((remote.Event{Kind: remote.Result, Text: "ok x"}).Line()),
-		"warning\x1b[2J from ⁦dell\nsecond\r line\n", 0)
-	r := newTestRemote(t, f, "dell")
+		"warning\x1b[2J from ⁦server\nsecond\r line\n", 0)
+	r := newTestRemote(t, f, "server")
 	if err := r.run(remote.Status, remote.StatusRequest{}); err != nil {
 		t.Fatal(err)
 	}
@@ -477,7 +477,7 @@ func TestRemoteCleansText(t *testing.T) {
 	if strings.ContainsAny(all, "\x1b\x07‮⁦ \r") {
 		t.Errorf("raw text reached the terminal: %q", all)
 	}
-	if !strings.Contains(r.out.String(), "  a]0;pwnedbc\n") || !strings.Contains(r.out.String(), "okx\n") || r.errb.String() != "dell: warning[2J from dell\ndell: second line\n" {
+	if !strings.Contains(r.out.String(), "  a]0;pwnedbc\n") || !strings.Contains(r.out.String(), "okx\n") || r.errb.String() != "server: warning[2J from server\nserver: second line\n" {
 		t.Errorf("out %q err %q", r.out.String(), r.errb.String())
 	}
 }
@@ -485,14 +485,14 @@ func TestRemoteCleansText(t *testing.T) {
 // The remote command never comes from what the user typed: only a Verb
 // has one, and the target is a separate argument after "--".
 func TestRemoteCommandFixed(t *testing.T) {
-	f := newFakeAccountSSH(t, "status", "dell", lines(remote.Event{Kind: remote.Result}), "", 0)
-	r := newTestRemote(t, f, "dell")
+	f := newFakeAccountSSH(t, "status", "server", lines(remote.Event{Kind: remote.Result}), "", 0)
+	r := newTestRemote(t, f, "server")
 	for _, v := range []remote.Verb{"status; touch /tmp/pwned", "gmi", "status --config x", ""} {
 		if err := r.run(v, remote.StatusRequest{}); err == nil || f.log() != "" {
 			t.Errorf("%q: %v, runs %q", v, err, f.log())
 		}
 	}
-	for _, target := range []string{"-oProxyCommand=touch /tmp/x", "dell ls", "dell\nls", ""} {
+	for _, target := range []string{"-oProxyCommand=touch /tmp/x", "server ls", "server\nls", ""} {
 		r := newTestRemote(t, f, target)
 		if err := r.run(remote.Status, remote.StatusRequest{}); err == nil || f.log() != "" {
 			t.Errorf("target %q: %v", target, err)
@@ -517,8 +517,8 @@ func TestRemoteCommandFixed(t *testing.T) {
 // On a client, lieer's own runs aren't forwarded.
 func TestGmiOnClientRefused(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), "config.json")
-	os.WriteFile(cfg, []byte(`{"port":7317,"server":{"ssh":"me@dell","node":"nSERVER1CNTRL","port":7320}}`), 0o600)
-	if err := runGmi([]string{"-config", cfg, "work", "pull"}); err == nil || !strings.Contains(err.Error(), "client of me@dell") {
+	os.WriteFile(cfg, []byte(`{"port":7317,"server":{"ssh":"me@server","node":"nSERVER1CNTRL","port":7320}}`), 0o600)
+	if err := runGmi([]string{"-config", cfg, "work", "pull"}); err == nil || !strings.Contains(err.Error(), "client of me@server") {
 		t.Errorf("%v", err)
 	}
 }
@@ -662,8 +662,8 @@ func TestRemoteResultEndsSession(t *testing.T) {
 	lingerWait = time.Second
 	t.Cleanup(func() { lingerWait = oldL })
 	evs := lines(remote.Event{Kind: remote.Consent, URL: consentURL}, remote.Event{Kind: remote.Result})
-	f := scriptSSH(t, "auth", "dell", "printf '%s' '"+evs+"'\nexec sleep 30")
-	r := newTestRemote(t, f, "dell")
+	f := scriptSSH(t, "auth", "server", "printf '%s' '"+evs+"'\nexec sleep 30")
+	r := newTestRemote(t, f, "server")
 	done := make(chan error, 1)
 	start := time.Now()
 	go func() { done <- r.run(remote.Auth, remote.AuthRequest{Name: "work", ConsentOpen: remote.ConsentPrint}) }()
@@ -694,8 +694,8 @@ func TestRemoteRelayTimers(t *testing.T) {
 	t.Cleanup(func() { relayStartWait, consentWait = oldS, oldC })
 
 	relayStartWait, consentWait = 300*time.Millisecond, time.Minute
-	f := scriptSSH(t, "auth", "dell", "exec sleep 30")
-	r := newTestRemote(t, f, "dell")
+	f := scriptSSH(t, "auth", "server", "exec sleep 30")
+	r := newTestRemote(t, f, "server")
 	start := time.Now()
 	err := r.run(remote.Auth, remote.AuthRequest{Name: "work", ConsentOpen: remote.ConsentPrint})
 	if err == nil || !strings.Contains(err.Error(), "sent no consent URL within") || time.Since(start) > 3*time.Second || !relayClosed(r.port) {
@@ -703,8 +703,8 @@ func TestRemoteRelayTimers(t *testing.T) {
 	}
 
 	relayStartWait, consentWait = time.Second, 1500*time.Millisecond
-	f = scriptSSH(t, "auth", "dell", "sleep 0.8\nprintf '%s' '"+lines(remote.Event{Kind: remote.Consent, URL: consentURL})+"'\nexec sleep 30")
-	r = newTestRemote(t, f, "dell")
+	f = scriptSSH(t, "auth", "server", "sleep 0.8\nprintf '%s' '"+lines(remote.Event{Kind: remote.Consent, URL: consentURL})+"'\nexec sleep 30")
+	r = newTestRemote(t, f, "server")
 	start = time.Now()
 	err = r.run(remote.Auth, remote.AuthRequest{Name: "work", ConsentOpen: remote.ConsentPrint})
 	d := time.Since(start)
