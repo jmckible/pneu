@@ -324,7 +324,8 @@ server with a `peer` block and the clients paired with it.
 12. **Nothing without a paired key gets past the handshake.** *On the
     server, after Let other machines in:* `curl -sk
     https://$(tailscale ip -4):7320/; echo "exit $?"` fails in the TLS
-    handshake (curl exits 35 or 56, with no HTTP status): the listener
+    handshake (curl exits 35, 55 or 56, with no HTTP status; which one
+    depends on when the server's refusal reaches curl): the listener
     requires a client certificate before any HTTP is read, and `-k` only
     skips curl's own check of the server.
 13. **The link's defences are tested.** *After step 1:* these tests are in
