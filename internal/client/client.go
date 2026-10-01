@@ -17,6 +17,7 @@ import (
 
 	"github.com/jmckible/pneu/internal/control"
 	"github.com/jmckible/pneu/internal/link"
+	"github.com/jmckible/pneu/internal/wake"
 	"github.com/jmckible/pneu/internal/web"
 )
 
@@ -40,6 +41,12 @@ type Upstream interface {
 	// event stream on it went quiet.
 	RoundTripOn(req *http.Request) (*http.Response, link.SessionID, error)
 	Stalled(link.SessionID)
+	// Reconnect calls that session down as starting, if it's still the
+	// live one: a request on it got no answer.
+	Reconnect(link.SessionID)
+	// CheckWake: if this machine slept since the last look, the session
+	// goes and an attempt starts (internal/wake).
+	CheckWake()
 }
 
 // Config is what New needs.
@@ -66,6 +73,11 @@ const (
 	// launchWait bounds how long a launch waits for the link before its
 	// sync is dropped.
 	launchWait = 15 * time.Second
+	// SettleWait is how long a request waits for a link that's starting
+	// (just started, just woken, or reconnecting after a dropped
+	// connection) before it's answered as down: a reconnect on the
+	// tailnet takes well under it.
+	SettleWait = 5 * time.Second
 )
 
 // Daemon serves pneu.localhost on a client.
@@ -78,8 +90,9 @@ type Daemon struct {
 	rp      *httputil.ReverseProxy
 	handler http.Handler
 
-	idle      time.Duration
-	launching atomic.Bool
+	idle       time.Duration
+	settleWait time.Duration
+	launching  atomic.Bool
 
 	// The live side (live.go): mu spans every change to live and its
 	// broadcast on hub, and each browser's subscription with its hello.
@@ -106,7 +119,7 @@ type Daemon struct {
 // call LinkChanged.
 func New(cfg Config) *Daemon {
 	d := &Daemon{
-		auth: cfg.Auth, up: cfg.Link, server: cfg.Server, theme: cfg.ThemePath, idle: IdleBody,
+		auth: cfg.Auth, up: cfg.Link, server: cfg.Server, theme: cfg.ThemePath, idle: IdleBody, settleWait: SettleWait,
 		checker:    web.Checker{Origin: cfg.Auth.Origin, Email: cfg.Link.Email},
 		hub:        web.NewHub(),
 		statusPath: cfg.StatusPath,
@@ -193,6 +206,11 @@ func (d *Daemon) Run(ctx context.Context) {
 	wg.Go(func() { web.WatchTheme(ctx, d.theme, d.themePoll, d.themeChanged) })
 	if d.statusPath != "" {
 		wg.Go(func() { d.runStatus(ctx) })
+		// The heartbeat's timer stopped while asleep, and status.json's
+		// updated with it: the widget would call it stale until the next
+		// tick. The link's own wake check rewrites it only when the state
+		// changes.
+		wg.Go(func() { wake.New().Watch(ctx.Done(), wake.Every, func(time.Duration) { d.wakeStatus() }) })
 	}
 	wg.Wait()
 	d.hub.Close()
@@ -202,6 +220,7 @@ func (d *Daemon) Run(ctx context.Context) {
 // link now, and once it's up ask the server to sync, without holding up
 // the window. Launches while one waits collapse into it.
 func (d *Daemon) Launch() {
+	d.up.CheckWake()
 	d.up.Retry()
 	if !d.launching.CompareAndSwap(false, true) {
 		return

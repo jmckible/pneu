@@ -36,6 +36,7 @@ import (
 	"github.com/jmckible/pneu/internal/notmuch"
 	"github.com/jmckible/pneu/internal/peer"
 	"github.com/jmckible/pneu/internal/tailscale"
+	"github.com/jmckible/pneu/internal/wake"
 	"github.com/jmckible/pneu/internal/web"
 )
 
@@ -253,6 +254,20 @@ func serve(args []string) error {
 	}
 	statusDone := make(chan struct{})
 	go func() { srv.RunStatus(ctx, statusPath); close(statusDone) }()
+	// After a sleep (internal/wake): status.json's updated is as old as
+	// the sleep, since the heartbeat's timer stopped with it, so it's
+	// rewritten now; the mail that came meanwhile is pulled once the
+	// network is back, which a resume takes some seconds to bring up (a
+	// sync that ran into it would count as a failure).
+	go wake.New().Watch(ctx.Done(), wake.Every, func(asleep time.Duration) {
+		log.Printf("pneu: woke after %v asleep", asleep.Round(time.Second))
+		srv.StatusChanged()
+		time.AfterFunc(wakeSync, func() {
+			if ctx.Err() == nil {
+				srv.Launch()
+			}
+		})
+	})
 	errc := make(chan error, len(lns))
 	for _, ln := range lns {
 		go func() { errc <- hs.Serve(ln) }()
@@ -363,6 +378,9 @@ func listenControl(srv *web.Server, ps *peer.Server) *control.Server {
 	}
 	return ctl
 }
+
+// wakeSync is how long after a wake the server syncs every account.
+const wakeSync = 15 * time.Second
 
 // launchWait bounds `pneu open`'s launch request. The answer comes once
 // every account is queued, which takes no gmi run.

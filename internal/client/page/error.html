@@ -8,8 +8,9 @@
 <link rel="stylesheet" href="/theme.css">
 <script src="/client/static/error.js" defer></script>
 </head>
-<body data-reason="{{.Reason}}">
+<body data-reason="{{.Reason}}"{{if .Retrying}} data-retrying{{end}}>
 <main>
+<svg class="mark" role="img" aria-label="pneu" viewBox="0 0 15 15">{{.Mark}}</svg>
 <h1>{{.Title}}</h1>
 <p>{{.Says}}</p>
 {{if .Steps}}<ul>{{range .Steps}}

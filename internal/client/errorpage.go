@@ -62,17 +62,20 @@ type errorPage struct {
 	Reason, Title, Says, Server, Since string
 	Steps                              []step
 	Retrying                           bool
+	Mark                               template.HTML // pneu's drawn mark (web.Mark)
 }
 
 // explain is the page for a reason, from local codes and the SSH target
 // alone: no server text.
 func explain(st link.State, server string) errorPage {
 	p := errorPage{Reason: string(st.Reason), Server: server, Since: st.Since.Local().Format("15:04 Jan 2"),
-		Retrying: st.Reason != link.PinMismatch}
+		Retrying: st.Reason != link.PinMismatch, Mark: web.Mark()}
 	fix := step{Menu: "Fix with agent"}
 	repair := []step{{Command: "pneu client unpair"}, {Command: "pneu client pair " + config.ShellWord(server), Note: "then add this machine again on " + server}}
 	switch st.Reason {
 	case link.Starting:
+		// Just started, just woken, or reconnecting after a dropped
+		// connection: nothing to fix, only to wait for.
 		p.Title, p.Says = "Connecting to "+server+"…", "pneu is opening its link to "+server+"."
 	case link.TailscaleDown:
 		p.Title = "Tailscale is off on this machine"
@@ -108,9 +111,10 @@ func explain(st link.State, server string) errorPage {
 }
 
 // errorPage answers a page navigation with the error page, under the
-// HTML class rt allows (app, or compose on the form's routes), saying the
-// request was never sent.
-func (d *Daemon) errorPage(w http.ResponseWriter, rt *web.Route, st link.State) {
+// HTML class rt allows (app, or compose on the form's routes), saying in
+// LinkHeader whether the request was sent (a page load's failure on a
+// connection it had is unknown, though a GET changes nothing).
+func (d *Daemon) errorPage(w http.ResponseWriter, rt *web.Route, st link.State, outcome string) {
 	var b bytes.Buffer
 	if err := errorTmpl.Execute(&b, explain(st, d.server)); err != nil {
 		http.Error(w, "the error page failed", http.StatusInternalServerError)
@@ -122,7 +126,7 @@ func (d *Daemon) errorPage(w http.ResponseWriter, rt *web.Route, st link.State) 
 		http.Error(w, "the error page failed", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set(LinkHeader, NotSent)
+	w.Header().Set(LinkHeader, outcome)
 	w.WriteHeader(http.StatusServiceUnavailable)
 	w.Write(b.Bytes())
 }

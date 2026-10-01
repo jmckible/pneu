@@ -2,8 +2,9 @@
 // comes from the server.
 //
 // The link page reloads once the link is up, which this daemon's own
-// /events says (its hello, then `link`), and asks for an attempt now on
-// its button. The send page (a compose form's POST /send the link failed)
+// /events says (its hello, then `link`). Its button asks for an attempt
+// now, whose success reloads it; with the link up already (the load
+// failed on a connection, not the link) it reloads at once. The send page (a compose form's POST /send the link failed)
 // never reloads, which would post the form again: its button goes back to
 // the draft, which compose.js kept.
 (function () {
@@ -16,22 +17,40 @@
     });
     return;
   }
+  var last = null; // the link as last heard
   function up(l) { return !!l && l.state === 'up'; }
   function reloadIf(l, after) { if (up(l)) setTimeout(function () { location.reload(); }, after); }
+  // upDelay: up already when this page subscribed, so it was served on a
+  // load that failed as the link went down (not marked yet) or on a
+  // connection that failed with the link up. Each such reload in a row
+  // waits twice as long, 1s to 30s, so a server failing every load isn't
+  // reloaded in a loop; a minute without one starts again at 1s. The
+  // count lives in sessionStorage, which may be refused: then it's 1s.
+  var KEY = 'pneu-error-reloads';
+  function upDelay() {
+    var n = 0, now = Date.now();
+    try {
+      var r = JSON.parse(sessionStorage.getItem(KEY) || 'null');
+      if (r && typeof r.n === 'number' && typeof r.at === 'number' && now - r.at < 60000) n = Math.min(r.n, 5);
+      sessionStorage.setItem(KEY, JSON.stringify({ n: n + 1, at: now }));
+    } catch (err) { /* ignore */ }
+    return 1000 * Math.pow(2, n);
+  }
   if (window.EventSource) {
     var es = new EventSource('/events');
-    // Up already when this page subscribed: it was served on a send that
-    // failed as the link went down, which the link hasn't marked yet. A
-    // second's wait keeps that from becoming a reload loop.
     es.addEventListener('hello', function (e) {
-      try { reloadIf(JSON.parse(e.data).link, 1000); } catch (err) { /* ignore */ }
+      try {
+        last = JSON.parse(e.data).link;
+        if (up(last)) reloadIf(last, upDelay());
+      } catch (err) { /* ignore */ }
     });
     es.addEventListener('link', function (e) {
-      try { reloadIf(JSON.parse(e.data), 0); } catch (err) { /* ignore */ }
+      try { last = JSON.parse(e.data); reloadIf(last, 0); } catch (err) { /* ignore */ }
     });
   }
   var btn = document.getElementById('retry');
   if (btn) btn.addEventListener('click', function () {
+    if (up(last)) { location.reload(); return; }
     btn.disabled = true;
     fetch('/client/retry', { method: 'POST', credentials: 'same-origin' })
       .catch(function () {})

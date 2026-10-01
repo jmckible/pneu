@@ -292,6 +292,14 @@ and build order; this file is the working contract. Read PLAN.md before touching
   `^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$`: refused (never cleaned) at the
   server's config, `pneu account add`, the link's hello and the handshake;
   a suggested command shows `<account>` for anything else.
+  Sleep (`internal/wake`, docs/client.md "Waking from sleep"): every Go
+  timer stops in suspend, so the link, the client's status.json and a
+  server's status.json and sync watch for a wall-clock jump instead;
+  on one the session goes and the link says `starting`. A request that
+  finds the link `starting` waits up to `SettleWait` for it; a safe one
+  (GET/HEAD, no body) that dies on a live session is retried once on a
+  fresh one (`Link.Reconnect`), a mutation never; a failed page
+  navigation always gets the error page.
   Pages get the daemon's own `hello` (state as last known, plus `link`),
   `link` on every change, its own desk's `theme`. The server's name shown
   anywhere is the SSH target, never hello's. status.json there is version

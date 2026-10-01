@@ -362,6 +362,10 @@ func TestHostileUpstream(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
+			// A case that breaks the connection (a header HPACK refuses)
+			// takes the session down with its safe retry; the next case
+			// starts on a fresh one.
+			r.waitUp()
 			r.got1xx.Store(0)
 			u.SetHandler(c.up)
 			body := ""

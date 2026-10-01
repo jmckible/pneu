@@ -22,6 +22,7 @@ import (
 	"github.com/jmckible/pneu/internal/config"
 	"github.com/jmckible/pneu/internal/peer"
 	"github.com/jmckible/pneu/internal/tailscale"
+	"github.com/jmckible/pneu/internal/wake"
 	"github.com/jmckible/pneu/internal/web"
 )
 
@@ -147,6 +148,10 @@ type Link struct {
 	beforePublish, beforeClose func()
 	afterDial                  func(net.Conn)
 
+	// wake notices this machine slept (wake.go): every timer above
+	// stopped with it, so the session goes and an attempt follows.
+	wake *wake.Clock
+
 	kick chan struct{}
 	stop chan struct{}
 	wg   sync.WaitGroup
@@ -160,13 +165,17 @@ func New(api API, creds Creds, port int) *Link {
 		state:  State{Reason: Starting, Since: time.Now()},
 		upc:    make(chan struct{}),
 		owned:  map[*session]struct{}{},
+		wake:   wake.New(),
 		kick:   make(chan struct{}, 1),
 		stop:   make(chan struct{}),
 	}
 }
 
 // Start connects in the background and keeps the link up.
-func (l *Link) Start() { l.wg.Go(l.run) }
+func (l *Link) Start() {
+	l.wg.Go(l.run)
+	l.wg.Go(func() { l.wake.Watch(l.stop, wake.Every, l.woke) })
+}
 
 // Close stops the link and closes its connection.
 func (l *Link) Close() {
@@ -257,6 +266,7 @@ func (l *Link) RoundTrip(req *http.Request) (*http.Response, error) {
 // RoundTripOn is RoundTrip, also naming the session that carried it: the
 // only one a failure on that response may be blamed on (Stalled).
 func (l *Link) RoundTripOn(req *http.Request) (*http.Response, SessionID, error) {
+	l.CheckWake()
 	l.mu.Lock()
 	s, reason := l.sess, l.state.Reason
 	if s != nil && !time.Now().Before(l.expiry) {
@@ -293,6 +303,49 @@ func (l *Link) Stalled(id SessionID) {
 		return
 	}
 	l.setDown(s, Refused, "the server's event stream went quiet")
+	l.Retry()
+}
+
+// Reconnect: a request on session id got no answer though the session
+// was live (a reset, an EOF): a connection the other end dropped, most
+// often while this machine slept. If id is still the live session it goes
+// down as starting, with every stream on it, and an attempt follows at
+// once, so a safe request's one retry (client.roundTripper) goes out on a
+// fresh session. A failing attempt names the real reason.
+func (l *Link) Reconnect(id SessionID) {
+	l.mu.Lock()
+	s := l.sess
+	l.mu.Unlock()
+	if s == nil || s.id != id {
+		return
+	}
+	l.setDown(s, Starting, "a request on the connection failed; reconnecting")
+	l.Retry()
+}
+
+// CheckWake looks for a sleep now rather than at the next tick: a launch
+// or a page load right after waking may arrive first. RoundTripOn checks
+// on its own.
+func (l *Link) CheckWake() {
+	if asleep, ok := l.wake.Slept(); ok {
+		l.woke(asleep)
+	}
+}
+
+// woke: this machine slept, so nothing the link knows is current. Its
+// timers stopped (wake.go): the lease still has its time and the session
+// still looks live, though the server dropped it long ago. The session
+// goes, the state says starting (a down reason from before the sleep is
+// stale too), and an attempt follows at once. A pin mismatch stays: it's
+// never retried in the background.
+func (l *Link) woke(asleep time.Duration) {
+	l.mu.Lock()
+	s, pin := l.sess, l.state.Reason == PinMismatch
+	l.mu.Unlock()
+	if pin {
+		return
+	}
+	l.setDown(s, Starting, "woke from "+asleep.Round(time.Second).String()+" asleep; reconnecting")
 	l.Retry()
 }
 

@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -119,6 +120,18 @@ func New(accounts []notmuch.Account, host, token string) (*Server, error) {
 	s.handler = s.Auth.Middleware(s.serveRoutes())
 	return s, nil
 }
+
+// Mark is pneu's drawn mark (base.html's "mark": the paths, stroked in
+// currentColor) for a page built outside this package, inside an
+// <svg viewBox="0 0 15 15">: the client's error page.
+var Mark = sync.OnceValue(func() template.HTML {
+	var b strings.Builder
+	t := template.Must(template.ParseFS(templateFS, "templates/base.html"))
+	if err := t.ExecuteTemplate(&b, "mark", nil); err != nil {
+		panic(err)
+	}
+	return template.HTML(b.String())
+})
 
 // parsePages gives each page its own set: every page redefines "content".
 func parsePages() (map[string]*template.Template, error) {

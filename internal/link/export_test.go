@@ -1,6 +1,10 @@
 package link
 
-import "net"
+import (
+	"net"
+
+	"github.com/jmckible/pneu/internal/wake"
+)
 
 // Seams for link_test: set before Start.
 func SetBeforePublish(l *Link, f func())     { l.beforePublish = f }
@@ -37,3 +41,6 @@ func Current(l *Link) SessionID {
 	}
 	return l.sess.id
 }
+
+// SetWake replaces the link's wake clock (before Start).
+func SetWake(l *Link, c *wake.Clock) { l.wake = c }

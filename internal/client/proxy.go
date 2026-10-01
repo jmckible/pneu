@@ -60,19 +60,24 @@ func exchangeOf(r *http.Request) *exchange {
 	return ex
 }
 
-// proxy is a proxied route's handler. A page navigation while the link
-// isn't up gets the error page instead. POST /sync (R, and the page's
-// focus return) also asks the link for a probe, or an attempt when down:
-// the moment you look is when a dead link must be noticed (R12).
+// proxy is a proxied route's handler. A request first lets a starting
+// link settle (settle), so a page loaded the moment the laptop wakes
+// waits for the reconnect rather than failing; a page navigation while
+// the link still isn't up gets the error page instead. POST /sync (R, and
+// the page's focus return) also asks the link for a probe, or an attempt
+// when down: the moment you look is when a dead link must be noticed
+// (R12).
 func (d *Daemon) proxy(rt *web.Route) http.Handler {
 	syncRoute := rt.Method == http.MethodPost && rt.Pattern == "/sync"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		d.up.CheckWake()
 		if syncRoute {
 			d.up.Retry()
 		}
+		d.settle(r.Context())
 		if pageNavigation(rt, r) {
 			if st := d.up.State(); st.Reason != link.Up {
-				d.errorPage(w, rt, st)
+				d.errorPage(w, rt, st, NotSent)
 				return
 			}
 		}
@@ -186,17 +191,23 @@ func (d *Daemon) fail(w http.ResponseWriter, r *http.Request, err error) {
 		}
 	case errors.Is(err, errContract):
 		writeLinkError(fw.w, ex.rt, ex.in, http.StatusBadGateway, Unknown, "the server's answer was refused")
+	case pageNavigation(ex.rt, ex.in):
+		// A page load that failed, after its one retry: the link went down
+		// between the check and the send, or the connection under it died.
+		// A GET changes nothing, so there's no outcome to explain, only
+		// the link's state, and the page reloads itself once it's back.
+		st := d.up.State()
+		if st.Reason == link.Up {
+			reason, detail := link.Classify(err)
+			st = link.State{Reason: reason, Since: time.Now(), Detail: detail}
+		}
+		outcome := NotSent
+		if ex.gotConn.Load() {
+			outcome = Unknown
+		}
+		d.errorPage(fw.w, ex.rt, st, outcome)
 	case !ex.gotConn.Load():
 		reason, _ := link.Classify(err)
-		if pageNavigation(ex.rt, ex.in) {
-			// The link went down between the check and the send.
-			st := d.up.State()
-			if st.Reason == link.Up {
-				st = link.State{Reason: reason, Since: time.Now()}
-			}
-			d.errorPage(fw.w, ex.rt, st)
-			return
-		}
 		writeLinkError(fw.w, ex.rt, ex.in, http.StatusBadGateway, NotSent, "Not sent: can't reach the server ("+string(reason)+").")
 	default:
 		if r.Context().Err() == nil {
@@ -299,7 +310,35 @@ var (
 	errIdle          = errors.New("client: the answer's body stalled")
 )
 
+// RoundTrip retries a safe request (GET or HEAD, no body) once when it
+// got no answer: on a live session, that's a connection the server
+// dropped (most often while this machine slept), so the session is called
+// down and the retry waits for a fresh one; on a link that went to
+// starting meanwhile, it waits for that. A request that timed out, or
+// that the browser cancelled, isn't retried, and a mutation never is
+// (docs/client.md, R10).
 func (t *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, sess, err := t.try(req)
+	if err == nil || !safe(req) || req.Context().Err() != nil || errors.Is(err, errHeaderTimeout) {
+		return resp, err
+	}
+	var down *link.DownError
+	switch {
+	case sess != 0:
+		t.d.up.Reconnect(sess)
+	case errors.As(err, &down) && down.Reason == link.Starting:
+	default:
+		return nil, err
+	}
+	if !t.d.waitUp(req.Context()) {
+		return nil, err
+	}
+	resp, _, err = t.try(req)
+	return resp, err
+}
+
+// try is one send with the route's response-header timeout.
+func (t *roundTripper) try(req *http.Request) (*http.Response, link.SessionID, error) {
 	ex := exchangeOf(req)
 	wait := web.DefaultWait
 	if ex != nil && ex.rt.Wait > 0 {
@@ -307,17 +346,38 @@ func (t *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	ctx, cancel := context.WithCancelCause(req.Context())
 	timer := time.AfterFunc(wait, func() { cancel(errHeaderTimeout) })
-	resp, err := t.d.up.RoundTrip(req.WithContext(ctx))
+	resp, sess, err := t.d.up.RoundTripOn(req.WithContext(ctx))
 	timer.Stop()
 	if err != nil {
 		if errors.Is(context.Cause(ctx), errHeaderTimeout) {
 			err = fmt.Errorf("%w: %v", errHeaderTimeout, err)
 		}
 		cancel(nil)
-		return nil, err
+		return nil, sess, err
 	}
 	resp.Body = &idleBody{rc: resp.Body, idle: t.d.idle, cancel: cancel}
-	return resp, nil
+	return resp, sess, nil
+}
+
+// safe: a request that changes nothing on the server and has no body to
+// send again (net/http/httputil gives a bodiless request a nil Body).
+func safe(r *http.Request) bool {
+	return (r.Method == http.MethodGet || r.Method == http.MethodHead) && (r.Body == nil || r.Body == http.NoBody)
+}
+
+// settle waits up to SettleWait for a link that's starting. Nothing has
+// left this machine yet, so waiting is safe for a mutation too.
+func (d *Daemon) settle(ctx context.Context) {
+	if d.up.State().Reason == link.Starting {
+		d.waitUp(ctx)
+	}
+}
+
+// waitUp waits up to SettleWait for the link to be up.
+func (d *Daemon) waitUp(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, d.settleWait)
+	defer cancel()
+	return d.up.WaitUp(ctx)
 }
 
 // idleBody cancels its request, which resets that one HTTP/2 stream, when

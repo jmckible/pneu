@@ -22,6 +22,7 @@ import (
 	"github.com/jmckible/pneu/internal/link/linktest"
 	"github.com/jmckible/pneu/internal/peer"
 	"github.com/jmckible/pneu/internal/tailscale"
+	"github.com/jmckible/pneu/internal/wake"
 )
 
 // fast is a link clock for tests.
@@ -786,5 +787,110 @@ func TestStalledNamesItsSession(t *testing.T) {
 	l.Stalled(b)
 	if st := l.State(); st.Reason != link.Refused {
 		t.Fatalf("B's own stall: %+v", st)
+	}
+}
+
+// sleeper is a wake clock whose wall clock jumps when told to: the
+// machine slept.
+type sleeper struct{ asleep atomic.Int64 }
+
+func (s *sleeper) clock() *wake.Clock {
+	start := time.Now()
+	return wake.NewWith(func() time.Time { return time.Now().Round(0).Add(time.Duration(s.asleep.Load())) },
+		func() time.Duration { return time.Since(start) })
+}
+
+func (s *sleeper) sleep(d time.Duration) { s.asleep.Add(int64(d)) }
+
+// Waking drops the session, every stream on it with it, says starting,
+// and connects a new one at once: every timer that would have noticed the
+// dead connection stopped while asleep. The first request after waking
+// finds the link starting rather than going out on the old connection.
+func TestWake(t *testing.T) {
+	keys := linktest.NewKeys(t)
+	u := linktest.StartUpstream(t, keys.Server, keys.Creds.Identity.SPKI, http.HandlerFunc(stream))
+	var zz sleeper
+	var mu sync.Mutex
+	var seen []link.State
+	l := start(t, linktest.NewAPI(), keys, u.Port, func(l *link.Link) {
+		link.SetWake(l, zz.clock())
+		l.OnChange = func(st link.State) { mu.Lock(); seen = append(seen, st); mu.Unlock() }
+	})
+	waitReason(t, l, link.Up)
+	a := link.Current(l)
+	resp, err := get(t, l, "/stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	zz.sleep(5 * time.Hour)
+	if _, err := get(t, l, "/x"); !errors.As(err, new(*link.DownError)) {
+		t.Fatalf("the first request after waking: %v", err)
+	}
+	if _, err := io.Copy(io.Discard, resp.Body); err == nil {
+		t.Fatal("the old session's stream outlived the wake")
+	}
+	waitReason(t, l, link.Up)
+	if b := link.Current(l); b == 0 || b == a {
+		t.Fatalf("session %d after waking, %d before", b, a)
+	}
+	// OnChange runs outside the lock, just after the state it reports.
+	waitFor(t, "up, starting (woke), up", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(seen) == 3 && seen[1].Reason == link.Starting && strings.Contains(seen[1].Detail, "woke from 5h0m0s asleep") &&
+			seen[2].Reason == link.Up
+	})
+}
+
+// The ticker notices a sleep on its own, with nothing asking; a pin
+// mismatch stays one (never retried in the background).
+func TestWakeWatch(t *testing.T) {
+	keys := linktest.NewKeys(t)
+	u := linktest.StartUpstream(t, keys.Server, keys.Creds.Identity.SPKI, nil)
+	var zz sleeper
+	l := start(t, linktest.NewAPI(), keys, u.Port, func(l *link.Link) { link.SetWake(l, zz.clock()) })
+	waitReason(t, l, link.Up)
+	a := link.Current(l)
+	zz.sleep(time.Hour)
+	waitFor(t, "a new session after the ticker's wake", func() bool {
+		b := link.Current(l)
+		return b != 0 && b != a
+	})
+
+	other, err := peer.LoadOrCreateServer(filepath.Join(t.TempDir(), "peer"), "impostor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := linktest.StartUpstream(t, other, "", nil)
+	var zz2 sleeper
+	p := start(t, linktest.NewAPI(), keys, bad.Port, func(l *link.Link) { link.SetWake(l, zz2.clock()) })
+	waitReason(t, p, link.PinMismatch)
+	conns := bad.Conns.Load()
+	zz2.sleep(time.Hour)
+	p.CheckWake()
+	time.Sleep(200 * time.Millisecond)
+	if st := p.State(); st.Reason != link.PinMismatch || bad.Conns.Load() != conns {
+		t.Fatalf("after waking: %+v, %d connections (was %d)", st, bad.Conns.Load(), conns)
+	}
+}
+
+// Reconnect takes down only the session it names, as starting, and an
+// attempt follows.
+func TestReconnect(t *testing.T) {
+	keys := linktest.NewKeys(t)
+	u := linktest.StartUpstream(t, keys.Server, keys.Creds.Identity.SPKI, nil)
+	l := start(t, linktest.NewAPI(), keys, u.Port, nil)
+	waitReason(t, l, link.Up)
+	a := link.Current(l)
+	l.Reconnect(a + 100)
+	if link.Current(l) != a {
+		t.Fatal("another session's failure took this one down")
+	}
+	l.Reconnect(a)
+	waitReason(t, l, link.Up)
+	if b := link.Current(l); b == a {
+		t.Fatal("no new session")
 	}
 }

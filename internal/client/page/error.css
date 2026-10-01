@@ -16,6 +16,12 @@
 }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 var(--font); }
 main { max-width: 64ch; margin: 12vh auto; padding: 0 2ch; }
+/* The drawn cut of pneu's mark (brand/README.md), as the app's header
+   draws it; it breathes while the page waits on the link. */
+.mark { display: block; width: 36px; height: 36px; margin: 0 0 1.5em; color: var(--accent); }
+body[data-retrying] .mark { animation: breathe 2.4s ease-in-out infinite; }
+@keyframes breathe { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { body[data-retrying] .mark { animation: none; } }
 h1 { font-size: inherit; color: var(--accent-hot); margin: 0 0 1em; }
 ul { padding-left: 2ch; }
 li { margin: 0.3em 0; }

@@ -597,6 +597,34 @@ When the link isn't up, page requests get a local page (with
   background.
 - An open page that loses the link keeps its content and switches the
   status line.
+- **Waking from sleep** (`internal/wake`). Go's timers run on
+  CLOCK_MONOTONIC, which stops in suspend: the lease, the sweep, the
+  HTTP/2 ping and the stream's silence watchdog all wake up believing a
+  few seconds passed, on a connection the server dropped hours ago. A
+  2s ticker compares how far the wall clock moved with how far the
+  monotonic one did; more than 5s apart is sleep. On it the session goes
+  (every stream with it), the link says `starting` (a reason from before
+  the sleep is stale) and an attempt runs at once; `pin-mismatch` stays.
+  `launch`, every proxied request and every `RoundTripOn` check first,
+  since super+m can beat the ticker. status.json is rewritten too (its
+  heartbeat slept with everything else). A server rewrites its
+  status.json on waking and syncs every account 15s later, once the
+  network is back (a sync into a dead network would count as a failure).
+- **Starting settles.** A request that finds the link `starting` (just
+  started, just woken, reconnecting) waits up to 5s for it before it's
+  answered as down: nothing has left the machine, so this holds for a
+  mutation too.
+- **One retry for a safe request.** A GET or HEAD that gets no answer on
+  a live session (a reset, an EOF: a connection the server dropped)
+  calls that session down as `starting` (`Link.Reconnect`), waits for a
+  fresh one and is sent once more. Not after the route's header timeout,
+  not when the browser cancelled, and never a mutation (R10 below).
+- A page navigation that still fails gets the error page whatever the
+  failure (Pneu-Link says `unknown` if it had a connection), never a
+  bare text answer; reads have no outcome to explain. It reloads when
+  the link is up; served while the link was up already, its reloads back
+  off 1s → 30s (sessionStorage), so a server failing every load isn't
+  reloaded in a loop. It carries pneu's mark, breathing while it waits.
 
 **Mutations over a failing link** (R10). The client can tell two cases
 apart, and the toast says which:
