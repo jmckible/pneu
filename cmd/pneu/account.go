@@ -99,7 +99,7 @@ func accountAdd(args []string) error {
 	}
 	name, address := pos[0], strings.TrimSpace(pos[1])
 	if !config.ValidName(name) {
-		return usageError{fmt.Sprintf("bad account name %q: a short word like personal or work", name)}
+		return usageError{fmt.Sprintf("bad account name %q: %s", name, config.NameRule)}
 	}
 	if !strings.Contains(address, "@") || strings.ContainsAny(address, " <>") {
 		return usageError{fmt.Sprintf("bad address %q", address)}

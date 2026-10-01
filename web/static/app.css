@@ -124,7 +124,7 @@ body > header #sync {
 body > header #sync:hover { color: var(--fg); }
 body > header #sync:focus-visible { outline: 1px dashed var(--accent); }
 body > header #sync[data-state=checking] { color: var(--accent); }
-body > header #sync[data-state=stale], body > header #sync[data-state=error], body > header #sync[data-state=link] { color: var(--accent-hot); }
+body > header #sync[data-state=stale], body > header #sync[data-state=error], body > header #sync[data-state=link], body > header #sync[data-state=worker] { color: var(--accent-hot); }
 body > header #sync .spin:not(:empty) { margin-right: 1ch; }
 /* Read to a screen reader, never drawn: #sync-live announces changes of
    state, not the ticking age. */

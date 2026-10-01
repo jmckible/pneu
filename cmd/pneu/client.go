@@ -38,8 +38,15 @@ var sshOptions = []string{
 }
 
 // pairCommand is the one remote command pairing runs; its parameters go on
-// stdin, never here (SSH joins arguments into a shell line).
-const pairCommand = "pneu peer add --stdin"
+// stdin, never here (SSH joins arguments into a shell line). It's a fixed
+// string the remote shell parses, with ~/.local/bin (where INSTALL.md
+// builds pneu) put first on PATH: a non-interactive SSH session reads no
+// login profile, so a bare `pneu` often isn't found there. Nothing is ever
+// interpolated into it.
+const pairCommand = `PATH="$HOME/.local/bin:$PATH" exec pneu peer add --stdin`
+
+// notFound is the exit status a POSIX shell gives a command it can't find.
+const notFound = 127
 
 // selfStatus is what pairing asks tailscaled: this node's StableID.
 type selfStatus interface {
@@ -179,6 +186,9 @@ func (e *clientEnv) pair(target, name string) error {
 	if out.over {
 		return fmt.Errorf("the server's answer is over %d bytes; not pairing", peer.MaxAddResult)
 	}
+	if ee := (*exec.ExitError)(nil); errors.As(runErr, &ee) && ee.ExitCode() == notFound {
+		return fmt.Errorf("the server's shell couldn't find pneu (exit 127): build it into ~/.local/bin on %s (INSTALL.md step 2), then pair again", target)
+	}
 	if runErr != nil {
 		return fmt.Errorf("pairing over ssh failed (%v); the server's own message, if any, is above", runErr)
 	}
@@ -186,12 +196,12 @@ func (e *clientEnv) pair(target, name string) error {
 	if err != nil {
 		return fmt.Errorf("the server's answer won't do: %w", err)
 	}
-	removeCmd := "ssh " + target + " pneu peer remove " + name
+	removeCmd := remoteRemove(target, name)
 	switch {
 	case res.Protocol != web.Protocol:
 		return fmt.Errorf("the server speaks link protocol %d and this pneu speaks %d, so nothing is pinned here. The server has recorded the pairing: update the older side, run `%s`, then pair again", res.Protocol, web.Protocol, removeCmd)
 	case res.Name != name:
-		return fmt.Errorf("the server paired a different name (%s); run `%s` there and pair again", res.Name, removeCmd)
+		return fmt.Errorf("the server paired a different name (%s); run `%s` and pair again", res.Name, removeCmd)
 	case res.Node == st.Self.StableID || peer.SPKI(cert) == id.SPKI:
 		return errors.New("the server answered with this machine's own node or key; not pairing")
 	}
@@ -214,7 +224,7 @@ func (e *clientEnv) pair(target, name string) error {
 	case "next-start":
 		fmt.Fprintln(e.stdout, "pneu isn't running on the server (or runs without its peer block): the pairing applies when it starts there.")
 	default:
-		fmt.Fprintf(e.stdout, "The server recorded it but didn't confirm it's live: its SSH session had no XDG_RUNTIME_DIR (no pam_systemd session), or its pneu didn't acknowledge in time. It applies at the server's next start at the latest (systemctl --user restart pneu there). Check with `ssh %s pneu peer list`.\n", target)
+		fmt.Fprintf(e.stdout, "The server recorded it but didn't confirm it's live: its SSH session had no XDG_RUNTIME_DIR (no pam_systemd session), or its pneu didn't acknowledge in time. It applies at the server's next start at the latest (systemctl --user restart pneu there). Check with `ssh %s '~/.local/bin/pneu peer list'`.\n", config.ShellWord(target))
 	}
 	fmt.Fprintln(e.stdout, "Next: systemctl --user restart pneu here, then pneu open.")
 	return nil
@@ -292,8 +302,17 @@ func (e *clientEnv) unpair() error {
 		fmt.Fprintln(e.stdout, "The server still admits the old key until you remove this machine there: pneu peer list, then pneu peer remove <name>.")
 		return nil
 	}
-	fmt.Fprintf(e.stdout, "The server still admits the old key until you run:\n\n  ssh %s pneu peer remove %s\n", target, name)
+	fmt.Fprintf(e.stdout, "The server still admits the old key until you run:\n\n  %s\n", remoteRemove(target, name))
 	return nil
+}
+
+// remoteRemove is the command that removes this machine on the server,
+// for the user to run: the remote shell expands ~ to the server's home, and
+// a non-interactive SSH session may not have ~/.local/bin on its PATH.
+// target and name are validated (config.ValidSSHTarget, peer.ValidName);
+// target is shell-quoted unless it's a plain word (config.ShellWord).
+func remoteRemove(target, name string) string {
+	return "ssh " + config.ShellWord(target) + " '~/.local/bin/pneu peer remove " + name + "'"
 }
 
 // cappedBuffer keeps at most max bytes; past that it fails the write,
@@ -426,7 +445,7 @@ func startClient(cfg config.Config, dir, sock string, sockErr error, api link.AP
 	if sockErr != nil {
 		return fail(fmt.Errorf("client mode needs its control socket (%v): pneu client unpair reaches the daemon through it", sockErr))
 	}
-	if c.ctl, err = control.Listen(sock, control.Handler{Launch: c.launch, Client: true, Unlink: c.unlink, ResetWindow: auth.ArmClearSite}); err != nil {
+	if c.ctl, err = control.Listen(sock, control.Handler{Launch: c.launch, Client: true, Unlink: c.unlink, ResetWindow: auth.ArmClearSite, Situation: c.situation}); err != nil {
 		return fail(fmt.Errorf("client mode needs its control socket: %w", err))
 	}
 	creds, err := link.LoadCreds(dir)
@@ -459,6 +478,18 @@ func (c *clientRun) launch() {
 	if d != nil {
 		d.Launch()
 	}
+}
+
+// situation is the control socket's: the daemon's view, or starting
+// before the link exists.
+func (c *clientRun) situation() control.Situation {
+	c.mu.Lock()
+	d := c.d
+	c.mu.Unlock()
+	if d == nil {
+		return control.Situation{Mode: control.ModeClient, Link: string(link.Starting)}
+	}
+	return d.Situation()
 }
 
 // unlink is the control socket's: the link drops its pairing and returns

@@ -765,7 +765,9 @@
     }).then(function (res) {
       return res.json().catch(function () { return null; }).then(function (data) {
         if (!res.ok || !data || typeof data.method !== 'string') {
-          throw new Error((data && (data.reason || data.error)) || 'HTTP ' + res.status);
+          var err = new Error((data && (data.reason || data.error)) || 'HTTP ' + res.status);
+          err.link = linkOutcome(res, data);
+          throw err;
         }
         return data;
       });
@@ -778,7 +780,9 @@
       s.abort = null;
       var ctx = s.ctx;
       cancel();
-      ctx.flash('Unsubscribe failed: ' + (err && err.message || 'network error'), 'error');
+      // On a client, a server it can't reach says so (link.js).
+      var lt = err && err.link && ctx.linkText ? ctx.linkText(err.link, false) : null;
+      ctx.flash(lt ? 'Unsubscribe: ' + lt : 'Unsubscribe failed: ' + (err && err.message || 'network error'), 'error');
     });
   }
 
@@ -1027,13 +1031,39 @@
     }).then(function (res) {
       return res.json().catch(function () { return null; }).then(function (data) {
         if (res.status === 409 && data && data.state === 'expired') return data;
+        // A client daemon that couldn't reach the server says whether the
+        // POST left this machine (Pneu-Link, link.js).
+        var link = linkOutcome(res, data);
+        if (link) return { linkFail: link };
         if (!res.ok || !data || typeof data.state !== 'string') return null; // no answer we can read
         return data;
       });
     }, function () { return null; }).then(function (data) {
-      if (data) outcome(s, data);
+      if (data && data.linkFail === 'not-sent') notSent(s);
+      else if (data && data.linkFail) unknown(s, token, 0, 0, s.ctx.linkText ? s.ctx.linkText('unknown', true) : null);
+      else if (data) outcome(s, data);
       else unknown(s, token, 0);
     });
+  }
+
+  // linkOutcome is a failed answer's Pneu-Link from a client daemon
+  // ('not-sent' or 'unknown'), or '' (the server answered, or a server).
+  function linkOutcome(res, data) {
+    var L = root.Pneu && root.Pneu.link;
+    return L && !res.ok ? L.outcome(res.headers, data) : '';
+  }
+
+  // notSent: the POST never left this machine (the link was down), so
+  // nothing ran and the token is unused. Safe to try again, from a fresh
+  // preview.
+  function notSent(s) {
+    var text = (s.ctx.linkText && s.ctx.linkText('not-sent', true)) || 'Not sent: can’t reach the server.';
+    if (!live(s)) { s.ctx.flash(text, 'error'); return; }
+    phase({
+      title: 'Not sent',
+      body: [note(text + ' Nothing was sent.', 'bad')],
+      actions: [['y', 'Preview again', function (e) { rearm(s, e); preview(s.after); }], CLOSE],
+    }, null);
   }
 
   // Delays before each ask for the stored result: two for a lost answer,
@@ -1044,10 +1074,11 @@
 
   // unknown: the POST's answer was lost. It may have run; it is never sent
   // again. The stored result is asked for instead.
-  function unknown(s, token, n, pending) {
+  // why, on the first call, says why the answer was lost (a client's link).
+  function unknown(s, token, n, pending, why) {
     pending = pending || 0;
     if (n === 0 && !pending && live(s)) {
-      phase({ title: 'Outcome unknown', body: [note('The answer was lost; checking whether it went through…')], actions: [CLOSE] }, null);
+      phase({ title: 'Outcome unknown', body: [note(why || 'The answer was lost; checking whether it went through…')], actions: [CLOSE] }, null);
     }
     if (n >= POLL.length || pending > PENDING.max) {
       report(s, 'Unsubscribe outcome unknown. It may have gone through; it will not be retried.', 'error',

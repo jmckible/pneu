@@ -83,3 +83,27 @@ func TestPeerAndServer(t *testing.T) {
 		t.Fatalf("round trip lost a block: %s", b)
 	}
 }
+
+// One account-name rule everywhere: a plain word.
+func TestValidName(t *testing.T) {
+	for n, want := range map[string]bool{
+		"personal": true, "work": true, "acme.co": true, "a_b-c": true, "9": true, strings.Repeat("a", 32): true,
+		"": false, strings.Repeat("a", 33): false, "-x": false, ".x": false, "_x": false, "a b": false,
+		"$(id)": false, "`id`": false, "a;b": false, "a/b": false, "x‮y": false, "über": false, "<b>": false, "a'b": false,
+	} {
+		if ValidName(n) != want {
+			t.Errorf("ValidName(%q) = %v", n, !want)
+		}
+	}
+}
+
+func TestShellWord(t *testing.T) {
+	for in, want := range map[string]string{
+		"dell": "dell", "me@dell.ts.net": "me@dell.ts.net", "host:22": "host:22",
+		"a b": "'a b'", "$(id)": "'$(id)'", "it's": `'it'\''s'`, "x;y": "'x;y'",
+	} {
+		if got := ShellWord(in); got != want {
+			t.Errorf("ShellWord(%q) = %s, want %s", in, got, want)
+		}
+	}
+}

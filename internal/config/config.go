@@ -139,26 +139,22 @@ func Write(path string, c Config) error {
 }
 
 // MaxName bounds an account name, in bytes.
-const MaxName = 64
+const MaxName = 32
 
-// ValidName reports whether name can be an account name: it becomes a path
-// segment and a command-line word, and is shown as plain text (pages, the
-// bar's status.json, a client's, from a server that may be hostile). Valid
-// UTF-8 of graphic characters only: no space, no control or format
-// character (bidi overrides included), no line or paragraph separator, no
-// slash, not starting with '-' or '.', at most MaxName bytes. Rejected,
-// never normalized.
-func ValidName(name string) bool {
-	if name == "" || len(name) > MaxName || !utf8.ValidString(name) || strings.HasPrefix(name, "-") || strings.HasPrefix(name, ".") {
-		return false
-	}
-	for _, r := range name {
-		if r == '/' || !unicode.IsGraphic(r) || unicode.IsSpace(r) {
-			return false
-		}
-	}
-	return true
-}
+// NameRule says what ValidName accepts, for error messages.
+const NameRule = "a short word like personal or work: letters, digits, . _ -, starting with a letter or digit, at most 32"
+
+// nameRE is the one account-name rule, everywhere: the config, `pneu
+// account add`, a server's /peer/hello, a client's event account set, and
+// what a suggested command or an agent prompt may show.
+var nameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$`)
+
+// ValidName reports whether name can be an account name. It becomes a
+// path segment and a command-line word, and is shown in pages, the bar
+// and (on a client, from a server that may be hostile) suggested
+// commands: so nothing a shell or a reader would take for more than a
+// word. Rejected, never normalized.
+func ValidName(name string) bool { return nameRE.MatchString(name) }
 
 func (c Config) normalize() (Config, error) {
 	if c.Port == 0 {
@@ -191,7 +187,7 @@ func (c Config) normalize() (Config, error) {
 	for i := range c.Accounts {
 		a := &c.Accounts[i]
 		if !ValidName(a.Name) {
-			return Config{}, fmt.Errorf("config: bad account name %q", a.Name)
+			return Config{}, fmt.Errorf("config: bad account name %q: %s", a.Name, NameRule)
 		}
 		if seen[a.Name] {
 			return Config{}, fmt.Errorf("config: duplicate account %q", a.Name)
@@ -210,6 +206,19 @@ func (c Config) normalize() (Config, error) {
 
 // nodeRE is a Tailscale StableID, as peer.ValidNode has it.
 var nodeRE = regexp.MustCompile(`^[A-Za-z0-9]{1,64}$`)
+
+// shellPlain is what ShellWord leaves unquoted.
+var shellPlain = regexp.MustCompile(`^[A-Za-z0-9@._:-]+$`)
+
+// ShellWord is s as one word of a shell command line printed for the user
+// to copy: as is when it's only [A-Za-z0-9@._:-], else single-quoted (any
+// ' inside as '\”). For printing, never for running: pneu runs argv.
+func ShellWord(s string) string {
+	if shellPlain.MatchString(s) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
 
 // ValidSSHTarget reports whether t can be handed to ssh after "--": not
 // empty, at most 255 bytes, no leading '-' (never an option, whatever ssh

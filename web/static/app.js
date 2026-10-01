@@ -1505,6 +1505,12 @@
     if (!target) return;
     Pneu.actions.unsubscribe(target, e, {
       flash: flash,
+      // linkText words a Pneu-Link outcome ('not-sent', 'unknown') for a
+      // write (a POST) or a read; null on a server, or with none.
+      linkText: function (out, write) {
+        if (!lk || !out) return null;
+        return write ? lk.failText(out, linkInfo) : lk.reachText(out, linkInfo);
+      },
       archive: function (id) {
         if (!id.root || id.root !== T.root || !id.root.isConnected) { flash('That thread is no longer open'); return; }
         whenReady(function () { threadRemove('archive'); })();
@@ -2048,6 +2054,9 @@
     });
   }
 
+  // word: an account name as a suggested command shows it (link.js).
+  function word(n) { return Pneu.link ? Pneu.link.accountWord(n) : '<account>'; }
+
   function acctLine(a) {
     var p = el('p');
     p.dataset.account = a.name;
@@ -2057,11 +2066,11 @@
     switch (a.state) {
       case 'unconfigured':
         text('not set up. Run ');
-        p.appendChild(el('code', null, 'pneu account add ' + a.name + ' <address>'));
+        p.appendChild(el('code', null, 'pneu account add ' + word(a.name) + ' <address>'));
         break;
       case 'unauthorized':
         text('not connected to Gmail. Run ');
-        p.appendChild(el('code', null, 'pneu account auth ' + a.name));
+        p.appendChild(el('code', null, 'pneu account auth ' + word(a.name)));
         break;
       case 'needs-pull':
         if (a.failures > 0) {
@@ -2155,6 +2164,21 @@
   var ageTimer = 0;
   var lineSaid = null; // the last state announced (#sync-live)
   var syncInfo = null; // dialog#syncinfo, once opened
+  var workers = 0;     // service worker registrations found on this origin
+
+  // A service worker on pneu's origin (docs/client.md R4): AppCSP's
+  // worker-src 'none' means pneu never registers one, so finding one means
+  // something else did. Each is unregistered, and the line says to reset
+  // the window: a worker that served this page could have served this
+  // script too, so this is a tripwire after the reset, not the reset.
+  if (navigator.serviceWorker && typeof navigator.serviceWorker.getRegistrations === 'function') {
+    navigator.serviceWorker.getRegistrations().then(function (regs) {
+      if (!regs || !regs.length) return;
+      workers = regs.length;
+      regs.forEach(function (r) { try { r.unregister(); } catch (e) { /* the line still says so */ } });
+      renderLine();
+    }, function () { /* no answer: nothing to say */ });
+  }
 
   acctOrder.forEach(function (n) { if (accounts[n].queued || accounts[n].running) busySince[n] = Date.now(); });
 
@@ -2175,11 +2199,14 @@
     return Math.floor(m / (24 * 60)) + 'd ago';
   }
 
-  // lineState is the line's state: { state, text }, state one of link (a
-  // client's link down: first, since nothing else on the line is current
-  // then), checking, error, stale, fresh, or '' (nothing to say: no ready
-  // account has synced).
+  // lineState is the line's state: { state, text }, state one of worker (a
+  // service worker was found: first, since nothing on the page can be
+  // trusted then), link (a client's link down: nothing else on the line is
+  // current then), checking, error, stale, fresh, or '' (nothing to say: no
+  // ready account has synced).
   function lineState() {
+    var worker = lk && lk.workerLine(workers);
+    if (worker) return worker;
     var down = lk && lk.lineState(linkInfo);
     if (down) return down;
     var accts = readyAccounts();
@@ -2218,7 +2245,7 @@
     clearTimeout(ageTimer);
     ageTimer = st.state === 'fresh' || st.state === 'stale' ? setTimeout(renderLine, AGE_TICK) : 0;
     // Announce a change of state, not the age ticking over.
-    var said = st.state + (st.state === 'error' || st.state === 'link' ? st.text : '');
+    var said = st.state + (st.state === 'error' || st.state === 'link' || st.state === 'worker' ? st.text : '');
     if (lineLive && lineSaid !== null && said !== lineSaid) lineLive.textContent = st.text;
     lineSaid = said;
     if (syncInfo && syncInfo.open) syncInfo.replaceChildren(syncDetails());

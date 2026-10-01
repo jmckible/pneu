@@ -31,6 +31,16 @@ func TestInstallScript(t *testing.T) {
 	if strings.Contains(out, "Uninstall") || strings.Contains(out, "rm -r") {
 		t.Error("the Uninstall section leaked into the rehearsal")
 	}
+	// The rehearsal is a server's install: the client path and the peer
+	// block are sections of their own, never run by it.
+	for _, leak := range []string{"pneu client pair", "packages client", ".peer = ", "step 'Client path'", "step 'Let other machines in'"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("%q leaked into the rehearsal:\n%s", leak, out)
+		}
+	}
+	if !strings.Contains(out, `cmd 'pkexec "$PWD/install/packages" server "$USER" ~/.cache/pneu/lieer'`) {
+		t.Errorf("step 1 doesn't install a server:\n%s", out)
+	}
 }
 
 // The Uninstall section is rehearsed on its own, after the install.

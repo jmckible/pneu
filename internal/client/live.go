@@ -172,3 +172,21 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
 }
+
+// Situation is the daemon's half of an agent callout (control.Situation):
+// the link's local reason code, the server's revision as the link kept it
+// (40 hex or ""), and the accounts the last valid status says are failing
+// (names in the hello's set, config.ValidName). Nothing else from the
+// server.
+func (d *Daemon) Situation() control.Situation {
+	sit := control.Situation{Mode: control.ModeClient, Link: string(d.up.State().Reason)}
+	if h := d.up.Hello(); h != nil {
+		sit.ServerRevision = h.Revision
+	}
+	d.mu.Lock()
+	if s := d.live.status; s != nil {
+		sit.Failing = web.FailingAccounts(s.Accounts)
+	}
+	d.mu.Unlock()
+	return sit
+}

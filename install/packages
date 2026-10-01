@@ -2,18 +2,34 @@
 # INSTALL.md step 1, the part that needs root, in one pkexec call so the
 # human answers one password dialog:
 #
-#   pkexec "$PWD/install/packages" "$USER" ~/.cache/pneu/lieer
+#   pkexec "$PWD/install/packages" server "$USER" ~/.cache/pneu/lieer
+#   pkexec "$PWD/install/packages" client
 #
-# Installs go, notmuch, python-tqdm and lieer's dependencies from the Arch
-# repos, builds lieer as USER from the AUR files in DIR (fetched and
-# reviewed beforehand, audit 10), installs it, and removes the build-only
-# packages this run added, even when a step fails. Nothing from the AUR is
-# used but DIR: a dependency that isn't in the Arch repos fails the install
-# rather than being built unreviewed.
+# server: installs go, notmuch, python-tqdm and lieer's dependencies from
+# the Arch repos, builds lieer as USER from the AUR files in DIR (fetched
+# and reviewed beforehand, audit 10), installs it, and removes the
+# build-only packages this run added, even when a step fails. Nothing from
+# the AUR is used but DIR: a dependency that isn't in the Arch repos fails
+# the install rather than being built unreviewed.
+#
+# client: a machine that keeps no mail (docs/client.md) needs only go to
+# build pneu: no lieer, no notmuch.
 set -eu
-[ $# = 2 ] || { echo "usage: pkexec $0 USER DIR" >&2; exit 2; }
-user=$1 dir=$2
+usage() { echo "usage: pkexec $0 server USER DIR | client" >&2; exit 2; }
+[ $# -ge 1 ] || usage
+mode=$1
+shift
+case $mode in
+server) [ $# = 2 ] || usage ;;
+client) [ $# = 0 ] || usage ;;
+*) usage ;;
+esac
 [ "$(id -u)" = 0 ] || { echo "packages: run this through pkexec" >&2; exit 1; }
+if [ "$mode" = client ]; then
+	pacman -S --needed --noconfirm go
+	exit
+fi
+user=$1 dir=$2
 [ -f "$dir/.SRCINFO" ] || { echo "packages: $dir has no .SRCINFO; fetch lieer first (INSTALL.md step 1)" >&2; exit 1; }
 [ "$(stat -c %U "$dir")" = "$user" ] || { echo "packages: $dir doesn't belong to $user" >&2; exit 1; }
 

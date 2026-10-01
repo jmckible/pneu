@@ -16,6 +16,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/jmckible/pneu/internal/config"
 	"github.com/jmckible/pneu/internal/link"
 	"github.com/jmckible/pneu/internal/web"
 )
@@ -23,9 +24,12 @@ import (
 //go:embed page
 var pageFS embed.FS
 
-var errorTmpl = template.Must(template.ParseFS(pageFS, "page/error.html"))
+var (
+	errorTmpl = template.Must(template.ParseFS(pageFS, "page/error.html"))
+	sendTmpl  = template.Must(template.ParseFS(pageFS, "page/send.html"))
+)
 
-// clientStatic is /client/static/: the error page's two files, nothing
+// clientStatic is /client/static/: the error pages' two files, nothing
 // else (no listing, no ranges, no validators).
 var clientStatic = map[string]string{
 	"error.css": "text/css; charset=utf-8",
@@ -66,7 +70,7 @@ func explain(st link.State, server string) errorPage {
 	p := errorPage{Reason: string(st.Reason), Server: server, Since: st.Since.Local().Format("15:04 Jan 2"),
 		Retrying: st.Reason != link.PinMismatch}
 	fix := step{Menu: "Fix with agent"}
-	repair := []step{{Command: "pneu client unpair"}, {Command: "pneu client pair " + server, Note: "then add this machine again on " + server}}
+	repair := []step{{Command: "pneu client unpair"}, {Command: "pneu client pair " + config.ShellWord(server), Note: "then add this machine again on " + server}}
 	switch st.Reason {
 	case link.Starting:
 		p.Title, p.Says = "Connecting to "+server+"…", "pneu is opening its link to "+server+"."
@@ -98,7 +102,7 @@ func explain(st link.State, server string) errorPage {
 	default: // refused, and anything new
 		p.Title = server + " is up, but pneu isn't answering"
 		p.Says = "pneu on " + server + " isn't running, or isn't letting other machines in."
-		p.Steps = []step{{Command: "ssh " + server + " systemctl --user status pneu"}, fix}
+		p.Steps = []step{{Command: "ssh " + config.ShellWord(server) + " systemctl --user status pneu"}, fix}
 	}
 	return p
 }
@@ -128,4 +132,56 @@ func (d *Daemon) errorPage(w http.ResponseWriter, rt *web.Route, st link.State) 
 func pageNavigation(rt *web.Route, r *http.Request) bool {
 	_, html := web.HTMLPolicy(rt)
 	return html && r.Method == http.MethodGet && web.Navigation(r)
+}
+
+// sendPage is what a compose form's POST /send gets when the link failed
+// it: the draft is in this browser's storage (compose.js keeps it, id and
+// all, until the send's own redirect), so the page says what happened and
+// takes the user back to it. It never reloads itself: that would post the
+// form again.
+type sendPage struct {
+	Outcome, Title string
+	Says           []string
+}
+
+func explainSend(outcome, server string) sendPage {
+	if outcome == NotSent {
+		return sendPage{Outcome: outcome, Title: "Not sent: can't reach " + server, Says: []string{
+			"Nothing left this machine.",
+			"Your draft is kept in this browser. Go back to it and send again once " + server + " is back; the status line says when.",
+		}}
+	}
+	return sendPage{Outcome: outcome, Title: server + " didn't answer", Says: []string{
+		"The message may have been sent: check Sent before writing it again.",
+		"Your draft is kept in this browser. Sending it again from the draft won't send it twice: " + server + " answers a repeat of the same draft from its record.",
+	}}
+}
+
+// sendNavigation: r is the compose form's own POST /send, a top-level
+// navigation, which a local page can answer under the compose class.
+func sendNavigation(rt *web.Route, r *http.Request) bool {
+	return rt.Method == http.MethodPost && rt.Pattern == "/send" && r.Method == http.MethodPost && web.Navigation(r)
+}
+
+// sendFailed answers a form's POST /send the link failed: 503 not-sent or
+// 504 unknown, under the route's HTML class (compose).
+func (d *Daemon) sendFailed(w http.ResponseWriter, rt *web.Route, outcome string) {
+	var b bytes.Buffer
+	if err := sendTmpl.Execute(&b, explainSend(outcome, d.server)); err != nil {
+		http.Error(w, "the error page failed", http.StatusInternalServerError)
+		return
+	}
+	p, _ := web.HTMLPolicy(rt)
+	a := web.Admitted{Policy: p, Header: http.Header{"Content-Type": {"text/html; charset=utf-8"}}}
+	if err := a.Install(w, rt); err != nil {
+		http.Error(w, "the error page failed", http.StatusInternalServerError)
+		return
+	}
+	status := http.StatusGatewayTimeout
+	if outcome == NotSent {
+		status = http.StatusServiceUnavailable
+	}
+	w.Header().Set(LinkHeader, outcome)
+	w.WriteHeader(status)
+	w.Write(b.Bytes())
 }

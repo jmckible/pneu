@@ -8,8 +8,10 @@ real. Only level 1 is built.
 This runs INSTALL.md itself, not a copy of it: `rehearse script` turns the
 numbered steps' shell blocks and file blocks into a script, and the harness
 runs that script. A new placeholder or a block the harness can't place
-fails `go test ./internal/testmail/cmd/rehearse`. A full run from scratch
-takes about three seconds.
+fails `go test ./internal/testmail/cmd/rehearse`. The numbered steps are
+a server's install; unnumbered sections (Let other machines in, the Client
+path) are not rehearsed. A full run from scratch takes about three
+seconds.
 
 ```sh
 scripts/rehearse                 # run steps 1–7 for one account, then check the result

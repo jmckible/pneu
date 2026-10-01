@@ -12,6 +12,7 @@ package control
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -23,12 +24,16 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/jmckible/pneu/internal/config"
 )
 
 // Command is one request.
@@ -48,6 +53,9 @@ const (
 	// PeersReload, as "peers-reload <generation> <hash>", asks the daemon to
 	// make that generation of peers.json live (ReloadPeers).
 	PeersReload Command = "peers-reload"
+	// SituationCmd answers what an agent callout needs to know (Situation),
+	// in local codes: `pneu agent`, from the bar menu's Fix with agent.
+	SituationCmd Command = "situation"
 )
 
 const (
@@ -101,6 +109,34 @@ func Self() Info {
 	return in
 }
 
+// Situation is the situation reply: the daemon's own view of what's
+// wrong, in local codes and names only (docs/client.md, "The action
+// menu"). The CLI validates every field again before any of it reaches a
+// prompt.
+type Situation struct {
+	Mode string `json:"mode"` // "server" | "client"
+	// Link is a client's link state as its local reason code (link.Reason:
+	// "up", "starting", "tailscale-down", …); empty on a server.
+	Link string `json:"link,omitempty"`
+	// ServerRevision is the server's vcs.revision from the last hello, only
+	// as 40 hex digits (the link keeps nothing else); "" when unknown.
+	ServerRevision string `json:"serverRevision,omitempty"`
+	// Failing names accounts whose sync is failing (web.Sick), at most
+	// MaxFailing of them; More counts the rest.
+	Failing []string `json:"failing,omitempty"`
+	More    int      `json:"more,omitempty"`
+}
+
+// MaxFailing bounds Situation.Failing, so the reply fits one line:
+// account names are at most 32 bytes (config.ValidName).
+const MaxFailing = 8
+
+// Situation modes.
+const (
+	ModeServer = "server"
+	ModeClient = "client"
+)
+
 // Handler is what the commands do. Launch must be quick: it runs before the
 // reply, so `pneu open` returns only once the sync is queued. PeersReload
 // (nil: no peer listener) returns once gen is live, or an error; it must
@@ -114,6 +150,8 @@ type Handler struct {
 	Unlink func() error
 	// ResetWindow arms the next navigation's Clear-Site-Data; nil: refused.
 	ResetWindow func()
+	// Situation is the daemon's view for an agent callout; nil: refused.
+	Situation func() Situation
 }
 
 // Server accepts commands on the socket until Close.
@@ -284,6 +322,11 @@ func (s *Server) answer(cmd Command) string {
 		}
 		s.h.ResetWindow()
 		return "ok"
+	case SituationCmd:
+		if s.h.Situation == nil {
+			return "error situation unavailable"
+		}
+		return situationReply(s.h.Situation())
 	case Status:
 		b, err := json.Marshal(Self())
 		if err != nil {
@@ -293,6 +336,130 @@ func (s *Server) answer(cmd Command) string {
 	default:
 		return "error unknown command"
 	}
+}
+
+// situationReply encodes sit on one line within MaxLine: at most
+// MaxFailing names, then fewer while it's still too long, the dropped ones
+// counted in More.
+func situationReply(sit Situation) string {
+	if len(sit.Failing) > MaxFailing {
+		sit.More += len(sit.Failing) - MaxFailing
+		sit.Failing = sit.Failing[:MaxFailing]
+	}
+	for {
+		b, err := json.Marshal(sit)
+		if err != nil {
+			return "error " + oneLine(err.Error())
+		}
+		if len(b) < MaxLine-1 || len(sit.Failing) == 0 {
+			if len(b) >= MaxLine-1 {
+				return "error situation too long"
+			}
+			return string(b)
+		}
+		sit.Failing = sit.Failing[:len(sit.Failing)-1]
+		sit.More++
+	}
+}
+
+// LinkCodes are the link's local reason codes (internal/link's Reason
+// values; a test there keeps the two in step): the only values a client's
+// Situation.Link may take.
+var LinkCodes = []string{"starting", "up", "tailscale-down", "node-offline", "node-mismatch", "refused", "pin-mismatch", "not-paired", "protocol"}
+
+// MaxMore bounds Situation.More: a config holds far fewer accounts.
+const MaxMore = 1000
+
+var revisionHex = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// AskSituation asks the daemon at path for its Situation, and parses the
+// reply as strictly as it's built: one JSON object and nothing after it,
+// each known key at most once and no other, every field within its shape
+// (ParseSituation).
+func AskSituation(path string) (Situation, error) {
+	reply, err := Send(path, SituationCmd, Timeout)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) {
+			return Situation{}, fmt.Errorf("%w (%v)", ErrNotRunning, err)
+		}
+		return Situation{}, err
+	}
+	sit, err := ParseSituation([]byte(reply))
+	if err != nil {
+		return Situation{}, fmt.Errorf("control: situation: %w", err)
+	}
+	return sit, nil
+}
+
+// ParseSituation reads a situation reply by token: encoding/json would
+// keep the last of a duplicate key, match keys case-insensitively, and
+// stop after the first value.
+func ParseSituation(b []byte) (Situation, error) {
+	var sit Situation
+	dec := json.NewDecoder(bytes.NewReader(b))
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return sit, errors.New("not a JSON object")
+	}
+	seen := map[string]bool{}
+	for dec.More() {
+		t, err := dec.Token()
+		if err != nil {
+			return sit, err
+		}
+		key, _ := t.(string)
+		if seen[key] {
+			return sit, fmt.Errorf("key %q twice", key)
+		}
+		seen[key] = true
+		var dst any
+		switch key {
+		case "mode":
+			dst = &sit.Mode
+		case "link":
+			dst = &sit.Link
+		case "serverRevision":
+			dst = &sit.ServerRevision
+		case "failing":
+			dst = &sit.Failing
+		case "more":
+			dst = &sit.More
+		default:
+			return sit, fmt.Errorf("unknown field %q", key)
+		}
+		if err := dec.Decode(dst); err != nil {
+			return sit, fmt.Errorf("%s: %w", key, err)
+		}
+	}
+	if t, err := dec.Token(); err != nil || t != json.Delim('}') {
+		return sit, errors.New("unterminated object")
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return sit, errors.New("trailing data after the object")
+	}
+	switch sit.Mode {
+	case ModeClient:
+		if !slices.Contains(LinkCodes, sit.Link) {
+			return sit, fmt.Errorf("unknown link code %q", sit.Link)
+		}
+		if sit.ServerRevision != "" && !revisionHex.MatchString(sit.ServerRevision) {
+			return sit, errors.New("serverRevision isn't 40 hex digits")
+		}
+	case ModeServer:
+		if sit.Link != "" || sit.ServerRevision != "" {
+			return sit, errors.New("a server has no link")
+		}
+	default:
+		return sit, fmt.Errorf("unknown mode %q", sit.Mode)
+	}
+	if len(sit.Failing) > MaxFailing || sit.More < 0 || sit.More > MaxMore {
+		return sit, errors.New("failing accounts out of bounds")
+	}
+	for _, n := range sit.Failing {
+		if !config.ValidName(n) {
+			return sit, fmt.Errorf("bad account name %q", n)
+		}
+	}
+	return sit, nil
 }
 
 // peersOff is the reply when the daemon runs no peer listener; clientMode,

@@ -7,6 +7,8 @@
 //	pneu account add|auth|status ...
 //	pneu peer add --stdin | list | remove <name>
 //	pneu client pair [-name <name>] <ssh-target> | unpair
+//	pneu agent [-print]
+//	pneu reset-window
 package main
 
 import (
@@ -62,8 +64,12 @@ func main() {
 		err = peerCmd(args)
 	case "client":
 		err = clientCmd(args)
+	case "agent":
+		err = agentCmd(args)
+	case "reset-window":
+		err = resetWindowCmd(args)
 	default:
-		err = usageError{fmt.Sprintf("unknown command %q; usage: pneu [serve|open|gmi|account|peer|client] ...", cmd)}
+		err = usageError{fmt.Sprintf("unknown command %q; usage: pneu [serve|open|gmi|account|peer|client|agent|reset-window] ...", cmd)}
 	}
 	if err != nil {
 		log.Print("pneu: ", err)
@@ -330,7 +336,10 @@ func listenControl(srv *web.Server, ps *peer.Server) *control.Server {
 		log.Printf("pneu: no control socket: %v; pneu open won't sync on launch", err)
 		return nil
 	}
-	h := control.Handler{Launch: srv.Launch, ResetWindow: srv.Auth.ArmClearSite}
+	h := control.Handler{Launch: srv.Launch, ResetWindow: srv.Auth.ArmClearSite,
+		Situation: func() control.Situation {
+			return control.Situation{Mode: control.ModeServer, Failing: srv.Failing()}
+		}}
 	if ps != nil {
 		h.PeersReload = ps.Reload
 	}

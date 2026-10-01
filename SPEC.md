@@ -84,7 +84,12 @@ them here if they're wrong.
   act on: a chip on the cursor message, a viewable attachment in the
   thread, a `List-Unsubscribe` header on the cursor message.
 - **Sync state.** A short status line at the header's far right says how
-  current the view is. In priority order: on a client (docs/client.md),
+  current the view is. In priority order: `A service worker was removed
+  from this window · Reset window data (bar menu)` in `--accent-hot`, in
+  either mode, when the page finds a service worker registered on its
+  origin (pneu never registers one: `worker-src 'none'`); it unregisters
+  each and holds the line until reloaded, since whatever the worker served
+  may still be running (docs/client.md R4). Then, on a client (docs/client.md),
   `Can't reach <server> · retrying` in `--accent-hot` while its link to
   the server is down (`<server>` is the SSH target it was paired with;
   the page keeps what it shows, and the line comes back when the link
@@ -122,7 +127,12 @@ them here if they're wrong.
   its usual failure: `Not sent: can't reach <server>.` when nothing left
   this machine (pressing again is safe), `<server> didn't answer; checking
   when it's back.` when it may have landed; the next `hello` (the link
-  back) brings the generation, and the list reconciles. A page loaded
+  back) brings the generation, and the list reconciles. An unsubscribe
+  (X) whose POST never left says `Not sent: can't reach <server>. Nothing
+  was sent.` with `y` to preview again; one whose answer was lost says
+  `<server> didn't answer; checking when it's back.` and asks for the
+  stored result as usual; a preview that couldn't reach the server
+  flashes `Unsubscribe: Can't reach <server>.` A page loaded
   while the link is down is the client's own error page: what's wrong in
   local words, the bar-menu action or terminal command that fixes it, and
   a reload once the link is up. A server never shows any of this.
@@ -163,6 +173,35 @@ them here if they're wrong.
   writer wins).
 - **Theme.** Everything references a CSS variable; nothing hardcodes a color.
   Verify against three Omarchy themes (one light) before merge. *default*
+- **Bar widget** (`shell/BarWidget.qml`, its decisions in `shell/status.js`).
+  The mark in the bar's foreground at rest, the accent with the unread
+  count, the urgent colour when the count can't be trusted; a first
+  download shows its percent in place of the count; `style: Minimal` shows
+  only unread mail or a warning. It reads only `status.json`: version 1
+  (a server's) or 2 (a client's, docs/client.md). Warning: no readable
+  file, this machine's pneu stopped or silent for 20 minutes, an account
+  failing, needing re-auth or not set up, and on a client the server out
+  of reach (`server.link` down, or `starting` for more than 90s) or
+  silent (`server.statusAt` 20 minutes old: the counts are stale even
+  though `updated` keeps ticking). A client still connecting just after
+  start is neutral: `Connecting to <server>…`. The tooltip lists what's
+  wrong: `Can't reach <server> since 14:02 · <server> is offline` (the
+  reason in local words), `No word from <server> since 14:02`, the unread
+  line with `(as of 14:02)` when stale, the accounts; on a client the
+  commands that fix an account say `on <server>`. Every string from the
+  file is drawn as plain text after control and bidi characters are
+  dropped. Left click runs `pneu open` (or the `command` setting); right
+  click opens the menu: **Open pneu**; **Fix with agent** only when
+  there's something to fix (an account failing; on a client also the link
+  out, a protocol mismatch, its own daemon stopped or silent, the server
+  silent), which runs `pneu agent`; **Reopen pneu (reset done)** for 30
+  minutes after a reset this widget started; **Reset window data…**,
+  which first says what it does (closes pneu's app windows and deletes
+  compose drafts saved in the browser; a pneu tab or popup needs the
+  browser quit first) and runs `pneu reset-window` on a second click. Every item runs a fixed argv from `status.js`, never a shell
+  line and never anything from the file. A suggested command shows an
+  account name only when it is a plain word (`config.ValidName`), else
+  `<account>`. *default*
 
 ## Index views
 
@@ -318,6 +357,14 @@ What the page says when a send doesn't simply go out:
   text, discard the draft and start again.
 - A draft already sent (or that may have been) and then edited is refused
   with the same advice.
+
+On a client, a send the link fails gets the client's own page in place of
+the form's answer, and the draft stays saved in the browser: `Not sent:
+can't reach <server>` (nothing left this machine; go back and send again
+once it's back), or `<server> didn't answer` (it may have been sent: check
+Sent; sending the same draft again is answered from the server's record,
+never sent twice). Its one button goes back to the draft; it never
+reloads, which would post the form again.
 
 If the browser can't save the draft before sending, the send is blocked
 with a message: without the saved id a reopened draft could send twice.

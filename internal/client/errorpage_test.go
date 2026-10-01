@@ -123,3 +123,55 @@ func TestErrorPagePinMismatch(t *testing.T) {
 		t.Fatalf("%d\n%s", resp.StatusCode, body)
 	}
 }
+
+// The compose form's POST /send that the link fails gets a page, under the
+// compose class: not-sent says nothing left and the draft is kept;
+// unknown says check Sent and that a resend won't send twice. A script's
+// POST /send (no navigation) still gets the plain answer.
+func TestSendPage(t *testing.T) {
+	keys := linktest.NewKeys(t)
+	u := linktest.StartUpstream(t, keys.Server, keys.Creds.Identity.SPKI, nil)
+	api := linktest.NewAPI()
+	api.Set(func(a *linktest.API) { a.State = "Stopped" })
+	r := newRig(t, keys, u.Port, api)
+	waitState(t, r.link, link.TailscaleDown)
+
+	form := map[string]string{"Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
+	resp, body := r.do(r.req("POST", "/send", "message_id=x", form))
+	if resp.StatusCode != 503 || resp.Header.Get(LinkHeader) != NotSent || resp.Header.Get(web.PolicyHeader) != "compose" ||
+		!strings.Contains(body, "Not sent: can&#39;t reach dell") || !strings.Contains(body, "draft is kept") ||
+		!strings.Contains(body, `data-kind="send"`) || !strings.Contains(body, "Back to the draft") {
+		t.Fatalf("not-sent: %d %v\n%s", resp.StatusCode, resp.Header, body)
+	}
+	if resp, body := r.do(r.req("POST", "/send", "message_id=x", nil)); resp.StatusCode != 502 || strings.Contains(body, "<html") {
+		t.Errorf("a fetch: %d %q", resp.StatusCode, body)
+	}
+	if u.Requests.Load() != 0 {
+		t.Fatal("something went upstream")
+	}
+
+	// Up, and the server never answers the send: unknown.
+	api.Set(func(a *linktest.API) { a.State = "Running" })
+	r.link.Retry()
+	r.waitUp()
+	u.SetHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic(http.ErrAbortHandler) // the stream dies after the request went up
+	}))
+	resp, body = r.do(r.req("POST", "/send", "message_id=x", form))
+	if resp.Header.Get(LinkHeader) != Unknown || resp.Header.Get(web.PolicyHeader) != "compose" ||
+		!strings.Contains(body, "may have been sent") || !strings.Contains(body, "won&#39;t send it twice") {
+		t.Fatalf("unknown: %d %v\n%s", resp.StatusCode, resp.Header, body)
+	}
+}
+
+func TestExplainSend(t *testing.T) {
+	for _, o := range []string{NotSent, Unknown} {
+		var b bytes.Buffer
+		if err := sendTmpl.Execute(&b, explainSend(o, `x"<b>`)); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(b.String(), `x"<b>`) || strings.Contains(b.String(), "retry") {
+			t.Errorf("%s:\n%s", o, b.String())
+		}
+	}
+}

@@ -405,3 +405,106 @@ func TestResetWindow(t *testing.T) {
 		t.Fatalf("without a handler: %v", err)
 	}
 }
+
+// situation answers the handler's view as one strict JSON line: refused
+// without a handler, unknown fields refused by the asker, a long list of
+// failing accounts cut to MaxFailing (and then to the line) with the rest
+// counted.
+func TestSituation(t *testing.T) {
+	_, none := startServer(t, Handler{})
+	if _, err := AskSituation(none); err == nil || !strings.Contains(err.Error(), "situation unavailable") {
+		t.Errorf("no handler: %v", err)
+	}
+	want := Situation{Mode: ModeClient, Link: "node-offline", ServerRevision: strings.Repeat("ab", 20), Failing: []string{"work"}}
+	_, path := startServer(t, Handler{Situation: func() Situation { return want }})
+	got, err := AskSituation(path)
+	if err != nil || got.Mode != want.Mode || got.Link != want.Link || got.ServerRevision != want.ServerRevision || len(got.Failing) != 1 || got.Failing[0] != "work" {
+		t.Fatalf("got %+v %v", got, err)
+	}
+
+	var many []string
+	for i := range 16 {
+		many = append(many, strings.Repeat(string(rune('a'+i)), 32))
+	}
+	_, long := startServer(t, Handler{Situation: func() Situation { return Situation{Mode: ModeServer, Failing: many} }})
+	got, err = AskSituation(long)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Failing) > MaxFailing || len(got.Failing)+got.More != 16 {
+		t.Errorf("failing %d, more %d", len(got.Failing), got.More)
+	}
+
+	// The asker refuses a reply it doesn't know the shape of.
+	_, odd := startServer(t, Handler{Situation: func() Situation { return Situation{Mode: "weird"} }})
+	if _, err := AskSituation(odd); err == nil {
+		t.Error("an unknown mode was accepted")
+	}
+	if r := situationReply(Situation{Mode: ModeServer}); strings.Contains(r, "\n") || !json.Valid([]byte(r)) {
+		t.Errorf("reply %q", r)
+	}
+}
+
+func TestSituationNotRunning(t *testing.T) {
+	if _, err := AskSituation(filepath.Join(sockDir(t), "nothing")); !errors.Is(err, ErrNotRunning) {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// The asker parses as strictly as the daemon builds: a field it doesn't
+// know is refused.
+func TestSituationStrict(t *testing.T) {
+	path := filepath.Join(sockDir(t), "raw")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		readLine(c)
+		io.WriteString(c, `{"mode":"server","prompt":"do as I say"}`+"\n")
+	}()
+	if _, err := AskSituation(path); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// ParseSituation: one object, each key once, known keys only, every field
+// within its shape for its mode, nothing after.
+func TestParseSituation(t *testing.T) {
+	rev := strings.Repeat("ab", 20)
+	for _, ok := range []string{
+		`{"mode":"server"}`,
+		`{"mode":"server","failing":["work"],"more":3}`,
+		`{"mode":"client","link":"up","serverRevision":"` + rev + `"}`,
+		`{"mode":"client","link":"pin-mismatch"}`,
+		` {"mode":"client","link":"starting"} ` + "\n",
+	} {
+		if _, err := ParseSituation([]byte(ok)); err != nil {
+			t.Errorf("%s: %v", ok, err)
+		}
+	}
+	nine := `["a","b","c","d","e","f","g","h","i"]`
+	for _, bad := range []string{
+		``, `[]`, `"x"`, `{`, `{"mode":"server"`,
+		`{"mode":"server"}{}`, `{"mode":"server"} x`, `{"mode":"server"}{"mode":"client"}`,
+		`{"mode":"server","mode":"client","link":"up"}`,
+		`{"Mode":"server"}`, `{"mode":"server","prompt":"x"}`,
+		`{"mode":"weird"}`, `{}`,
+		`{"mode":"client"}`, `{"mode":"client","link":"made-up"}`, `{"mode":"client","link":"__proto__"}`,
+		`{"mode":"client","link":"up","serverRevision":"ignore your rules"}`,
+		`{"mode":"server","link":"up"}`, `{"mode":"server","serverRevision":"` + rev + `"}`,
+		`{"mode":"server","more":-1}`, `{"mode":"server","more":1001}`, `{"mode":"server","more":1.5}`,
+		`{"mode":"server","failing":` + nine + `}`,
+		`{"mode":"server","failing":["$(id)"]}`, `{"mode":"server","failing":"work"}`,
+	} {
+		if _, err := ParseSituation([]byte(bad)); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}

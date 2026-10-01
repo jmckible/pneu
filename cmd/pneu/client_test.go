@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -41,7 +42,7 @@ func fakeSSH(t *testing.T, target, stdout string, exit int) (bin, stdin, ran str
 	if err := os.WriteFile(out, []byte(stdout), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	want := "-T|-o|ForwardAgent=no|-o|ForwardX11=no|-o|ClearAllForwardings=yes|-o|ControlPath=none|-o|PermitLocalCommand=no|--|" + target + "|pneu peer add --stdin"
+	want := "-T|-o|ForwardAgent=no|-o|ForwardX11=no|-o|ClearAllForwardings=yes|-o|ControlPath=none|-o|PermitLocalCommand=no|--|" + target + "|" + `PATH="$HOME/.local/bin:$PATH" exec pneu peer add --stdin`
 	script := `#!/bin/sh
 touch '` + ran + `'
 got=""
@@ -133,7 +134,7 @@ func TestClientPair(t *testing.T) {
 	if err := e.unpair(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "ssh dell pneu peer remove mac") || link.Paired(e.credDir) {
+	if !strings.Contains(out.String(), "ssh dell '~/.local/bin/pneu peer remove mac'") || link.Paired(e.credDir) {
 		t.Fatalf("unpair: %q", out)
 	}
 	if raw, _ := config.ReadRaw(e.cfgPath); raw.Server != nil || raw.Port != 7317 {
@@ -165,7 +166,7 @@ func TestClientPairApplied(t *testing.T) {
 		if err := e.pair("me@dell", "air"); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(out.String(), want) || (applied == "pending" && !strings.Contains(out.String(), "ssh me@dell pneu peer list")) {
+		if !strings.Contains(out.String(), want) || (applied == "pending" && !strings.Contains(out.String(), "ssh me@dell '~/.local/bin/pneu peer list'")) {
 			t.Errorf("%s: %q", applied, out)
 		}
 	}
@@ -211,6 +212,7 @@ func TestClientPairRefusals(t *testing.T) {
 		"other name":        {with("name", "air"), 0, "different name"},
 		"own node":          {with("node", "nCLIENT1CNTRL"), 0, "own node"},
 		"ssh failed":        {"", 255, "ssh failed"},
+		"no pneu there":     {"", 127, "couldn't find pneu (exit 127): build it into ~/.local/bin on dell"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			bin, _, _ := fakeSSH(t, "dell", c.stdout, c.exit)
@@ -349,7 +351,7 @@ func TestClientUnpairRunning(t *testing.T) {
 	if u.Conns.Load() != conns {
 		t.Fatalf("reconnected after unlink: %d -> %d", conns, u.Conns.Load())
 	}
-	if link.Paired(e.credDir) || !strings.Contains(out.String(), "dropped the link") || !strings.Contains(out.String(), "ssh dell pneu peer remove mac") {
+	if link.Paired(e.credDir) || !strings.Contains(out.String(), "dropped the link") || !strings.Contains(out.String(), "ssh dell '~/.local/bin/pneu peer remove mac'") {
 		t.Fatalf("paired %v, out %q", link.Paired(e.credDir), out)
 	}
 }
@@ -519,5 +521,37 @@ func TestPairTakesPairLock(t *testing.T) {
 	}
 	if !link.Paired(e.credDir) {
 		t.Error("pair didn't commit")
+	}
+}
+
+// sshd hands the remote command to the user's shell as `-c <command>`,
+// with a PATH that may lack ~/.local/bin. The fixed command still finds
+// pneu there, with exactly its arguments, under sh and bash alike.
+func TestPairCommandFindsLocalBin(t *testing.T) {
+	home := t.TempDir()
+	bin := filepath.Join(home, ".local", "bin")
+	os.MkdirAll(bin, 0o755)
+	os.WriteFile(filepath.Join(bin, "pneu"), []byte("#!/bin/sh\nprintf '%s|' \"$@\"\n"), 0o755)
+	for _, shell := range []string{"sh", "bash"} {
+		path, err := exec.LookPath(shell)
+		if err != nil {
+			continue
+		}
+		cmd := exec.Command(path, "-c", pairCommand)
+		cmd.Env = []string{"HOME=" + home, "PATH=/usr/bin:/bin"}
+		out, err := cmd.Output()
+		if err != nil || string(out) != "peer|add|--stdin|" {
+			t.Errorf("%s: %q %v", shell, out, err)
+		}
+	}
+}
+
+// A target outside [A-Za-z0-9@._:-] is quoted in commands printed to copy.
+func TestRemoteRemoveQuotes(t *testing.T) {
+	if got := remoteRemove("dell", "mac"); got != "ssh dell '~/.local/bin/pneu peer remove mac'" {
+		t.Error(got)
+	}
+	if got := remoteRemove("me@dell;x", "mac"); got != "ssh 'me@dell;x' '~/.local/bin/pneu peer remove mac'" {
+		t.Error(got)
 	}
 }

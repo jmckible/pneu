@@ -69,6 +69,38 @@ type StatusAccount struct {
 	Progress *ProgressView `json:"progress"`
 }
 
+// Sick is the bar widget's "failing" for an account (shell/status.js
+// accountSick): it needs re-auth or setting up, or its last sync failed.
+func Sick(a StatusAccount) bool {
+	switch a.State {
+	case gmi.StateReauth, gmi.StateUnconfigured, gmi.StateUnauthorized:
+		return true
+	}
+	return a.Failures > 0 || (a.Error != nil && *a.Error != "")
+}
+
+// FailingAccounts names the Sick accounts, in order.
+func FailingAccounts(accts []StatusAccount) []string {
+	var out []string
+	for _, a := range accts {
+		if Sick(a) {
+			out = append(out, a.Name)
+		}
+	}
+	return out
+}
+
+// Failing names the accounts failing in the last status doc written: the
+// server's half of an agent callout (control.Situation).
+func (s *Server) Failing() []string {
+	s.pubStatus.mu.Lock()
+	defer s.pubStatus.mu.Unlock()
+	if s.pubStatus.last == nil {
+		return nil
+	}
+	return FailingAccounts(s.pubStatus.last.Accounts)
+}
+
 // StatusChanged asks for a rewrite now: a sync or push ended.
 func (s *Server) StatusChanged() { signal(s.statusNow) }
 

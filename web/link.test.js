@@ -53,3 +53,28 @@ test('details: the link and both builds, or nothing on a server', () => {
   assert.equal(L.reasonText('pin-mismatch', down), "dell's identity changed; not connecting");
   assert.equal(L.reasonText('__proto__', down), '__proto__');
 });
+
+test('reachText: a failed read names the server; nothing without an outcome', () => {
+  assert.equal(L.reachText('not-sent', down), "Can't reach dell.");
+  assert.equal(L.reachText('unknown', up), "Can't reach dell.");
+  assert.equal(L.reachText('', down), null);
+  assert.equal(L.reachText('not-sent', null), "Can't reach the server.");
+});
+
+test('workerLine: only with a registration found, in both modes', () => {
+  assert.equal(L.workerLine(0), null);
+  assert.equal(L.workerLine(undefined), null);
+  assert.equal(L.workerLine(NaN), null);
+  const w = L.workerLine(2);
+  assert.equal(w.state, 'worker');
+  assert.match(w.text, /Reset window data/);
+});
+
+test('accountWord: a plain name, else <account>', () => {
+  assert.equal(L.accountWord('work'), 'work');
+  for (const bad of ['$(id)', '`id`', 'a b', '', null, undefined, 'x'.repeat(33), '__proto__x;', '<b>']) assert.equal(L.accountWord(bad), '<account>', String(bad));
+});
+
+test('reasonText: an Object.prototype name is not a known reason', () => {
+  for (const r of ['__proto__', 'constructor', 'toString']) assert.equal(L.reasonText(r, down), r);
+});

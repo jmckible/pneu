@@ -99,8 +99,9 @@ func substitute(line string, lineNo int) (string, error) {
 	return out, bad
 }
 
-// script turns the numbered steps of INSTALL.md (from "## 1." up to
-// "## Uninstall"), or with uninstall the Uninstall section, into bash that
+// script turns the numbered steps of INSTALL.md ("## 1." to "## 7.",
+// skipping any section without a number), or with uninstall the Uninstall
+// section, into bash that
 // calls the functions scripts/rehearse defines:
 //
 //	step TITLE            a "## " heading
@@ -128,10 +129,11 @@ func script(path string, uninstall bool, w io.Writer) error {
 			title := strings.TrimPrefix(line, "## ")
 			if uninstall {
 				on = title == "Uninstall"
-			} else if strings.HasPrefix(title, "1.") {
-				on = true
-			} else if title == "Uninstall" {
-				on = false
+			} else {
+				// The numbered steps, in order: the server's install. A
+				// section without a number (Let other machines in, the
+				// Client path, Uninstall) isn't part of it.
+				on = title != "" && title[0] >= '1' && title[0] <= '9'
 			}
 			if on {
 				fmt.Fprintf(w, "step %s\n", shq(title))

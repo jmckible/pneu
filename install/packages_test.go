@@ -1,6 +1,7 @@
 package install
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"os/user"
@@ -52,7 +53,7 @@ esac`,
 		os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"+body+"\n"), 0o755)
 	}
 	logf := filepath.Join(tmp, "pacman.log")
-	cmd := exec.Command("sh", "packages", me.Username, dir)
+	cmd := exec.Command("sh", "packages", "server", me.Username, dir)
 	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "LOG="+logf, "DB="+db)
 	out, err := cmd.CombinedOutput()
 	b, _ := os.ReadFile(logf)
@@ -96,5 +97,48 @@ func TestPackagesCleansUpAfterAFailure(t *testing.T) {
 	}
 	if !has(db, "python-pytest") {
 		t.Error("a package installed before the run was removed")
+	}
+}
+
+// run runs install/packages with args against a pacman stub that logs.
+func run(t *testing.T, args ...string) (log string, err error) {
+	t.Helper()
+	tmp := t.TempDir()
+	bin := filepath.Join(tmp, "bin")
+	os.MkdirAll(bin, 0o755)
+	os.WriteFile(filepath.Join(bin, "id"), []byte("#!/bin/sh\necho 0\n"), 0o755)
+	os.WriteFile(filepath.Join(bin, "pacman"), []byte("#!/bin/sh\necho \"pacman $*\" >>\"$LOG\"\n"), 0o755)
+	os.WriteFile(filepath.Join(bin, "makepkg"), []byte("#!/bin/sh\necho \"makepkg $*\" >>\"$LOG\"\n"), 0o755)
+	logf := filepath.Join(tmp, "log")
+	cmd := exec.Command("sh", append([]string{"packages"}, args...)...)
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "LOG="+logf)
+	out, err := cmd.CombinedOutput()
+	b, _ := os.ReadFile(logf)
+	t.Logf("output:\n%s\ncalls:\n%s", out, b)
+	return string(b), err
+}
+
+// A client keeps no mail: go only, no lieer, no notmuch, nothing built.
+func TestPackagesClient(t *testing.T) {
+	log, err := run(t, "client")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(log) != "pacman -S --needed --noconfirm go" {
+		t.Errorf("client installs:\n%s", log)
+	}
+}
+
+// The mode comes first and takes exactly its own arguments; anything else
+// is a usage error before pacman runs.
+func TestPackagesUsage(t *testing.T) {
+	for _, args := range [][]string{
+		nil, {"desktop"}, {"client", "me"}, {"server"}, {"server", "me"}, {"server", "me", "dir", "extra"}, {"me", "dir"},
+	} {
+		log, err := run(t, args...)
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) || ee.ExitCode() != 2 || log != "" {
+			t.Errorf("%q: %v, calls %q", args, err, log)
+		}
 	}
 }

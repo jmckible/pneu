@@ -77,7 +77,7 @@ func (d *Daemon) proxy(rt *web.Route) http.Handler {
 			}
 		}
 		ex := &exchange{rt: rt, in: r}
-		fw := &finalWriter{w: w, ex: ex, hdr: http.Header{}}
+		fw := &finalWriter{w: w, ex: ex, hdr: http.Header{}, d: d}
 		d.rp.ServeHTTP(fw, r.WithContext(context.WithValue(r.Context(), exchangeKey{}, ex)))
 	})
 }
@@ -176,6 +176,14 @@ func (d *Daemon) fail(w http.ResponseWriter, r *http.Request, err error) {
 	}
 	fw.wrote = true
 	switch {
+	case sendNavigation(ex.rt, ex.in):
+		// The compose form's own POST: a page that says what happened and
+		// takes the user back to the draft, not a bare text answer.
+		if ex.gotConn.Load() || errors.Is(err, errContract) {
+			d.sendFailed(fw.w, ex.rt, Unknown)
+		} else {
+			d.sendFailed(fw.w, ex.rt, NotSent)
+		}
 	case errors.Is(err, errContract):
 		writeLinkError(fw.w, ex.rt, ex.in, http.StatusBadGateway, Unknown, "the server's answer was refused")
 	case !ex.gotConn.Load():
@@ -227,6 +235,7 @@ type finalWriter struct {
 	ex    *exchange
 	hdr   http.Header
 	wrote bool
+	d     *Daemon // for the send page
 }
 
 var errRefused = errors.New("client: answer refused")
@@ -247,6 +256,10 @@ func (f *finalWriter) WriteHeader(code int) {
 	if a == nil || !a.Bodiless && a.Header.Get("Content-Type") == "" || a.Install(f.w, f.ex.rt) != nil {
 		// Only an admitted answer gets here; anything else is refused whole.
 		f.ex.admitted = nil
+		if sendNavigation(f.ex.rt, f.ex.in) {
+			f.d.sendFailed(f.w, f.ex.rt, Unknown)
+			return
+		}
 		writeLinkError(f.w, f.ex.rt, f.ex.in, http.StatusBadGateway, Unknown, "the server's answer was refused")
 		return
 	}

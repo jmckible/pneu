@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmckible/pneu/internal/control"
 	"github.com/jmckible/pneu/internal/link"
 	"github.com/jmckible/pneu/internal/link/linktest"
 	"github.com/jmckible/pneu/internal/web"
@@ -651,5 +652,29 @@ func TestResetWindow(t *testing.T) {
 	}
 	if resp, _ := r.get("/client/link", nav); resp.Header.Get("Clear-Site-Data") != "" {
 		t.Fatal("twice")
+	}
+}
+
+// The daemon's half of an agent callout: the link's own reason code, and
+// failing accounts from the last valid status. Nothing else.
+func TestSituation(t *testing.T) {
+	keys := linktest.NewKeys(t)
+	u := linktest.StartUpstream(t, keys.Server, keys.Creds.Identity.SPKI, nil)
+	api := linktest.NewAPI()
+	api.Set(func(a *linktest.API) { a.State = "Stopped" })
+	r := newRig(t, keys, u.Port, api)
+	waitState(t, r.link, link.TailscaleDown)
+	sit := r.d.Situation()
+	if sit.Mode != control.ModeClient || sit.Link != "tailscale-down" || len(sit.Failing) != 0 {
+		t.Fatalf("%+v", sit)
+	}
+	bad := "gmi: boom"
+	r.d.mu.Lock()
+	r.d.live.status = &web.StatusDoc{Version: 1, Accounts: []web.StatusAccount{
+		{Name: "work", Failures: 2, Error: &bad}, {Name: "home"}, {Name: "new", State: "reauth"},
+	}}
+	r.d.mu.Unlock()
+	if sit := r.d.Situation(); strings.Join(sit.Failing, ",") != "work,new" {
+		t.Fatalf("failing %v", sit.Failing)
 	}
 }

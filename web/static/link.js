@@ -77,7 +77,32 @@
     return rows;
   }
 
-  var api = { lineState: lineState, outcome: outcome, failText: failText, reasonText: reasonText, details: details };
+  // reachText is a failed read's words (the unsubscribe preview, say),
+  // where "not sent" would mean nothing: null for anything but a link
+  // outcome.
+  function reachText(out, link) {
+    if (out !== 'not-sent' && out !== 'unknown') return null;
+    return "Can't reach " + serverName(link) + '.';
+  }
+
+  // workerLine is the status line while a service worker was found on
+  // the origin (both modes; docs/client.md R4): app.js has unregistered it,
+  // but whatever it served may still be running, so the line holds until
+  // the window is reset. n: how many registrations; null for none.
+  function workerLine(n) {
+    if (!(n > 0)) return null;
+    return { state: 'worker', text: 'A service worker was removed from this window · Reset window data (bar menu)' };
+  }
+
+  // accountWord is an account name as a suggested command may show it:
+  // the name when it has config.ValidName's plain shape (every name does,
+  // on either side), else the placeholder <account>.
+  var NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+  function accountWord(name) {
+    return typeof name === 'string' && NAME_RE.test(name) ? name : '<account>';
+  }
+
+  var api = { accountWord: accountWord, lineState: lineState, outcome: outcome, failText: failText, reachText: reachText, reasonText: reasonText, details: details, workerLine: workerLine };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else (root.Pneu = root.Pneu || {}).link = api;
 })(this);

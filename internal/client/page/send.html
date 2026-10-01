@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · pneu</title>
+<link rel="stylesheet" href="/client/static/error.css">
+<link rel="stylesheet" href="/theme.css">
+<script src="/client/static/error.js" defer></script>
+</head>
+<body data-kind="send" data-outcome="{{.Outcome}}">
+<main>
+<h1>{{.Title}}</h1>
+{{range .Says}}<p>{{.}}</p>
+{{end}}<p><button id="back" type="button">Back to the draft</button></p>
+<p class="foot"><code>{{.Outcome}}</code></p>
+</main>
+</body>
+</html>

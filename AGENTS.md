@@ -22,7 +22,17 @@ and build order; this file is the working contract. Read PLAN.md before touching
   the repo. The widget draws its icon from `brand/pneu-mark.ttf` (a hinted
   glyph, like the bar's own icons), so a plugin packaged without `brand/`
   must carry the font. The shell doesn't reload a changed widget; run
-  `omarchy-restart-shell`.
+  `omarchy-restart-shell`. The widget's decisions (status.json v1/v2,
+  staleness, the link, the menu, the tooltip) are `shell/status.js`, plain
+  JS the QML imports and `node --test shell/status.test.js` runs;
+  `shell/test/` loads the real widget under Qt 6 against stand-ins for
+  the shell (`QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner
+  -import shell/test/imports -input shell/test`; `/usr/bin/qmltestrunner`
+  is Qt 5 and fails silently). Every Text is `Text.PlainText`, every
+  string from the file goes through `clean()`, enums are compared or
+  checked as own properties (never `table[value]`), and the menu runs only
+  `status.js`'s fixed argv through `Util.execArgv` (no shell), chosen by
+  item id: nothing from status.json ever reaches a command (R1, R14).
 - One binary: `pneu` (or `pneu serve`) is the server; `pneu open` waits for it,
   sends `launch` over the control socket (a sync on every account), and
   launches or focuses the window through `omarchy-launch-or-focus-webapp`
@@ -30,7 +40,12 @@ and build order; this file is the working contract. Read PLAN.md before touching
   `pneu gmi <account> <args>` is the manual lieer run (below);
   `pneu account add|auth|status` sets an account up (INSTALL.md step 5);
   `pneu peer add --stdin|list|remove` pairs other machines' clients (below);
-  `pneu client pair <ssh-target>|unpair` makes this machine one (below). All
+  `pneu client pair <ssh-target>|unpair` makes this machine one (below);
+  `pneu agent [-print]` and `pneu reset-window` are the bar menu's Fix with
+  agent and Reset window data (docs/client.md "As built: step 6"; the
+  reset closes only pneu's app windows, says to quit the browser for any
+  other pneu tab, and stops when a browser window's title shows pneu).
+  Commands printed for the user quote the SSH target (`config.ShellWord`). All
   read `~/.config/pneu/config.json`; there are no built-in accounts, and
   `pneu account add` is what writes it. A config with `server` (a client's,
   docs/client.md) makes `pneu serve` the client daemon; with `accounts` or
@@ -92,6 +107,18 @@ and build order; this file is the working contract. Read PLAN.md before touching
   (`Server.readOnly`): no tags, undo, mark-read or send. Its closing lastmod
   would swallow the write, and a resumed pull's label refresh would revert it.
 
+- Agent callouts (`internal/callout`): `pneu agent` asks the daemon for
+  its `situation` and hands `omarchy-agent-prompt` one fixed template per
+  situation, as one argv element. The only values in it are local: the
+  situation code, this binary's revision, the config's SSH target, the
+  server's revision only as 40 hex (else "unknown"), and on a server its
+  own account names (a client's prompt only counts the failing accounts:
+  their names are the server's). Never a
+  server's error text, its name for itself, or anything SSH printed; the
+  prompt says what it reads from the server is data. Golden prompts in
+  `internal/callout/testdata` (`go test ./internal/callout -update`, then
+  read the diff).
+
 ## Environment
 
 - go 1.27, notmuch 0.40 and lieer 1.6 are installed. Per-account notmuch configs
@@ -101,7 +128,9 @@ and build order; this file is the working contract. Read PLAN.md before touching
   `internal/testmail/cmd/stubgmi`, a lieer simulator (its output format, files,
   and token/stall/kill failures); `testdata/fakegmi` is the internal/gmi
   tests' contract fake. `scripts/rehearse` runs INSTALL.md itself in a
-  sandbox (docs/rehearsal.md); keep it passing when INSTALL.md changes.
+  sandbox (docs/rehearsal.md): its numbered steps, the server's install;
+  unnumbered sections (Let other machines in, the Client path) aren't
+  rehearsed. Keep it passing when INSTALL.md changes.
   `scripts/screenshot` captures the app on the fixture mail for the README
   and marketing (docs/screenshots.md); never screenshot a real inbox.
   `scripts/ctaeval <account> [N]` is the one tool that reads real mail on
@@ -136,7 +165,10 @@ and build order; this file is the working contract. Read PLAN.md before touching
   `Clear-Site-Data: "cache", "storage"` for the next authenticated
   same-origin top-level navigation, once, either mode), `unlink` (a client's daemon only:
   it drops the link and acks once its connections are closed; `pneu client
-  unpair` sends it before deleting anything), `peers-reload <gen> <hash>`
+  unpair` sends it before deleting anything), `situation` (the daemon's
+  view for `pneu agent`: mode, a client's link reason code, the server's
+  revision as 40 hex, failing account names; JSON on one line, parsed by
+  token: each key once, nothing after, every field bounded), `peers-reload <gen> <hash>`
   (a client's daemon refuses it), whose
   only arguments are a decimal generation and 64 hex digits, validated
   before any handler runs), both ends checking `SO_PEERCRED`
@@ -178,7 +210,8 @@ and build order; this file is the working contract. Read PLAN.md before touching
   and 301/302/303/307/308 may be untyped, and they carry no body, on both
   the server's writer and the proxy's. A local failure says `Pneu-Link:
   not-sent` only when no connection was ever handed to the request
-  (GotConn), else `unknown`. The link dials only the address its own
+  (GotConn), else `unknown`; a compose form's own POST `/send` gets the
+  client's send page instead (compose class, never reloads itself). The link dials only the address its own
   tailscaled gives for the pinned StableID after a whois passes, over one
   transport per up period whose connections all close when it goes down or
   its 60s whois lease lapses; `link.PinnedTLS` is the only place
@@ -194,8 +227,10 @@ and build order; this file is the working contract. Read PLAN.md before touching
   transaction each, so none interleaves with another. A tracked
   connection's close and its removal are one `once.Do`. A session's close waits for dials
   in flight as well as closing its connections. `Link.Unpair` returns only once every session the link owns
-  (pending, live, going down) has finished closing. Pairing runs one fixed `ssh -T -o … -- <target> 'pneu peer
-  add --stdin'`, the request on stdin and the answer parsed strictly
+  (pending, live, going down) has finished closing. Pairing runs one fixed `ssh -T -o … -- <target>
+  'PATH="$HOME/.local/bin:$PATH" exec pneu peer add --stdin'` (a
+  non-interactive SSH session may not have ~/.local/bin on PATH; exit 127
+  says so), the request on stdin and the answer parsed strictly
   (`peer.ParseAddResult`).
   Its live side (docs/client.md "As built: step 5b"): exactly one upstream
   `/events`, whose first event must be `hello` and after which only
@@ -207,9 +242,10 @@ and build order; this file is the working contract. Read PLAN.md before touching
   (`client.Budget`) before parsing, over it the stream closes and backs
   off, reset only after 60s healthy. 60s of silence calls down the
   session that carried the stream (`Link.Stalled(id)`), never a later
-  one. Account names are `config.ValidName` everywhere: plain graphic
-  text, refused (never cleaned) at the server's config, the link's hello
-  and the handshake.
+  one. Account names are `config.ValidName` everywhere, exactly
+  `^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$`: refused (never cleaned) at the
+  server's config, `pneu account add`, the link's hello and the handshake;
+  a suggested command shows `<account>` for anything else.
   Pages get the daemon's own `hello` (state as last known, plus `link`),
   `link` on every change, its own desk's `theme`. The server's name shown
   anywhere is the SSH target, never hello's. status.json there is version
@@ -236,7 +272,8 @@ and build order; this file is the working contract. Read PLAN.md before touching
   `running:false` on a clean stop; the widget calls it stale at 20 minutes.
   Each rewrite is also SSE `status` (the same doc), and `/events`' hello
   carries the last one: a client's status.json (version 2) is built from it.
-  Never put the token, a nonce, or message content in it.
+  Never put the token, a nonce, or message content in it. The widget
+  accepts versions 1 and 2.
 - `pneu gmi <account> <args>` takes the account's flock (the engine's lock,
   waiting up to 10 minutes), sets `NOTMUCH_CONFIG`, cds to the lieer dir, and
   execs gmi with the lock fd inherited, so gmi holds the lock for its own life.

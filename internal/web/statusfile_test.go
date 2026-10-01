@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jmckible/pneu/internal/gmi"
 )
 
 func TestFirstName(t *testing.T) {
@@ -260,5 +262,31 @@ func TestHelloOrderedAgainstStatus(t *testing.T) {
 	close(errs)
 	for e := range errs {
 		t.Error(e)
+	}
+}
+
+// Sick is the widget's failing: re-auth, not set up, or a failed sync.
+func TestSick(t *testing.T) {
+	e, empty := "x", ""
+	for _, c := range []struct {
+		a    StatusAccount
+		sick bool
+	}{
+		{StatusAccount{State: gmi.StateReady}, false},
+		{StatusAccount{State: gmi.StatePulling}, false},
+		{StatusAccount{State: gmi.StateReady, Error: &empty}, false},
+		{StatusAccount{State: gmi.StateReady, Failures: 1}, true},
+		{StatusAccount{State: gmi.StateReady, Error: &e}, true},
+		{StatusAccount{State: gmi.StateReauth}, true},
+		{StatusAccount{State: gmi.StateUnconfigured}, true},
+		{StatusAccount{State: gmi.StateUnauthorized}, true},
+	} {
+		if Sick(c.a) != c.sick {
+			t.Errorf("%+v: %v", c.a, !c.sick)
+		}
+	}
+	got := FailingAccounts([]StatusAccount{{Name: "a", Failures: 1}, {Name: "b"}, {Name: "c", State: gmi.StateReauth}})
+	if strings.Join(got, ",") != "a,c" {
+		t.Errorf("%v", got)
 	}
 }

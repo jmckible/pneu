@@ -3,62 +3,61 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "status.js" as Status
 
-// pneu's bar presence: unread inbox threads across every account, and a
-// warning when the mail isn't flowing.
+// pneu's bar presence: unread inbox threads across every account, a
+// warning when the mail isn't flowing, and a menu (right-click) for the
+// actions that reach outside the browser.
 //
-// Everything comes from ~/.local/state/pneu/status.json, which the server
-// rewrites at startup, after every sync and push, shortly after triage, on a
-// five-minute heartbeat, and with running:false on a clean stop. So the
-// widget runs nothing and polls nothing; it works with the window parked or
-// closed, and it never touches notmuch or the install token.
+// Everything comes from ~/.local/state/pneu/status.json, which this
+// machine's pneu rewrites at startup, after every sync and push (on a
+// client, whenever the server's status arrives or the link changes),
+// shortly after triage, on a five-minute heartbeat, and with running:false
+// on a clean stop. So the widget polls nothing; it works with the window
+// parked or closed, and it never touches notmuch or the install token.
+// The decisions are status.js's (node --test shell/status.test.js): this
+// file draws them.
 //
-// Warning (the mark in the urgent colour) means the count can't be trusted:
-// no readable file, the server stopped, the file older than staleAfter
-// (so the server is gone or wedged whatever sync is doing), or an account
-// that is failing, erroring, needs re-auth, or isn't set up. An account
-// downloading its mail for the first time isn't a warning: the count shows
+// Version 1 is a server's file, version 2 a client's (docs/client.md): its
+// counts come from the server, and server.link and server.statusAt say
+// whether they're current. Warning (the mark in the urgent colour) means
+// the count can't be trusted: no readable file, this machine's pneu
+// stopped or silent past staleAfter, an account failing, erroring, needing
+// re-auth or not set up, or (a client) the server out of reach or silent.
+// A client still connecting just after start isn't a warning, and neither
+// is an account downloading its mail for the first time: the count shows
 // its progress ("43%") instead, and the tooltip how far back it's complete.
+//
+// Every string from the file is drawn as Text.PlainText (this file's Text
+// items, the shell's Buttons, the bar's tooltip), after status.js's clean().
+// None reaches a command: the menu runs only status.js's fixed argv, chosen
+// by item id, through Util.execArgv (no shell).
 //
 // The Minimal style is for bars that keep only what needs attention: the
 // mark alone in the accent colour while there is unread mail, nothing
 // otherwise. A warning still shows (in urgent), or a dead server would read
 // as an empty inbox.
+
 BarWidget {
   id: root
   moduleName: "pneu"
 
-  // Well past the server's heartbeat, and past the 15-minute cap on sync
-  // backoff, so a slow week of failures still reads as failures, not as a
-  // dead server.
-  readonly property int staleAfter: 20 * 60 * 1000
+  readonly property int staleAfter: Status.STALE_AFTER
 
-  property var status: null     // parsed status.json, or null
-  property bool unreadable: true // missing or unparseable
+  property var doc: null    // parsed status.json (Status.parse), or null
   property bool missing: true
   property double now: Date.now()
+  // When this widget last ran Reset window data: Reopen pneu shows in the
+  // menu for a while after. The widget's own state, not the file's.
+  property double resetAt: 0
 
-  readonly property var accounts: status && Array.isArray(status.accounts) ? status.accounts : []
-  readonly property int unread: status ? (parseInt(status.unread) || 0) : 0
-  readonly property var senders: status && Array.isArray(status.senders) ? status.senders.map(String) : []
-  readonly property double updatedAt: status ? Date.parse(String(status.updated || "")) : NaN
-  readonly property bool stale: !isFinite(updatedAt) || now - updatedAt > staleAfter
-  readonly property bool stopped: status !== null && status.running !== true
-  readonly property var sickAccounts: accounts.filter(function (a) { return root.accountSick(a) })
-  readonly property bool warning: unreadable || stopped || stale || sickAccounts.length > 0
-  // Accounts before or in their first pull, and the least-done one's
-  // percent: -1 while any has none yet (waiting, or still listing).
-  readonly property var pullingAccounts: accounts.filter(function (a) { return a && (a.state === "pulling" || a.state === "needs-pull") })
-  readonly property int pullPercent: {
-    var pct = 100
-    for (var i = 0; i < pullingAccounts.length; i++) {
-      var p = pullingAccounts[i].progress
-      var v = p && p.percent !== null && p.percent !== undefined ? parseInt(p.percent) : NaN
-      if (isNaN(v)) return -1
-      pct = Math.min(pct, v)
-    }
-    return pullingAccounts.length > 0 ? pct : -1
-  }
+  readonly property var model: Status.model(doc, missing, now)
+  readonly property bool warning: model.warning
+  readonly property int unread: model.unread
+  readonly property var pullingAccounts: model.pulling
+  readonly property int pullPercent: model.pullPercent
+  readonly property bool resetPending: resetAt > 0 && now - resetAt < Status.REOPEN_FOR
+  readonly property var menuItems: Status.menu(model, resetPending)
 
   readonly property bool minimal: String(setting("style", "Default")) === "Minimal"
 
@@ -69,14 +68,6 @@ BarWidget {
   visible: shown
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
-
-  function accountSick(a) {
-    if (!a) return false
-    // A pneu too old to write state: not pulled was the warning.
-    if (a.state === undefined) return (parseInt(a.failures) || 0) > 0 || !!a.error || a.pulled === false
-    if (a.state === "reauth" || a.state === "unconfigured" || a.state === "unauthorized") return true
-    return (parseInt(a.failures) || 0) > 0 || (a.error !== null && a.error !== undefined && a.error !== "")
-  }
 
   // The server replaces the file by rename; watchChanges follows that and
   // the file's first creation. text() is stale inside the change signal, so
@@ -92,84 +83,28 @@ BarWidget {
   }
 
   function apply(raw, missing) {
-    var parsed = null
-    try { parsed = JSON.parse(raw) } catch (e) {}
-    var ok = parsed !== null && typeof parsed === "object" && parsed.version === 1
-    root.status = ok ? parsed : null
-    root.unreadable = !ok
+    root.doc = Status.parse(raw)
     root.missing = missing
     root.now = Date.now()
   }
 
   // Staleness is a function of the clock, not of the file, so the clock is
-  // what ticks. A minute is fine resolution against a 20-minute threshold.
+  // what ticks. A minute is fine resolution against a 20-minute threshold;
+  // a client's connecting grace is 90s, so it rereads sooner while one is
+  // connecting.
   Timer {
-    interval: 60000
+    interval: root.model.connecting ? 15000 : 60000
     running: true
     repeat: true
     onTriggered: root.now = Date.now()
   }
 
-  function clockOf(ms) {
-    return isFinite(ms) ? Qt.formatDateTime(new Date(ms), "HH:mm") : "never"
-  }
+  readonly property var fmt: ({
+    clock: function (ms) { return Qt.formatDateTime(new Date(ms), "HH:mm") },
+    day: function (ms) { return Qt.formatDateTime(new Date(ms), "d MMM yyyy") }
+  })
 
-  function num(n) {
-    var s = String(parseInt(n) || 0)
-    for (var i = s.length - 3; i > 0; i -= 3) s = s.slice(0, i) + "," + s.slice(i)
-    return s
-  }
-
-  // pullLine words a first pull as app.js and `pneu account status` do.
-  function pullLine(a) {
-    var name = String(a.name || "?")
-    var p = a.progress
-    if (a.state !== "pulling" || !p) return name + ": waiting to download"
-    var out
-    if (p.phase === "listing") out = "listing messages: " + num(p.done) + " found"
-    else if (p.phase === "content") out = "downloading " + num(p.done) + " of " + num(p.total)
-    else if (p.phase === "metadata") out = "checking labels " + num(p.done) + " of " + num(p.total)
-    else if (p.phase === "removing") out = "removing deleted messages"
-    else out = "starting the download"
-    if (p.percent !== null && p.percent !== undefined) out += " (" + p.percent + "%)"
-    if (p.frontier) {
-      var t = Date.parse(String(p.frontier))
-      if (isFinite(t)) out += ", complete back to " + Qt.formatDateTime(new Date(t), "d MMM yyyy")
-    }
-    return name + ": " + out
-  }
-
-  function accountLine(a) {
-    var name = String(a.name || "?")
-    if (a.state === undefined && a.pulled === false) return name + ": first pull not finished"
-    if (a.state === "reauth") return name + ": Gmail access expired or was revoked; reconnect in pneu"
-    if (a.state === "unconfigured") return name + ": not set up (pneu account add " + name + " <address>)"
-    if (a.state === "unauthorized") return name + ": not connected to Gmail (pneu account auth " + name + ")"
-    var failures = parseInt(a.failures) || 0
-    var err = a.error ? String(a.error) : ""
-    var head = name + (failures > 0 ? ": " + failures + " failed sync" + (failures === 1 ? "" : "s") : ": error")
-    return err ? head + " · " + err : head
-  }
-
-  function unreadLine() {
-    if (root.unread === 0) return "No unread mail"
-    var names = root.senders.slice(0, Math.min(root.unread, 3))
-    if (names.length === 0) return root.unread + " unread"
-    var extra = root.unread - names.length
-    return root.unread + " unread · " + names.join(", ") + (extra > 0 ? " +" + extra : "")
-  }
-
-  readonly property string tooltip: {
-    if (root.missing) return "pneu: no status yet. Is the server installed and running?\nsystemctl --user status pneu"
-    if (root.unreadable) return "pneu: status.json unreadable (a newer or older pneu?)"
-    var lines = []
-    if (root.stopped) lines.push("pneu server stopped (last update " + root.clockOf(root.updatedAt) + ")")
-    else if (root.stale) lines.push("pneu server not responding (last update " + root.clockOf(root.updatedAt) + ")")
-    lines.push(root.unreadLine())
-    for (var j = 0; j < root.pullingAccounts.length; j++) lines.push(root.pullLine(root.pullingAccounts[j]))
-    for (var i = 0; i < root.sickAccounts.length; i++) lines.push(root.accountLine(root.sickAccounts[i]))
-    return lines.join("\n")
-  }
+  readonly property string tooltip: Status.tooltip(model, fmt)
 
   function open() {
     if (!root.bar) return
@@ -177,6 +112,32 @@ BarWidget {
     // bar.run is `bash -lc`, and Omarchy's login profile puts ~/.local/bin
     // on PATH, so the bare name finds a ~/.local/bin install.
     root.bar.run(command !== "" ? command : "pneu open")
+  }
+
+  // ---- the menu (docs/client.md, "The action menu"; R1) ----
+  // Launchers live here and nowhere else: a page can't reach this widget
+  // or the control socket the commands talk to.
+
+  property bool confirming: false
+
+  function toggleMenu() {
+    root.confirming = false
+    menu.open = !menu.open
+  }
+
+  // act runs a menu item: Open as a click does; Reset window data asks
+  // first (it closes the windows and deletes saved drafts); everything else
+  // is the item's fixed argv from status.js, without a shell.
+  function act(id) {
+    if (id === "cancel") { root.confirming = false; return }
+    if (id === "open") { menu.open = false; root.open(); return }
+    if (id === "reset" && !root.confirming) { root.confirming = true; return }
+    if (Status.argv(id) === null) return
+    menu.open = false
+    root.confirming = false
+    if (id === "reset") { root.resetAt = Date.now(); root.now = root.resetAt }
+    if (id === "reopen") root.resetAt = 0
+    Util.execArgv(Status.argv(id))
   }
 
   FontLoader {
@@ -210,7 +171,10 @@ BarWidget {
     slotSize: contentSize + Style.space(10)
     opticalSize: contentSize
     tooltipText: root.tooltip
-    onPressed: function (b) { if (b === Qt.LeftButton) root.open() }
+    onPressed: function (b) {
+      if (b === Qt.LeftButton) root.open()
+      else if (b === Qt.RightButton) root.toggleMenu()
+    }
 
     // NativeRendering: the default distance-field rasteriser blurs a 10px
     // digit at bar scale.
@@ -244,6 +208,48 @@ BarWidget {
             font.pixelSize: Style.font.caption
             renderType: Text.NativeRendering
           }
+        }
+      }
+    }
+  }
+
+  // The menu card. Its labels are status.js's fixed strings, drawn by the
+  // shell's Button (PlainText); outside clicks close it (PopupCard's focus
+  // grab), as does another popup opening.
+  PopupCard {
+    id: menu
+    anchorItem: button
+    bar: root.bar
+    contentWidth: menu.fittedContentWidth(Style.space(280))
+    contentHeight: menu.fittedContentHeight(menuColumn.implicitHeight)
+    onOpenChanged: if (!open) root.confirming = false
+
+    Column {
+      id: menuColumn
+      width: parent.width
+      spacing: Style.space(2)
+
+      Text {
+        visible: root.confirming
+        width: parent.width
+        wrapMode: Text.WordWrap
+        text: Status.RESET_CONFIRM
+        textFormat: Text.PlainText
+        color: Color.foreground
+        font.family: Style.font.family
+        font.pixelSize: Style.font.body
+      }
+
+      Repeater {
+        model: root.confirming
+          ? [{ id: "reset", label: "Reset window data" }, { id: "cancel", label: "Cancel" }]
+          : root.menuItems
+        delegate: Button {
+          required property var modelData
+          width: menuColumn.width
+          leftAlign: true
+          text: modelData.label
+          onClicked: root.act(modelData.id)
         }
       }
     }
