@@ -107,7 +107,10 @@ them here if they're wrong.
   machine's build and the server's differ; docs/client.md "Versions and
   updates"), and the details say which side is older and which bar-menu
   item updates it. Only ready accounts count; one in its first pull or
-  waiting on setup or reconnection is the `#accounts` strip's, and with
+  waiting on setup or reconnection is the `#accounts` strip's (on a
+  client, an account whose Gmail access lapsed shows `pneu account auth
+  <name>` to run in a terminal there, and Fix with agent, instead of
+  Reconnect: the consent waits on the server's lieer), and with
   no ready account synced yet the line is empty. A push (after a
   keystroke) never shows as checking. The age refreshes every 30s while
   shown and on focus; a screen reader hears changes of state (a live

@@ -700,45 +700,39 @@ branch recorded at install** (`"source"` in config) (R15):
 A client with no archive refers server work to dell over SSH, with the
 same fixed options as pairing (R7):
 
-- `pneu account add|auth|status|…` on a client prints what it will run,
+- `pneu account add|auth|status` on a client prints what it will run,
   then runs `ssh -T … -- dell 'pneu account <verb> --stdin'`, where
   `<verb>` comes from a fixed enum and the arguments go as JSON on stdin.
   The arguments are never joined into the remote command line. No PTY:
-  the remote side speaks line-delimited JSON events on stdout (prompts,
-  progress, the consent URL, the result), and the client renders them. A
+  the remote side speaks line-delimited JSON events on stdout (progress,
+  the consent URL, the result), and the client renders them. A
   PTY would mix echo and framing into that channel.
-- **Consent over a forward** (R9). lieer's consent flow waits for Google on
-  dell's `localhost:8080`, but the Google page opens on the laptop. `pneu
-  account add|auth` from a client:
-  1. checks that the laptop's 8080 is free by **binding** `127.0.0.1:8080`
-     and `[::1]:8080` explicitly, then releasing them. Today's
-     `CheckAuthPort` does a single `localhost` listen, which isn't the
-     same thing (N12).
-  2. runs SSH with its **own** option set. Pairing's
-     `ClearAllForwardings=yes` also clears command-line `-L`s. That was
-     checked against OpenSSH 10.5 with `ssh -G`, from both the command
-     line and a `-F` file (N12). So consent uses `ClearAllForwardings=no`,
-     and **first** resolves the target's config with `ssh -G <target>`:
-     if any `LocalForward`, `RemoteForward` or `DynamicForward` is
-     configured for it, consent refuses and names the lines, rather than
-     inheriting forwards the user didn't intend for this session. Then:
-     `-T -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=no
-     -o ExitOnForwardFailure=yes -o ControlPath=none -L
-     127.0.0.1:8080:127.0.0.1:8080 -L [::1]:8080:127.0.0.1:8080`, bound
-     explicitly to loopback so `GatewayPorts` doesn't apply. Both binds
-     must succeed (`ExitOnForwardFailure`) before the URL is opened.
-  3. passes `consentOpen: "print"` in the stdin parameters, so dell sends
-     the URL as an event instead of running `xdg-open` on dell's screen
-     (today `consentOpener` opens it on whichever machine runs the
-     command);
-  4. **validates the URL locally** with the same Google-only rule
-     `consentOpener` uses, then opens it in the laptop's browser.
+- **Consent through a relay, not a forward** (R9; the forward design
+  first planned here was dropped in review, Y1 in "As built: step 8"). lieer's
+  consent flow waits for Google's redirect on dell's `localhost:8080`, but
+  the Google page opens on the laptop. No SSH forward carries it: a
+  preflight `ssh -G` can't see every forward the real session gets (a
+  config's `ClearAllForwardings yes` that our `no` turns back on, a
+  `Match command` on the remote command), so every pneu ssh, consent
+  included, runs with pairing's `ClearAllForwardings=yes`. Instead `pneu
+  account auth` from a client:
+  1. binds the laptop's `127.0.0.1:8080` and `[::1]:8080` itself (both, or
+     it refuses) before ssh runs;
+  2. passes `consentOpen: "print"`, so dell sends the consent URL as an
+     event instead of running `xdg-open` on dell's screen;
+  3. validates the URL with the same Google-only rule `consentOpener`
+     uses, notes its `state`, and opens it in the laptop's browser;
+  4. answers Google's redirect itself: one `GET /` whose query has only
+     Google's callback keys and this consent's `state`, with a fixed
+     "close this tab" page; anything else gets a fixed 400 and it keeps
+     waiting;
+  5. sends that query to dell as one more line on the session's stdin,
+     and dell replays it to lieer on its own loopback.
 
-  The forward lasts only as long as that SSH session. While it's up, a
-  page in the laptop's browser can reach lieer's callback server. At worst
-  a stray request uses up the one-shot callback (it handles one request)
-  and consent has to be run again. The OAuth `state` check still stands
-  between a stolen code and a usable credential.
+  The listener lives until the callback, the result, 10 minutes, or the
+  end of the session. A page in the laptop's browser can reach it
+  meanwhile, but without the state it can't use up the one-shot; the
+  OAuth `state` check in lieer still stands behind it.
 - **Reauth from the UI** (`POST /accounts/{a}/reauth`) is refused on the
   peer listener with `409 reauth-on-server`. The UI shows `pneu account
   auth <name>`, and the bar menu's **Fix with agent** covers it.
@@ -1905,6 +1899,260 @@ running (a configured filter or hook that daemonizes, though hooks are
 off) would hold the update lock while it lives: an availability cost
 (`pneu update` says another update or a program it started is running),
 never a correctness one.
+
+## As built: step 8
+
+Server work from a client: `pneu account` over SSH, the consent relay,
+and reauth from the UI on a client.
+
+- **Verbs.** `add`, `auth` and `status`: every `pneu account` verb there is,
+  and each makes sense on the server. The remote command is one fixed
+  string per `remote.Verb` (`remote.Command`), `PATH="$HOME/.local/bin:$PATH"
+  exec pneu account <verb> --stdin`, after `--` and the target as its own
+  argument, never built from what was typed. The server's form is the verb,
+  `--stdin` and nothing else; it uses its default config, and refuses on a
+  client's. `pneu gmi` on a client refuses and prints the `ssh -t` to run
+  it on the server: arbitrary lieer arguments aren't forwarded.
+- **The request** is one JSON object, the first line on stdin, at most
+  16 KiB, read by token: exactly the verb's keys, spelled exactly, each once, all required,
+  strings or (force) a boolean, nothing after. `add`: `{name, address,
+  fullName, clientSecret}`; `auth`: `{name, force, consentOpen}`,
+  `consentOpen` exactly `"print"`; `status`: `{name}`, `""` for all (so a
+  client's `status` takes at most one name). The server checks again what
+  the client checked: `config.ValidName`; `remote.ValidAddress` (one `@`,
+  none of ` <>`, no control or format characters, 254 bytes);
+  `remote.ValidFullName` (128 bytes, no control characters: it becomes a
+  line of the notmuch config; the local `--name` is held to it too);
+  `clientSecret` `""` or JSON that passes `gmi.CleanClientSecret`.
+- **No prompt events.** Nothing in `pneu account` asks a question today:
+  `add` takes flags, `auth` waits on Google, not the terminal. So the
+  client gathers everything before ssh runs (the flags, and the OAuth
+  client JSON, read from the laptop, where step 4 downloads it, then cleaned
+  there and sent as its validated fields only), and stdin carries one
+  request (and, for auth, the callback). A prompt/answer channel would be a second parser on
+  both ends for no current question; adding one later is a new event kind
+  and a protocol change.
+- **Events** are one JSON object per line on stdout (`remote.Event`): `{event:
+  "progress", text}`, `{event: "waiting"}`, `{event: "consent-url", url}`,
+  `{event: "result", text}` (text may be empty), `{event: "error", text}`.
+  The client (`remote.ParseEvent`) refuses a line over 8 KiB, anything but
+  one object of string values, an unknown kind, a missing, extra or
+  repeated key, text over 2 KiB raw; a session over 4096 events or 2 MiB;
+  a second consent URL; anything after the closing `result` or `error`.
+  Any of those kills ssh and ends the command: nothing the server sends
+  after a fault is read, let alone opened. `text` is display text, made
+  plain on both ends (`config.Plain`, moved from the client daemon: no
+  control, bidi or line-separator characters, 500 runes). The server's
+  stderr (pneu's own diagnostics, a lock wait, ssh's errors) reaches the
+  terminal only as plain lines prefixed with the target, 64 KiB at most.
+  Exit 127 says to build pneu into `~/.local/bin` there; no closing event
+  says the server's pneu may be older (Update <server>).
+- **The server's half** (`accountstdin.go`) runs the same code as the
+  terminal commands (`doAdd`, `doAuth`, `doStatus`) through an `acctOut`:
+  the terminal's prints, the stream's sends each line as `progress`, an
+  error as `error` (its extra lines as progress first), success as an
+  empty `result`; main doesn't log an error already sent. lieer's own lines
+  during consent are progress; its consent line is the `consent-url`
+  event, never xdg-open on the server (`consentOpener.open` is the event).
+  Nobody may be at the other end any more, and lieer waits with no timeout
+  of its own, holding the account's lock and the server's 8080: so the
+  wait ends at 10 minutes, a `waiting` heartbeat every 15s for the whole
+  command turns a client that's gone into a failed write, stdin ending
+  before the callback says the same, and SIGPIPE, SIGHUP, SIGINT and
+  SIGTERM are caught (a write to a closed stdout returns EPIPE rather than
+  killing pneu and orphaning lieer). Any of them cancels the command's
+  context, which (Y3) covers the account lock's wait
+  (`gmi.LockContext`) and every gmi it runs: each in a process group of
+  its own, stopped and reaped as a whole (`procgroup.go`, Z1), the token check also
+  bounded at 2 minutes (`verifyWait`). `auth -f`'s set-aside credentials
+  go back.
+- **Options.** Every verb, consent included, uses pairing's exact set
+  (`config.SafeSSHOptions` after `-T`: `ForwardAgent=no`, `ForwardX11=no`,
+  `ClearAllForwardings=yes`, `ControlPath=none`, `PermitLocalCommand=no`):
+  no `-L`, no `ssh -G` preflight (Y1, below). `auth` always runs with the
+  relay: only the server knows whether the account needs consent or just a
+  check, and `add` never runs consent (it never did; `auth` follows it,
+  from the laptop too). The command line is printed before it runs.
+- **The relay** (`relay.go`; Y1). Before ssh, `listenRelay` binds
+  `127.0.0.1:8080` and `[::1]:8080` (Go's SO_REUSEADDR, so a recent
+  consent's TIME_WAIT doesn't refuse; either taken refuses, naming it).
+  It takes no callback until the consent URL has come and its `state`
+  (`remote.ConsentState`: exactly one, non-empty) has armed it. It answers
+  `GET /` only: path exactly `/`, Host `localhost`, `127.0.0.1` or `[::1]`
+  at the bound port (no rebinding), `Sec-Fetch-Mode: navigate` and
+  `Sec-Fetch-Dest: document` when the browser sends them, and a query that
+  passes `remote.ParseCallback` (4 KiB, well-formed, only `state`, `code`,
+  `scope`, `authuser`, `prompt`, `hd`, `iss`, `error`,
+  `error_description`, `error_uri`, each once, printable ASCII, a state and
+  exactly one of code or error; google_auth_oauthlib's server takes any
+  request and oauthlib reads `state`, `code` and `error`) with this
+  consent's state, once. Everything else is a fixed 400 and it keeps
+  waiting; the one that passes gets a fixed page (nosniff, no-store, CSP
+  `default-src 'none'`, no-referrer, keep-alives off). No request value is
+  ever written back. The query goes to the session's stdin as
+  `{"callback":"<query>"}` (`remote.CallbackLine`), and the relay closes;
+  it also closes at the result or error, when ssh ends, or when a bound
+  runs out (Z2).
+- **The protocol's stdin.** The request is the first line (16 KiB). `add`
+  and `status` then need the end of input. `auth`'s stays open for at
+  most one more line, the callback, read by token (exactly `callback`,
+  then `ParseCallback` again on the server); the server takes it only once
+  it has sent the consent URL, and replays it as `GET /?<query rebuilt
+  from the parsed keys>` to `127.0.0.1:8080` (where lieer's AF_INET
+  wsgiref server listens) with Host `localhost:8080`, no proxy, no
+  redirects, 10s. A line that isn't a callback, or one before the URL,
+  ends the consent and interrupts lieer. Stdin ending before a callback
+  means the client is gone.
+- **One consent-URL rule** (`gmi.ValidConsentURL`), used by a local
+  consent's line (`gmi.ConsentURL`), the server's Reauth, and a client
+  reading the event: https, host exactly `accounts.google.com` (by
+  `url.Parse` as well as the prefix), no userinfo, no port, printable
+  ASCII with no space or backslash, 4 KiB at most. The client opens it with
+  the same `openURL` (xdg-open, detached) a local consent uses, and prints
+  it too.
+- **Reauth from the UI.** The server already answers a client's Reconnect
+  `409 reauth-on-server`. On a client (the page has a `link`), the
+  `#accounts` line of a reauth account shows `Gmail access expired or was
+  revoked. Run <code>pneu account auth <name></code> in a terminal on this
+  machine (it runs on <server> over SSH and opens Google here), or Fix with
+  agent in the bar menu.` instead of the Reconnect button, and a Reconnect
+  that gets the 409 anyway flashes the same words (`link.js` `reauthHelp`,
+  `reauthRefused`; the name through `accountWord`, so only a plain word or
+  `<account>`; no SSH target is shown, since the command runs here). The
+  bar widget's v2 reauth line says `pneu account auth <name> here, or Fix
+  with agent`. Fix with agent has a **`reauth` situation**:
+  `control.Situation` gains `reauth`, a count of accounts in state reauth
+  (parsed by token, at most the failing count), and `callout.Choose` picks
+  it before `sync-failing` (after the link). Its client template tells the
+  agent the fix is the user's `pneu account auth <account>` here and to
+  wait for them (no account named: the server chose the names); the
+  server's names its own failing accounts and offers Reconnect. The
+  client's `sync-failing` no longer says consent needs the server's desk.
+- **Tests.** A fake ssh asserts each verb's argv exactly, saves the
+  request line and the callback line, and plays event streams; the relay's
+  listeners and the opener are seams. Covered: the request sent (the OAuth
+  client's extra fields dropped), the relay end to end with a real HTTP
+  client as the browser (POST, another path, an encoded path, an extra
+  key, a wrong or missing state, oversize, a duplicate key, a fetch or an
+  image, a rebound or wrong-port Host: each a fixed 400 that never echoes
+  the query, the relay still waiting; then the callback on `[::1]`, relayed
+  exactly; a second refused; both families closed afterwards), the relay's
+  one-shot while still listening and nothing before it's armed, either
+  family taken refusing before ssh, the hostile streams (oversized line
+  with and without a newline, unknown event, extra fields, a consent URL
+  not Google's, `javascript:`, `file:`, credentials, 5 KB, without a state,
+  from a verb with no consent, a second consent, data after the result, no
+  result, exit 127 and 255, control and bidi characters on stdout and
+  stderr), the fixed commands under `sh -c`, hostile verbs and targets
+  refused before ssh, the server's strict parsing (oversize, unknown,
+  duplicate and case-variant keys, trailing data on the line and after it,
+  null, bad values) with nothing written, the server end to end against
+  the stub lieer (consent URL as an event, xdg-open never run), its replay
+  to a fake lieer (the rebuilt query and Host; malformed callback lines and
+  a callback before the URL end the consent, nothing replayed), a client
+  that goes away after the consent URL (by heartbeat or by stdin ending:
+  lieer interrupted, 8080 free), and a stalled `gmi pull -t` (client gone,
+  or `verifyWait`: the child killed, the lock free). **Real ssh:** `ssh -G
+  -F <config>` with every argv pneu runs (pairing and each verb, with its
+  remote command) against a config that adds a LocalForward,
+  RemoteForward and DynamicForward, `ClearAllForwardings no`, agent
+  forwarding, a ControlPath, and a `Match command "*pneu*"` adding two
+  more: none resolve, while the same argv with `ClearAllForwardings=no`
+  resolves all five (checked on OpenSSH 10.5p1; skipped without ssh).
+  Mutation-checked: a remote command built from the verb text,
+  `ClearAllForwardings=no` in the shared options, an unvalidated URL
+  opened, extra event fields accepted, text or stderr passed raw,
+  duplicate keys or trailing data accepted, the server opening the URL
+  itself, data after the result accepted, the `reauth` choice, the page's
+  help; and for the relay and Y3: a non-allowlisted key relayed (client or
+  server side), the query reflected, one family bound, no state, Sec-Fetch,
+  Host, path or method check, a second callback taken, a callback before
+  the URL, verification without its context or its bound, no heartbeat,
+  stdin's end ignored, a prompt or printed hint without the safe options.
+
+## As built: step 8, review fixes (Y1–Y3)
+
+- **Y1: no SSH forwarding at all.** Codex reproduced on OpenSSH 10.5p1
+  that `ssh -G -- <target>` didn't see what the session would get: a
+  config's `ClearAllForwardings yes` hides its `RemoteForward` from `-G`,
+  and the session's own `ClearAllForwardings=no` turns it back on (a
+  laptop port opened to dell); a `Match command "*account auth*"` adds a
+  forward only when the real command is there; `Match exec` can answer
+  differently between the two runs. So the `-G` preflight, the `-L`s and
+  `ClearAllForwardings=no` are gone; every pneu ssh uses pairing's options,
+  and the consent's callback goes through the relay above.
+- **Y2: printed ssh commands carry the safe options.** A hint like `ssh
+  dell '~/.local/bin/pneu account status'` runs with whatever the user's
+  ssh config adds (agent forwarding, forwards, a shared master).
+  `config.SSHHint(target, tty)` is `ssh -o ForwardAgent=no -o
+  ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o
+  PermitLocalCommand=no [-t] <target>`, and every printed ssh command uses
+  it: unpair's and a refused pairing's `peer remove`, the pending pairing's
+  `peer list`, the error page's `systemctl --user status pneu`, `pneu gmi`'s
+  refusal, and the agent prompts (`{sshcmd}`, `{sshtty}`; the client head
+  tells the agent to keep those options). Where pneu has its own hardened
+  path, the prompts say that instead: `pneu account status` and `pneu
+  account auth <account>` here, not over a bare ssh. The golden test fails
+  any prompt with an ssh command lacking them.
+- **Y3: the remote auth path stops when the client does.** Above (the
+  server's half): the lock wait, the consent and the token check all run
+  under the command's context, children in their own process groups, the
+  heartbeat through the whole command, the check bounded.
+
+## As built: step 8, review fixes (Z1–Z3)
+
+Codex closed Y1 and Y2 (checking real OpenSSH with hostile `Match
+command` and `Match exec` configs); Y3 was partial.
+
+- **Z1: the whole group, then the lock.** exec's cancellation reaches the
+  group with SIGINT only through our own `Cancel`, and its last resort
+  (`WaitDelay`, then `Process.Kill`) is the leader alone: a descendant
+  that ignores SIGINT outlived it, and the account's lock was released
+  while it still ran. Every gmi pneu account runs outside a terminal
+  (the remote consent, the token check, add's `gmi init` and `gmi set`)
+  now goes through `startGroup`/`run` (`procgroup.go`): its own process
+  group; on the context's end SIGINT to the group, `groupGrace` (5s),
+  SIGKILL to the group; and whatever way the leader ended, `reap` sends
+  SIGINT, waits the grace, SIGKILL, and polls `kill(-pgid, 0)` until
+  ESRCH (bounded; past it, an error). Only then does the caller release
+  the lock. `WaitDelay` is the grace too, so a descendant holding the
+  output pipe doesn't keep Wait from returning; a leader that succeeded is
+  still a success. Test: a fake gmi whose leader exits on SIGINT and whose
+  background child ignores it, on the token check and on the consent; the
+  child is dead, and another taker of the lock finds it dead when it gets
+  the lock.
+- **Z2: the client's session ends with its last word.** A `result` or
+  `error` disarms and closes the relay and closes ssh's stdin at once;
+  ssh then gets `lingerWait` (5s) to end, and is killed after it (a
+  result is still a success; a note says the session was closed). The
+  relay has two bounds: `relayStartWait` (3 minutes) for the consent URL
+  to arrive, and `consentWait` (10 minutes) from that URL, so a slow ssh
+  or a lock wait on the server doesn't eat the user's consent time. Either
+  running out closes the relay and stdin, kills ssh, and says which. The
+  relay's goroutine selects on the callback, the session's end, a closing
+  event and both bounds. Tests: a server that sends the result and keeps
+  stdout open (the relay is gone at once, the command returns after the
+  linger); no consent URL (the start bound); a URL after 0.8s with a 1.5s
+  consent bound (it fires at 2.3s, not 1.5s).
+- **Z3: the relay's connections are bounded.** `ReadHeaderTimeout`,
+  `ReadTimeout` and `WriteTimeout` 5s, 8 KiB of headers, and at most 16
+  connections across both families (a stdlib-only limit listener; one
+  past that is closed as soon as it's accepted). Test: 32 connections
+  whose headers never end (at least 16 closed at once, none held past the
+  timeout), a POST whose body never comes, then the real callback still
+  taken.
+- **Residuals, stated.** pneu prints the full consent URL, its `state`
+  included, and passes it to `xdg-open` in argv: another process of the
+  same user can read it (`/proc/<pid>/cmdline`), and with it answer the
+  relay first. A same-uid process is outside the threat model; it can
+  read the user's mail store and keys anyway. `gmi.ValidConsentURL` holds
+  the host to `accounts.google.com` but not the OAuth parameters: a
+  compromised server could send a consent URL for its own OAuth client
+  (or another `redirect_uri`), and the browser would show Google's
+  genuine consent screen for that app. The user's defence is that screen,
+  which names the app asking and the access it wants; the consent is the
+  user's own decision, made on Google's page. (A server that is already
+  compromised holds the mail and the account's existing token: T6.)
 
 ## Review status
 

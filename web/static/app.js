@@ -1872,6 +1872,7 @@
     if (!lk || !l || typeof l !== 'object') return;
     linkInfo = l;
     renderLine();
+    renderAccounts(); // a client's reauth line differs
   }
 
   function onHello(h) {
@@ -2050,6 +2051,8 @@
       flash('Finish in the Google window; ' + name + ' reconnects when you allow access');
     }, function (err) {
       if (w) w.close();
+      var help = lk && lk.reauthRefused(err) && lk.reauthHelp(name, linkInfo);
+      if (help) { flash(help.lead + help.command + help.tail, 'error'); return; }
       fail('Reconnect ' + name, err);
     });
   }
@@ -2095,6 +2098,12 @@
           p.appendChild(acctButton('Cancel', function () {
             acctPost(a.name, 'reauth/cancel').catch(function (err) { fail('Cancel', err); });
           }));
+        } else if (lk && lk.reauthHelp(a.name, linkInfo)) {
+          // A client: consent can't run from this page (409 reauth-on-server).
+          var help = lk.reauthHelp(a.name, linkInfo);
+          text(help.lead, 'bad');
+          p.appendChild(el('code', null, help.command));
+          text(help.tail);
         } else {
           text('Gmail access expired or was revoked', 'bad');
           p.appendChild(acctButton('Reconnect', function () { reconnect(a.name); }));

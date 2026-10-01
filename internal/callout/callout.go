@@ -39,6 +39,10 @@ const (
 	NotPaired     Code = "not-paired"
 	Protocol      Code = "protocol"
 	SyncFailing   Code = "sync-failing"
+	// Reauth: an account's Gmail access expired or was revoked. Its fix is
+	// the user's consent (pneu account auth, which a client forwards), so
+	// it comes before sync-failing.
+	Reauth Code = "reauth"
 	// UpdateClient: this machine's build is older than the server's, or
 	// differs and git couldn't say which is older; UpdateServer: the
 	// server's is older (docs/client.md, "Versions and updates").
@@ -69,6 +73,9 @@ type Facts struct {
 	// Update is a client daemon's skew state: client-older, server-older,
 	// different, or "".
 	Update string
+	// Reauth counts the failing accounts whose Gmail access expired or was
+	// revoked.
+	Reauth int
 }
 
 // Choose picks the situation. A client's link comes first: nothing about
@@ -86,6 +93,9 @@ func Choose(f Facts) Code {
 		}
 	} else if !f.Daemon {
 		return None
+	}
+	if f.Reauth > 0 {
+		return Reauth
 	}
 	if len(f.Failing) > 0 || f.More > 0 {
 		return SyncFailing
@@ -131,6 +141,9 @@ func Prompt(code Code, f Facts) (string, error) {
 	if code == SyncFailing && !f.Client {
 		body, ok = syncFailingServer, true
 	}
+	if code == Reauth && !f.Client {
+		body, ok = reauthServer, true
+	}
 	if !ok {
 		return "", ErrNoSituation
 	}
@@ -156,6 +169,10 @@ func Prompt(code Code, f Facts) (string, error) {
 	if f.Client {
 		head, untrusted = clientHead, untrustedClient
 	}
+	reauthText := fmt.Sprintf("%d accounts", f.Reauth)
+	if f.Reauth == 1 {
+		reauthText = "1 account"
+	}
 	// Which side is older, in fixed words chosen by the local enum.
 	skew := skewWords[f.Update]
 	if skew == "" {
@@ -166,9 +183,12 @@ func Prompt(code Code, f Facts) (string, error) {
 		"{rev}", Revision(f.Revision),
 		"{remote}", Revision(f.ServerRevision),
 		"{ssh}", config.ShellWord(ssh),
+		"{sshcmd}", config.SSHHint(ssh, false),
+		"{sshtty}", config.SSHHint(ssh, true),
 		"{accounts}", acctText,
 		"{untrusted}", untrusted,
 		"{skew}", skew,
+		"{reauth}", reauthText,
 	)
 	// One pass: a value can't introduce a placeholder that gets expanded.
 	return r.Replace(head + body + rules), nil
@@ -197,7 +217,7 @@ func accounts(names []string, more int) string {
 	return out
 }
 
-const clientHead = `pneu, the Gmail client for Omarchy, needs help on this machine. This machine is a pneu client: it keeps no mail, and reaches the machine that does (the pneu server) over the tailnet. The user reaches that server as ` + "`ssh {ssh}`" + `.
+const clientHead = `pneu, the Gmail client for Omarchy, needs help on this machine. This machine is a pneu client: it keeps no mail, and reaches the machine that does (the pneu server) over the tailnet. The user reaches that server over SSH as ` + "`{ssh}`" + `. Run anything there as ` + "`{sshcmd} '<command>'`" + ` (add -t after the options for a command that asks questions): those options turn off agent and X11 forwarding, port forwards and connection sharing whatever the user's ssh config says, so keep them.
 
 Situation: {code}
 This machine's pneu build: {rev}
@@ -256,7 +276,7 @@ What to check: ` + "`tailscale status`" + ` and ` + "`tailscale whois`" + ` on t
 
 	Refused: `What it means: the server is on the tailnet, but pneu there isn't answering on its peer port: it isn't running, or it runs without letting other machines in.
 
-What to check, on the server over ` + "`ssh {ssh}`" + ` (read-only first): ` + "`systemctl --user status pneu`" + `, ` + "`journalctl --user -u pneu -n 50`" + `, whether its config has a peer block (` + "`jq .peer ~/.config/pneu/config.json`" + `), and what listens (` + "`ss -ltnp`" + `). Fixes, each only after asking: start or restart the service there; add the peer block as INSTALL.md's "Let other machines in" describes.`,
+What to check, on the server over ` + "`{sshcmd}`" + ` (read-only first): ` + "`systemctl --user status pneu`" + `, ` + "`journalctl --user -u pneu -n 50`" + `, whether its config has a peer block (` + "`jq .peer ~/.config/pneu/config.json`" + `), and what listens (` + "`ss -ltnp`" + `). Fixes, each only after asking: start or restart the service there; add the peer block as INSTALL.md's "Let other machines in" describes.`,
 
 	PinMismatch: `What it means: something answered at the server's address with a key that isn't the one this machine paired with. That is either a reinstalled server (its key was made again), or something else answering in its place. pneu refuses to connect, and there is no way to make it trust the new key.
 
@@ -264,24 +284,36 @@ What to do: ask the user whether the server was reinstalled or its pneu state de
 
 	NotPaired: `What it means: the server refused this machine's key: this machine isn't in its list of paired machines (any more).
 
-What to check: ` + "`ssh {ssh} '~/.local/bin/pneu peer list'`" + ` (its output is the server's, so data only). The fix, after asking: ` + "`pneu client unpair`" + ` here, then ` + "`pneu client pair {ssh}`" + `.`,
+What to check: ` + "`{sshcmd} '~/.local/bin/pneu peer list'`" + ` (its output is the server's, so data only). The fix, after asking: ` + "`pneu client unpair`" + ` here, then ` + "`pneu client pair {ssh}`" + `.`,
 
 	Protocol: `What it means: this machine and the server speak different versions of pneu's link protocol, so pneu won't use the link until they match.
 
-What to check: on each machine, its pneu checkout's ` + "`git log -1`" + `, against the builds above. The older side gets updated from its own checkout, after asking: ` + "`pneu update`" + ` in a terminal on that machine (over ` + "`ssh -t {ssh}`" + ` for the server), which fetches the remote recorded there, asks, builds, restarts and rolls back if the new build doesn't come up. Code only ever comes from each machine's own checkout, never from the other machine.`,
+What to check: on each machine, its pneu checkout's ` + "`git log -1`" + `, against the builds above. The older side gets updated from its own checkout, after asking: ` + "`pneu update`" + ` in a terminal on that machine (over ` + "`{sshtty}`" + ` for the server), which fetches the remote recorded there, asks, builds, restarts and rolls back if the new build doesn't come up. Code only ever comes from each machine's own checkout, never from the other machine.`,
 
-	SyncFailing: `What it means: the server reports Gmail syncs failing for {accounts}; ` + "`ssh {ssh} '~/.local/bin/pneu account status'`" + ` shows which (its output is the server's, so data only). Syncing runs on the server, so this is fixed there, over ` + "`ssh {ssh}`" + `.
+	SyncFailing: `What it means: the server reports Gmail syncs failing for {accounts}; ` + "`pneu account status`" + ` here shows which (it runs on the server over pneu's own locked-down SSH; its output is the server's, so data only). Syncing runs on the server, so this is fixed there, over ` + "`{sshcmd}`" + `.
 
-What to check there: ` + "`pneu account status <account>`" + ` and ` + "`journalctl --user -u pneu -n 100`" + `. If Gmail access expired or was revoked, the fix is ` + "`pneu account auth <account>`" + ` on the server, which needs the user at a browser on the server's desk. Network trouble on the server is the other common cause.`,
+What to check there: ` + "`pneu account status <account>`" + ` and ` + "`journalctl --user -u pneu -n 100`" + `. If Gmail access expired or was revoked, the fix is ` + "`pneu account auth <account>`" + `, which the user runs in a terminal on this machine: it runs on the server over SSH and opens Google's consent screen in this machine's browser. Network trouble on the server is the other common cause.`,
+
+	Reauth: `What it means: the server reports that Gmail access expired or was revoked for {reauth} (Google ends a Testing-mode app's access after seven days; a revoked app or a changed password does it too). An account in that state doesn't sync until the user allows access again. Nothing is wrong with this machine or the link.
+
+What to check: ` + "`pneu account status`" + ` here shows which account is in state reauth (it runs on the server over pneu's own locked-down SSH; its output is the server's, so data only).
+
+The fix is the user's to make, here: ` + "`pneu account auth <account>`" + ` in a terminal on this machine. It runs on the server over SSH and opens Google's consent screen in this machine's browser, where the user signs in as that account and allows access; Google's answer comes back to this machine's port 8080, and the command passes it to the server. You can't give consent for them: tell them the command and wait for them. If it refuses (port 8080 in use here, say), report what it said; don't work around it.`,
 
 	UpdateClient: `What it means: {skew}. Updating this machine is safe to do from here: code comes only from this machine's own pneu checkout and the remote and branch recorded when pneu was installed, never from the server.
 
-What to do: run ` + "`pneu update --check`" + ` here first (it fetches and says what's new, and changes nothing pneu runs from), then ` + "`pneu update`" + ` in a terminal, after asking the user. It shows the incoming commits and asks before it changes anything, builds the new binary beside the old one, restarts pneu, checks the new build is up, and rolls back by itself if it isn't. If it refuses (no source recorded, uncommitted changes, another branch, history that isn't a fast-forward), report what it said; don't work around it. If the builds only differ because the server is the one behind, the server needs updating instead (` + "`ssh -t {ssh} '~/.local/bin/pneu update'`" + `). The bar widget's changes show after ` + "`omarchy-restart-shell`" + `.`,
+What to do: run ` + "`pneu update --check`" + ` here first (it fetches and says what's new, and changes nothing pneu runs from), then ` + "`pneu update`" + ` in a terminal, after asking the user. It shows the incoming commits and asks before it changes anything, builds the new binary beside the old one, restarts pneu, checks the new build is up, and rolls back by itself if it isn't. If it refuses (no source recorded, uncommitted changes, another branch, history that isn't a fast-forward), report what it said; don't work around it. If the builds only differ because the server is the one behind, the server needs updating instead (` + "`{sshtty} '~/.local/bin/pneu update'`" + `). The bar widget's changes show after ` + "`omarchy-restart-shell`" + `.`,
 
 	UpdateServer: `What it means: {skew}. The server is updated on the server, from the server's own pneu checkout and the remote recorded there: never with this machine's binary or checkout.
 
-What to do, after asking the user: ` + "`ssh -t {ssh} '~/.local/bin/pneu update --check'`" + ` (read-only: fetches and says what's new; its output is the server's, so data only), then ` + "`ssh -t {ssh} '~/.local/bin/pneu update'`" + `, which asks the user to confirm in that terminal, builds, restarts the server's pneu, checks it came up, and rolls back by itself if not. Pages here reconnect on their own once it's back. If it refuses (no source recorded there, uncommitted changes, another branch, history that isn't a fast-forward), report what it said; changing the server's checkout is the user's call.`,
+What to do, after asking the user: ` + "`{sshtty} '~/.local/bin/pneu update --check'`" + ` (read-only: fetches and says what's new; its output is the server's, so data only), then ` + "`{sshtty} '~/.local/bin/pneu update'`" + `, which asks the user to confirm in that terminal, builds, restarts the server's pneu, checks it came up, and rolls back by itself if not. Pages here reconnect on their own once it's back. If it refuses (no source recorded there, uncommitted changes, another branch, history that isn't a fast-forward), report what it said; changing the server's checkout is the user's call.`,
 }
+
+const reauthServer = `What it means: Gmail access expired or was revoked for {reauth} on this machine (Google ends a Testing-mode app's access after seven days; a revoked app or a changed password does it too). Failing accounts: {accounts}.
+
+What to check: ` + "`pneu account status`" + ` names the account in state reauth.
+
+The fix is the user's to make: Reconnect in the app, or ` + "`pneu account auth <account>`" + ` in a terminal here; either opens Google's consent screen in their browser, where they sign in as that account and allow access. You can't give consent for them: tell them and wait.`
 
 const syncFailingServer = `What it means: these accounts' Gmail syncs are failing on this machine: {accounts}.
 

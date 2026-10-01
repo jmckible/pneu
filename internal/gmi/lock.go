@@ -118,9 +118,18 @@ func retryEINTR(fn func() error) error {
 // waiting up to wait and calling onWait once if it is held. The returned
 // func releases it.
 func Lock(path string, wait time.Duration, onWait func()) (func(), error) {
-	ctx, cancel := context.WithTimeout(context.Background(), wait)
+	return LockContext(context.Background(), path, wait, onWait)
+}
+
+// LockContext is Lock that also gives up when ctx ends (a remote client
+// gone, say), with ctx's error.
+func LockContext(ctx context.Context, path string, wait time.Duration, onWait func()) (func(), error) {
+	wctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
-	release, err := flockFile(ctx, path, onWait)
+	release, err := flockFile(wctx, path, onWait)
+	if err != nil && ctx.Err() != nil {
+		return nil, fmt.Errorf("gmi lock %s: %w", path, ctx.Err())
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return nil, fmt.Errorf("gmi lock %s: still held after %v (pneu is syncing; see journalctl --user -u pneu)", path, wait)
 	}

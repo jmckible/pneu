@@ -34,10 +34,7 @@ const clientUsage = "usage: pneu client pair [-name <name>] <ssh-target> | unpai
 
 // sshOptions are pairing's: every SSH capability it doesn't need off (R7),
 // host-key checking left at the user's own setting.
-var sshOptions = []string{
-	"-T", "-o", "ForwardAgent=no", "-o", "ForwardX11=no", "-o", "ClearAllForwardings=yes",
-	"-o", "ControlPath=none", "-o", "PermitLocalCommand=no",
-}
+var sshOptions = append([]string{"-T"}, config.SafeSSHOptions...)
 
 // pairCommand is the one remote command pairing runs; its parameters go on
 // stdin, never here (SSH joins arguments into a shell line). It's a fixed
@@ -226,7 +223,7 @@ func (e *clientEnv) pair(target, name string) error {
 	case "next-start":
 		fmt.Fprintln(e.stdout, "pneu isn't running on the server (or runs without its peer block): the pairing applies when it starts there.")
 	default:
-		fmt.Fprintf(e.stdout, "The server recorded it but didn't confirm it's live: its SSH session had no XDG_RUNTIME_DIR (no pam_systemd session), or its pneu didn't acknowledge in time. It applies at the server's next start at the latest (systemctl --user restart pneu there). Check with `ssh %s '~/.local/bin/pneu peer list'`.\n", config.ShellWord(target))
+		fmt.Fprintf(e.stdout, "The server recorded it but didn't confirm it's live: its SSH session had no XDG_RUNTIME_DIR (no pam_systemd session), or its pneu didn't acknowledge in time. It applies at the server's next start at the latest (systemctl --user restart pneu there). Check with `%s '~/.local/bin/pneu peer list'`.\n", config.SSHHint(target, false))
 	}
 	fmt.Fprintln(e.stdout, "Next: systemctl --user restart pneu here, then pneu open.")
 	return nil
@@ -314,7 +311,7 @@ func (e *clientEnv) unpair() error {
 // target and name are validated (config.ValidSSHTarget, peer.ValidName);
 // target is shell-quoted unless it's a plain word (config.ShellWord).
 func remoteRemove(target, name string) string {
-	return "ssh " + config.ShellWord(target) + " '~/.local/bin/pneu peer remove " + name + "'"
+	return config.SSHHint(target, false) + " '~/.local/bin/pneu peer remove " + name + "'"
 }
 
 // cappedBuffer keeps at most max bytes; past that it fails the write,

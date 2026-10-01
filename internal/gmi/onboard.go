@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -291,11 +292,32 @@ const consentPrompt = "Please visit this URL to authorize this application: "
 
 // ConsentURL is the consent URL a line of `gmi auth` output announces, and
 // whether it is one: the line is run_local_server's prompt and the URL is
-// Google's.
+// Google's (ValidConsentURL).
 func ConsentURL(line string) (string, bool) {
 	u, ok := strings.CutPrefix(line, consentPrompt)
 	u = strings.TrimSpace(u)
-	return u, ok && strings.HasPrefix(u, "https://accounts.google.com/")
+	return u, ok && ValidConsentURL(u)
+}
+
+// MaxConsentURL bounds a consent URL; Google's are well under 1 KiB.
+const MaxConsentURL = 4096
+
+// ValidConsentURL is the one rule for a URL pneu hands a browser as
+// Google's consent screen, wherever it came from (lieer here, a server's
+// event stream on a client): https on exactly accounts.google.com, no
+// credentials or port, printable ASCII only (no space, no backslash, which
+// a browser reads as a slash), at most MaxConsentURL bytes.
+func ValidConsentURL(u string) bool {
+	if len(u) > MaxConsentURL || !strings.HasPrefix(u, "https://accounts.google.com/") {
+		return false
+	}
+	for i := 0; i < len(u); i++ {
+		if c := u[i]; c <= ' ' || c >= 0x7f || c == '\\' {
+			return false
+		}
+	}
+	p, err := url.Parse(u)
+	return err == nil && p.Scheme == "https" && p.Host == "accounts.google.com" && p.User == nil && p.Opaque == "" && p.Port() == ""
 }
 
 // AuthPort is where lieer's consent flow waits for Google's redirect:
@@ -498,7 +520,7 @@ func (e *Engine) Reauth(ctx context.Context, account string) (string, error) {
 
 	select {
 	case u := <-urls:
-		if !strings.HasPrefix(u, "https://accounts.google.com/") {
+		if !ValidConsentURL(u) {
 			cancel()
 			return "", fmt.Errorf("gmi auth [%s]: consent URL isn't Google's: %q", a.Name, u)
 		}

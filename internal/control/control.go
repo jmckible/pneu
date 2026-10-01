@@ -150,6 +150,10 @@ type Situation struct {
 	// MaxFailing of them; More counts the rest.
 	Failing []string `json:"failing,omitempty"`
 	More    int      `json:"more,omitempty"`
+	// Reauth counts accounts whose Gmail access expired or was revoked
+	// (state reauth), among the failing: the fix is a consent, not a
+	// diagnosis, so it has its own situation.
+	Reauth int `json:"reauth,omitempty"`
 	// Update is a client's skew state (internal/update: client-older,
 	// server-older, different); "" when the builds are the same or no
 	// hello has said the server's.
@@ -484,6 +488,8 @@ func ParseSituation(b []byte) (Situation, error) {
 			dst = &sit.More
 		case "update":
 			dst = &sit.Update
+		case "reauth":
+			dst = &sit.Reauth
 		default:
 			return sit, fmt.Errorf("unknown field %q", key)
 		}
@@ -517,6 +523,9 @@ func ParseSituation(b []byte) (Situation, error) {
 	}
 	if len(sit.Failing) > MaxFailing || sit.More < 0 || sit.More > MaxMore {
 		return sit, errors.New("failing accounts out of bounds")
+	}
+	if sit.Reauth < 0 || sit.Reauth > len(sit.Failing)+sit.More {
+		return sit, errors.New("reauth count out of bounds")
 	}
 	for _, n := range sit.Failing {
 		if !config.ValidName(n) {

@@ -38,7 +38,8 @@ and build order; this file is the working contract. Read PLAN.md before touching
   launches or focuses the window through `omarchy-launch-or-focus-webapp`
   (pattern `pneu.localhost__open`, the class minus browser prefix and profile);
   `pneu gmi <account> <args>` is the manual lieer run (below);
-  `pneu account add|auth|status` sets an account up (INSTALL.md step 5);
+  `pneu account add|auth|status` sets an account up (INSTALL.md step 5),
+  and on a client runs on the server over SSH (below);
   `pneu peer add --stdin|list|remove` pairs other machines' clients (below);
   `pneu client pair <ssh-target>|unpair` makes this machine one (below);
   `pneu agent [-print]` and `pneu reset-window` are the bar menu's Fix with
@@ -49,7 +50,8 @@ and build order; this file is the working contract. Read PLAN.md before touching
   checkout and the remote and branch `pneu source set` recorded (either
   mode; docs/client.md "As built: step 7"), and `pneu version` prints the
   build (`pneu <revision>`), which update's smoke check reads.
-  Commands printed for the user quote the SSH target (`config.ShellWord`). All
+  Commands printed for the user quote the SSH target (`config.ShellWord`),
+  and printed ssh commands carry the safe options (`config.SSHHint`). All
   read `~/.config/pneu/config.json`; there are no built-in accounts, and
   `pneu account add` is what writes it. A config with `server` (a client's,
   docs/client.md) makes `pneu serve` the client daemon; with `accounts` or
@@ -299,6 +301,42 @@ and build order; this file is the working contract. Read PLAN.md before touching
   binary's own error page (`/client/static/`); `/client/link` (read) and
   `/client/retry` (no input) are the only other `/client/` routes, all
   `ClientOnly` entries in the route table.
+- Server work from a client (`internal/remote`, `cmd/pneu/accountremote.go`,
+  `relay.go`, `accountstdin.go`; docs/client.md "As built: step 8" and its
+  Y1–Y3): `pneu account add|auth|status` on a client runs `ssh -T
+  <config.SafeSSHOptions> -- <target> 'PATH="$HOME/.local/bin:$PATH" exec
+  pneu account <verb> --stdin'`, the command a fixed string per
+  `remote.Verb` (never built from input), the parameters one JSON object
+  as stdin's first line (16 KiB; exact keys, each once, strings and
+  booleans, all required; `remote.Parse*`). The server answers with
+  line-delimited events (`progress`, `waiting`, `consent-url`, `result`,
+  `error`; ≤ 8 KiB a line, exact keys per kind, text plain at 500 runes, a
+  closing `result`/`error` and nothing after; `remote.ParseEvent`); its
+  stderr reaches the terminal only as plain prefixed lines. **No pneu ssh
+  ever forwards anything**: every one, consent included, has
+  `ClearAllForwardings=yes` (a real-ssh `-G` test holds it against a
+  config adding forwards, `Match command` included); never add `-L`, `-R`,
+  `-D` or `ClearAllForwardings=no`. auth's consent comes back through the
+  relay: the client binds 127.0.0.1:8080 and [::1]:8080 itself, takes one
+  `GET /` whose query is Google's callback keys only with this consent's
+  state (`remote.ParseCallback`), answers fixed text (never reflecting the
+  request), and sends `{"callback":…}` as one more stdin line; the server
+  replays it to lieer on 127.0.0.1:8080. The consent URL is opened only if
+  `gmi.ValidConsentURL` passes, the one rule every consent URL meets. The
+  remote command's context (heartbeat, stdin's end, signals) covers the
+  lock wait and every gmi it runs; each gmi pneu account runs outside a
+  terminal is a process group of its own (`procgroup.go`): SIGINT, grace,
+  SIGKILL to the group, and the lock is released only once the group is
+  gone. Consent is bounded at 10 minutes and the token check at 2; on the
+  client, a closing event closes the relay and stdin at once (ssh killed
+  5s later if it lingers), and the relay has a 3-minute bound for the
+  consent URL and 10 minutes from it, with time, size and connection
+  limits on its listener. `pneu gmi` on a
+  client refuses. Every ssh command pneu prints is `config.SSHHint` (the
+  same safe options), or a local `pneu account …` where that exists. Fix
+  with agent has a `reauth` situation (`control.Situation.Reauth`, a
+  count), and a client's page shows `pneu account auth <name>` instead of
+  Reconnect (the server answers that 409 `reauth-on-server`).
 - `peers.json` (`$XDG_STATE_HOME/pneu`, 0600, O_NOFOLLOW, a generation and
   a hash over its content) is written only by `pneu peer add|remove` under
   an flock on `peers.lock`, a file never replaced (N8), with temp + fsync +

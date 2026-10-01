@@ -233,6 +233,7 @@ func (d *Daemon) Situation() control.Situation {
 	d.mu.Lock()
 	if s := d.live.status; s != nil {
 		sit.Failing = web.FailingAccounts(s.Accounts)
+		sit.Reauth = web.ReauthCount(s.Accounts)
 	}
 	if u := d.updateLocked(); u != nil {
 		sit.Update = u.State

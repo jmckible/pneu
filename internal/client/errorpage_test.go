@@ -24,7 +24,7 @@ func TestExplain(t *testing.T) {
 		link.TailscaleDown: {"Tailscale is off", "sudo tailscale up", "Fix with agent"},
 		link.NodeOffline:   {"dell is offline", "Fix with agent"},
 		link.NodeMismatch:  {"another machine", "Fix with agent"},
-		link.Refused:       {"isn't answering", "ssh dell systemctl --user status pneu", "Fix with agent"},
+		link.Refused:       {"isn't answering", "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no dell systemctl --user status pneu", "Fix with agent"},
 		link.PinMismatch:   {"identity changed", "pneu client unpair", "pneu client pair dell", "Fix with agent", "Check again", "Not retrying"},
 		link.NotPaired:     {"doesn't know this machine", "pneu client unpair", "pneu client pair dell"},
 		link.Protocol:      {"different versions", "Update pneu", "Update dell"},

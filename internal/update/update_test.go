@@ -794,8 +794,21 @@ func TestUpdateStagedTampered(t *testing.T) {
 	r.commit("second")
 	r.env.crash = func(p string) bool {
 		if p == "prev" {
-			for _, s := range r.stagedLeft() {
-				os.WriteFile(s, []byte("#!/bin/sh\necho evil\n"), 0o755)
+			// Replace, don't overwrite in place: writing to an executable
+			// a parallel test's fork still holds open fails with ETXTBSY,
+			// and an ignored failure left nothing tampered (a flake).
+			staged := r.stagedLeft()
+			if len(staged) == 0 {
+				t.Error("no staged build to tamper with")
+			}
+			for _, s := range staged {
+				tmp := s + ".evil"
+				if err := os.WriteFile(tmp, []byte("#!/bin/sh\necho evil\n"), 0o755); err != nil {
+					t.Error(err)
+				}
+				if err := os.Rename(tmp, s); err != nil {
+					t.Error(err)
+				}
 			}
 		}
 		return false

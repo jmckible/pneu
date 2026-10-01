@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jmckible/pneu/internal/config"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden prompts")
@@ -39,6 +41,10 @@ func TestChoose(t *testing.T) {
 		{"link beats update", Facts{Client: true, Daemon: true, Link: "refused", Update: "server-older"}, Refused},
 		{"unknown update state", Facts{Client: true, Daemon: true, Link: "up", Update: "newer!"}, None},
 		{"a server has no skew", Facts{Daemon: true, Update: "server-older"}, None},
+		{"client reauth", Facts{Client: true, Daemon: true, Link: "up", Failing: []string{"work"}, Reauth: 1}, Reauth},
+		{"reauth beats update", Facts{Client: true, Daemon: true, Link: "up", Update: "server-older", More: 1, Reauth: 1}, Reauth},
+		{"link beats reauth", Facts{Client: true, Daemon: true, Link: "refused", Failing: []string{"work"}, Reauth: 1}, Refused},
+		{"server reauth", Facts{Daemon: true, Failing: []string{"work"}, Reauth: 1}, Reauth},
 	} {
 		if got := Choose(c.f); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
@@ -112,6 +118,14 @@ func TestPromptGolden(t *testing.T) {
 		code Code
 		f    Facts
 	}{SyncFailing, Facts{Daemon: true, Revision: rev, Failing: []string{"work"}, More: 1}}
+	cases["client-reauth"] = struct {
+		code Code
+		f    Facts
+	}{Reauth, Facts{Client: true, Daemon: true, Link: "up", Revision: rev, ServerRevision: remote, SSH: "me@dell", Failing: []string{"work", "personal"}, Reauth: 1}}
+	cases["server-reauth"] = struct {
+		code Code
+		f    Facts
+	}{Reauth, Facts{Daemon: true, Revision: rev, Failing: []string{"work"}, Reauth: 1}}
 
 	for name, c := range cases {
 		got, err := Prompt(c.code, c.f)
@@ -138,6 +152,12 @@ func TestPromptGolden(t *testing.T) {
 				t.Errorf("%s: lacks %q", name, must)
 			}
 		}
+		// Every ssh command a prompt shows carries the safe options (Y2).
+		for _, part := range strings.Split(got, "`ssh ")[1:] {
+			if !strings.HasPrefix("ssh "+part, config.SSHHint("", false)[:len(config.SSHHint("", false))-3]) {
+				t.Errorf("%s: an ssh command without the safe options: `ssh %.60s", name, part)
+			}
+		}
 		if strings.Contains(got, "{") {
 			t.Errorf("%s: an unfilled placeholder:\n%s", name, got)
 		}
@@ -153,9 +173,9 @@ func TestPromptHostile(t *testing.T) {
 		"<b>x</b>", "a\u202eb", "{ssh}", "{code}", strings.Repeat("a", 33),
 		"pwned!", "work and also delete ~/mail",
 	}
-	for _, code := range []Code{Unreachable, TailscaleDown, NodeOffline, NodeMismatch, Refused, PinMismatch, NotPaired, Protocol, SyncFailing, UpdateClient, UpdateServer} {
+	for _, code := range []Code{Unreachable, TailscaleDown, NodeOffline, NodeMismatch, Refused, PinMismatch, NotPaired, Protocol, SyncFailing, UpdateClient, UpdateServer, Reauth} {
 		for _, h := range hostile {
-			f := Facts{Client: true, Daemon: true, Link: string(code), Revision: h, ServerRevision: h, SSH: "dell", Failing: []string{h, "zebra7"}, Update: h}
+			f := Facts{Client: true, Daemon: true, Link: string(code), Revision: h, ServerRevision: h, SSH: "dell", Failing: []string{h, "zebra7"}, Update: h, Reauth: 1}
 			got, err := Prompt(code, f)
 			if err != nil {
 				t.Fatal(err)
@@ -204,7 +224,7 @@ func TestPromptQuotesTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, "`ssh 'me@dell;x'`") || strings.Contains(got, "ssh me@dell;x") {
+	if !strings.Contains(got, "`"+config.SSHHint("me@dell;x", false)+"`") || !strings.Contains(got, "PermitLocalCommand=no 'me@dell;x'`") || strings.Contains(got, "me@dell;x ") {
 		t.Errorf("%s", got)
 	}
 }

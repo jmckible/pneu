@@ -107,7 +107,7 @@ func (e *actionEnv) agent(cfg config.Config, printOnly, onlyUpdate bool) error {
 		if sit.Mode != want {
 			return fmt.Errorf("the running pneu is a %s, but this config makes a %s: restart it (systemctl --user restart pneu)", sit.Mode, want)
 		}
-		f.Daemon, f.Link, f.ServerRevision, f.Failing, f.More, f.Update = true, sit.Link, sit.ServerRevision, sit.Failing, sit.More, sit.Update
+		f.Daemon, f.Link, f.ServerRevision, f.Failing, f.More, f.Update, f.Reauth = true, sit.Link, sit.ServerRevision, sit.Failing, sit.More, sit.Update, sit.Reauth
 	case !f.Client:
 		return fmt.Errorf("pneu isn't answering here (%v): systemctl --user status pneu", err)
 	case !errors.Is(err, control.ErrNotRunning):

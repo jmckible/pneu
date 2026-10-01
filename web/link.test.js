@@ -95,3 +95,25 @@ test('the version nudge: muted tail on the line, a details row, nothing on a ser
   // Down keeps the nudge: the line shows the link first, the tail after.
   assert.equal(L.nudge({ ...down, update: { state: 'different' } }), 'Update available');
 });
+
+test('reauthHelp: a client shows the command to run here and the bar menu; a server keeps Reconnect', () => {
+  const h = L.reauthHelp('work', up);
+  assert.equal(h.lead + h.command + h.tail,
+    'Gmail access expired or was revoked. Run pneu account auth work in a terminal on this machine (it runs on dell over SSH and opens Google here), or Fix with agent in the bar menu.');
+  assert.equal(h.command, 'pneu account auth work');
+  // Down too: the command waits for the link itself.
+  assert.equal(L.reauthHelp('work', down).command, 'pneu account auth work');
+  // A name outside the plain shape never reaches a suggested command.
+  assert.equal(L.reauthHelp('$(id)', up).command, 'pneu account auth <account>');
+  assert.equal(L.reauthHelp('a b; rm -rf ~', up).command, 'pneu account auth <account>');
+  // A server: no link, so the app's own Reconnect.
+  assert.equal(L.reauthHelp('work', null), null);
+  assert.equal(L.reauthHelp('work', { state: '__proto__' }), null);
+});
+
+test('reauthRefused: only the 409 reauth-on-server', () => {
+  assert.equal(L.reauthRefused({ status: 409, message: 'reauth-on-server' }), true);
+  assert.equal(L.reauthRefused({ status: 409, message: 'gmi: a re-auth is already waiting' }), false);
+  assert.equal(L.reauthRefused({ status: 500, message: 'reauth-on-server' }), false);
+  assert.equal(L.reauthRefused(null), false);
+});

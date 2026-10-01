@@ -130,7 +130,28 @@
     return typeof name === 'string' && NAME_RE.test(name) ? name : '<account>';
   }
 
-  var api = { nudge: nudge, updateText: updateText, accountWord: accountWord, lineState: lineState, outcome: outcome, failText: failText, reachText: reachText, reasonText: reasonText, details: details, workerLine: workerLine };
+  // reauthHelp is a reauth account line's words on a client, where the
+  // page can't run the consent: it waits on the server's lieer, and the
+  // server answers this page's Reconnect with 409 reauth-on-server.
+  // `pneu account auth` in a terminal here runs it on the server over SSH
+  // and opens Google in this machine's browser (docs/client.md, step 8).
+  // {lead, command, tail}, the command to show as code; null on a server.
+  function reauthHelp(name, link) {
+    if (!valid(link)) return null;
+    return {
+      lead: 'Gmail access expired or was revoked. Run ',
+      command: 'pneu account auth ' + accountWord(name),
+      tail: ' in a terminal on this machine (it runs on ' + serverName(link) + ' over SSH and opens Google here), or Fix with agent in the bar menu.',
+    };
+  }
+
+  // reauthRefused reports whether a failed Reconnect is the server's
+  // 409 reauth-on-server.
+  function reauthRefused(err) {
+    return !!err && err.status === 409 && err.message === 'reauth-on-server';
+  }
+
+  var api = { reauthHelp: reauthHelp, reauthRefused: reauthRefused, nudge: nudge, updateText: updateText, accountWord: accountWord, lineState: lineState, outcome: outcome, failText: failText, reachText: reachText, reasonText: reasonText, details: details, workerLine: workerLine };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else (root.Pneu = root.Pneu || {}).link = api;
 })(this);

@@ -134,7 +134,7 @@ func TestClientPair(t *testing.T) {
 	if err := e.unpair(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "ssh dell '~/.local/bin/pneu peer remove mac'") || link.Paired(e.credDir) {
+	if !strings.Contains(out.String(), "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no dell '~/.local/bin/pneu peer remove mac'") || link.Paired(e.credDir) {
 		t.Fatalf("unpair: %q", out)
 	}
 	if raw, _ := config.ReadRaw(e.cfgPath); raw.Server != nil || raw.Port != 7317 {
@@ -166,7 +166,7 @@ func TestClientPairApplied(t *testing.T) {
 		if err := e.pair("me@dell", "air"); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(out.String(), want) || (applied == "pending" && !strings.Contains(out.String(), "ssh me@dell '~/.local/bin/pneu peer list'")) {
+		if !strings.Contains(out.String(), want) || (applied == "pending" && !strings.Contains(out.String(), "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no me@dell '~/.local/bin/pneu peer list'")) {
 			t.Errorf("%s: %q", applied, out)
 		}
 	}
@@ -351,7 +351,7 @@ func TestClientUnpairRunning(t *testing.T) {
 	if u.Conns.Load() != conns {
 		t.Fatalf("reconnected after unlink: %d -> %d", conns, u.Conns.Load())
 	}
-	if link.Paired(e.credDir) || !strings.Contains(out.String(), "dropped the link") || !strings.Contains(out.String(), "ssh dell '~/.local/bin/pneu peer remove mac'") {
+	if link.Paired(e.credDir) || !strings.Contains(out.String(), "dropped the link") || !strings.Contains(out.String(), "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no dell '~/.local/bin/pneu peer remove mac'") {
 		t.Fatalf("paired %v, out %q", link.Paired(e.credDir), out)
 	}
 }
@@ -548,10 +548,10 @@ func TestPairCommandFindsLocalBin(t *testing.T) {
 
 // A target outside [A-Za-z0-9@._:-] is quoted in commands printed to copy.
 func TestRemoteRemoveQuotes(t *testing.T) {
-	if got := remoteRemove("dell", "mac"); got != "ssh dell '~/.local/bin/pneu peer remove mac'" {
+	if got := remoteRemove("dell", "mac"); got != "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no dell '~/.local/bin/pneu peer remove mac'" {
 		t.Error(got)
 	}
-	if got := remoteRemove("me@dell;x", "mac"); got != "ssh 'me@dell;x' '~/.local/bin/pneu peer remove mac'" {
+	if got := remoteRemove("me@dell;x", "mac"); got != "ssh -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ControlPath=none -o PermitLocalCommand=no 'me@dell;x' '~/.local/bin/pneu peer remove mac'" {
 		t.Error(got)
 	}
 }

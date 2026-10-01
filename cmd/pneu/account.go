@@ -7,6 +7,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -26,17 +27,24 @@ import (
 
 	"github.com/jmckible/pneu/internal/config"
 	"github.com/jmckible/pneu/internal/gmi"
+	"github.com/jmckible/pneu/internal/remote"
 	"github.com/jmckible/pneu/internal/web"
 )
 
 const accountUsage = `usage:
   pneu account add <name> <address> [--name "Full Name"] [--client-secret FILE]
   pneu account auth <name> [--force]
-  pneu account status [<name>]`
+  pneu account status [<name>]
+On a client each runs on its server over SSH (docs/client.md).`
 
 func account(args []string) error {
 	if len(args) == 0 {
 		return usageError{accountUsage}
+	}
+	// The server's half of a client's command: the verb, then --stdin and
+	// nothing else; parameters come as JSON on stdin, events go to stdout.
+	if len(args) == 2 && args[1] == "--stdin" {
+		return accountStdin(remote.Verb(args[0]), os.Stdin, os.Stdout)
 	}
 	switch args[0] {
 	case "add":
@@ -81,10 +89,16 @@ func tildePath(p string) string {
 	return p
 }
 
-func step(format string, a ...any) { fmt.Printf("  "+format+"\n", a...) }
+// addParams are `pneu account add`'s, from the command line or a
+// client's request. secret is the OAuth client JSON (nil: none given) and
+// secretFrom where it came from, for messages.
+type addParams struct {
+	name, address, fullName string
+	secret                  []byte
+	secretFrom              string
+}
 
-// accountAdd lays out one account, each step checked before it acts, so a
-// rerun finishes what an interrupted one started and changes nothing else.
+// accountAdd is `pneu account add`: here, or on a client, on its server.
 func accountAdd(args []string) error {
 	fs := flag.NewFlagSet("pneu account add", flag.ContinueOnError)
 	cfgFlag := fs.String("config", "", "config file (default ~/.config/pneu/config.json)")
@@ -97,23 +111,90 @@ func accountAdd(args []string) error {
 	if len(pos) != 2 {
 		return usageError{accountUsage}
 	}
-	name, address := pos[0], strings.TrimSpace(pos[1])
-	if !config.ValidName(name) {
-		return usageError{fmt.Sprintf("bad account name %q: %s", name, config.NameRule)}
+	p := addParams{name: pos[0], address: strings.TrimSpace(pos[1]), fullName: *fullName}
+	if !config.ValidName(p.name) {
+		return usageError{fmt.Sprintf("bad account name %q: %s", p.name, config.NameRule)}
 	}
-	if !strings.Contains(address, "@") || strings.ContainsAny(address, " <>") {
-		return usageError{fmt.Sprintf("bad address %q", address)}
+	if !remote.ValidAddress(p.address) {
+		return usageError{fmt.Sprintf("bad address %q", p.address)}
+	}
+	if !remote.ValidFullName(p.fullName) {
+		return usageError{fmt.Sprintf("bad --name: at most %d bytes, no control characters", remote.MaxFullName)}
+	}
+	if *secret != "" {
+		if p.secret, err = readSecretFile(*secret); err != nil {
+			return err
+		}
+		p.secretFrom = *secret
 	}
 	cfgPath, err := configPath(*cfgFlag)
 	if err != nil {
 		return err
 	}
+	if target, ok, err := clientOf(cfgPath); err != nil || ok {
+		if err != nil {
+			return err
+		}
+		req := remote.AddRequest{Name: p.name, Address: p.address, FullName: p.fullName}
+		if p.secret != nil {
+			// Only the validated fields go to the server.
+			clean, err := gmi.CleanClientSecret(p.secret)
+			if err != nil {
+				return fmt.Errorf("%s: %w", *secret, err)
+			}
+			req.ClientSecret = string(clean)
+		}
+		return newRemoteEnv(target).run(remote.Add, req)
+	}
+	return doAdd(cfgPath, p, termOut{})
+}
+
+// maxSecretFile bounds the OAuth client JSON read from disk; Google's is
+// well under 1 KiB.
+const maxSecretFile = 64 << 10
+
+func readSecretFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, maxSecretFile+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > maxSecretFile {
+		return nil, fmt.Errorf("%s: over %d bytes; that isn't an OAuth client JSON", path, maxSecretFile)
+	}
+	return b, nil
+}
+
+// clientOf reports whether the config at cfgPath is a client's, and its
+// server's SSH target.
+func clientOf(cfgPath string) (string, bool, error) {
+	raw, err := config.ReadRaw(cfgPath)
+	if err != nil {
+		return "", false, err
+	}
+	if raw.Server == nil {
+		return "", false, nil
+	}
+	if !config.ValidSSHTarget(raw.Server.SSH) {
+		return "", false, fmt.Errorf("%s: server.ssh isn't a usable ssh target", cfgPath)
+	}
+	return raw.Server.SSH, true, nil
+}
+
+// doAdd lays out one account, each step checked before it acts, so a rerun
+// finishes what an interrupted one started and changes nothing else.
+func doAdd(cfgPath string, p addParams, o acctOut) error {
+	name, address := p.name, p.address
 	raw, err := config.ReadRaw(cfgPath)
 	if err != nil {
 		return err
 	}
 	if raw.Server != nil {
-		return fmt.Errorf("this machine is a client of %s: accounts live on the server (run pneu account add there)", raw.Server.SSH)
+		return fmt.Errorf("this machine is a client of %s: accounts live on the server", raw.Server.SSH)
 	}
 	existing := -1
 	for i, a := range raw.Accounts {
@@ -146,7 +227,7 @@ func accountAdd(args []string) error {
 			others = append(others, a)
 		}
 	}
-	fmt.Printf("Setting up %s (%s)\n", name, address)
+	o.say("Setting up %s (%s)", name, address)
 
 	// 1. Directories, private even if they existed before: the config dir
 	// holds the OAuth client, the mail root the mail and its index, and the
@@ -163,20 +244,16 @@ func accountAdd(args []string) error {
 
 	// 2. The OAuth client, if given or already in place.
 	secretPath := filepath.Join(filepath.Dir(nmConfig), "client_secret.json")
-	if *secret != "" {
-		b, err := os.ReadFile(*secret)
+	if p.secret != nil {
+		clean, err := gmi.CleanClientSecret(p.secret)
 		if err != nil {
-			return err
-		}
-		clean, err := gmi.CleanClientSecret(b)
-		if err != nil {
-			return fmt.Errorf("%s: %w", *secret, err)
+			return fmt.Errorf("%s: %w", p.secretFrom, err)
 		}
 		// Only the validated fields reach lieer.
 		if err := writeSecret(secretPath, clean); err != nil {
 			return err
 		}
-		step("copied the OAuth client to %s (mode 0600)", tildePath(secretPath))
+		o.say("  copied the OAuth client to %s (mode 0600)", tildePath(secretPath))
 	} else if b, err := os.ReadFile(secretPath); err == nil {
 		clean, err := gmi.CleanClientSecret(b)
 		if err != nil {
@@ -185,9 +262,9 @@ func accountAdd(args []string) error {
 		if err := writeSecret(secretPath, clean); err != nil {
 			return err
 		}
-		step("OAuth client in place at %s", tildePath(secretPath))
+		o.say("  OAuth client in place at %s", tildePath(secretPath))
 	} else {
-		step("no OAuth client at %s yet: put the Desktop-app JSON there (INSTALL.md step 4) before `pneu account auth`", tildePath(secretPath))
+		o.say("  no OAuth client at %s yet: put the Desktop-app JSON there (INSTALL.md step 4) before `pneu account auth`", tildePath(secretPath))
 	}
 
 	// 3. The notmuch config, and this address in the others' user.other_email.
@@ -197,20 +274,20 @@ func accountAdd(args []string) error {
 		otherEmails = append(otherEmails, o.Email)
 	}
 	if _, err := os.Stat(nmConfig); err == nil {
-		step("kept the existing notmuch config %s", tildePath(nmConfig))
+		o.say("  kept the existing notmuch config %s", tildePath(nmConfig))
 	} else {
-		who := *fullName
+		who := p.fullName
 		if who == "" {
 			who = defaultFullName(others)
 		}
 		if err := os.WriteFile(nmConfig, []byte(notmuchConfig(dbPath, who, address, otherEmails)), 0o644); err != nil {
 			return err
 		}
-		step("wrote the notmuch config %s", tildePath(nmConfig))
+		o.say("  wrote the notmuch config %s", tildePath(nmConfig))
 	}
-	for _, o := range others {
-		if err := addOtherEmail(o, address); err != nil {
-			return fmt.Errorf("adding %s to %s's user.other_email: %w", address, o.Name, err)
+	for _, other := range others {
+		if err := addOtherEmail(other, address, o); err != nil {
+			return fmt.Errorf("adding %s to %s's user.other_email: %w", address, other.Name, err)
 		}
 	}
 
@@ -219,19 +296,19 @@ func accountAdd(args []string) error {
 		if out, err := notmuchCmd(nmConfig, "new", "--quiet"); err != nil {
 			return fmt.Errorf("notmuch new: %v\n%s", err, out)
 		}
-		step("created the notmuch database in %s", tildePath(dbPath))
+		o.say("  created the notmuch database in %s", tildePath(dbPath))
 	} else {
-		step("notmuch database already exists")
+		o.say("  notmuch database already exists")
 	}
 
 	// 5. The lieer repository, and pneu's throwaway tag in its ignore list.
 	if _, err := os.Stat(filepath.Join(gmiDir, ".gmailieer.json")); err != nil {
-		if out, err := gmiCmd(gmiDir, nmConfig, nil, "init", "--no-auth", "--replace-slash-with-dot", address); err != nil {
+		if out, err := gmiCmd(o.ctx(), gmiDir, nmConfig, "init", "--no-auth", "--replace-slash-with-dot", address); err != nil {
 			return fmt.Errorf("gmi init: %v\n%s", err, out)
 		}
-		step("initialized the lieer repository %s", tildePath(gmiDir))
+		o.say("  initialized the lieer repository %s", tildePath(gmiDir))
 	} else {
-		step("lieer repository already initialized")
+		o.say("  lieer repository already initialized")
 	}
 	ignored, err := lieerIgnoreTags(gmiDir)
 	if err != nil {
@@ -240,10 +317,10 @@ func accountAdd(args []string) error {
 	if !slices.Contains(ignored, gmi.TouchTag) {
 		// --ignore-tags-local replaces the list, so keep what's there.
 		list := strings.Join(append(ignored, gmi.TouchTag), ",")
-		if out, err := gmiCmd(gmiDir, nmConfig, nil, "set", "--ignore-tags-local", list); err != nil {
+		if out, err := gmiCmd(o.ctx(), gmiDir, nmConfig, "set", "--ignore-tags-local", list); err != nil {
 			return fmt.Errorf("gmi set: %v\n%s", err, out)
 		}
-		step("lieer ignores the local tag %s", gmi.TouchTag)
+		o.say("  lieer ignores the local tag %s", gmi.TouchTag)
 	}
 
 	// 6. The account in pneu's config.
@@ -252,14 +329,14 @@ func accountAdd(args []string) error {
 		if err := config.Write(cfgPath, raw); err != nil {
 			return err
 		}
-		step("added %s to %s", name, tildePath(cfgPath))
+		o.say("  added %s to %s", name, tildePath(cfgPath))
 	} else {
-		step("%s already in %s", name, tildePath(cfgPath))
+		o.say("  %s already in %s", name, tildePath(cfgPath))
 	}
 	if running, knows := serverKnows(raw.Port, name); running && !knows {
-		fmt.Println(restartNote(name))
+		o.say("%s", restartNote(name))
 	}
-	fmt.Printf("Next: pneu account auth %s\n", name)
+	o.say("Next: pneu account auth %s", name)
 	return nil
 }
 
@@ -330,7 +407,7 @@ synchronize_flags=false
 
 // addOtherEmail lists address in account o's user.other_email, so its
 // `notmuch reply` knows the new address is yours too.
-func addOtherEmail(o config.Account, address string) error {
+func addOtherEmail(o config.Account, address string, w acctOut) error {
 	p, err := config.ExpandHome(o.NotmuchConfig)
 	if err != nil {
 		return err
@@ -349,7 +426,7 @@ func addOtherEmail(o config.Account, address string) error {
 	if out, err := notmuchCmd(p, append([]string{"config", "set", "user.other_email"}, append(have, address)...)...); err != nil {
 		return fmt.Errorf("%v: %s", err, out)
 	}
-	step("added %s to %s's user.other_email", address, o.Name)
+	w.say("  added %s to %s's user.other_email", address, o.Name)
 	return nil
 }
 
@@ -385,18 +462,24 @@ func withEnv(env []string, kv ...string) []string {
 
 // lockAccount takes the account's lock, the one the server's own runs
 // take, for a series of gmi runs (gmiLocked). A failure is a lock error,
-// never gmi's.
-func lockAccount(gmiDir string) (func(), error) {
+// never gmi's. It gives up when ctx ends (a remote client gone).
+func lockAccount(ctx context.Context, gmiDir string) (func(), error) {
 	path := gmi.DefaultLockPath(gmiDir)
-	return gmi.Lock(path, gmiWait, func() {
+	return gmi.LockContext(ctx, path, gmiWait, func() {
 		fmt.Fprintf(os.Stderr, "pneu account: waiting for %s (pneu is syncing)\n", path)
 	})
 }
 
+// verifyWait bounds the token check (`gmi pull -t`), as the engine's.
+var verifyWait = 2 * time.Minute
+
 // gmiLocked runs gmi in the account's lieer dir; the caller holds the lock.
 // With term set, gmi's output goes straight to the terminal (the consent
-// flow prints its URL there); otherwise it is returned.
-func gmiLocked(gmiDir, nmConfig string, term io.Writer, env []string, args ...string) (string, error) {
+// flow prints its URL there) and gmi stays in the terminal's process
+// group, so Ctrl-C reaches it; otherwise its output is returned, and it
+// runs in a group of its own (procgroup.go) that ctx's end stops as a
+// whole, and that is gone before this returns.
+func gmiLocked(ctx context.Context, gmiDir, nmConfig string, term io.Writer, env []string, args ...string) (string, error) {
 	bin, err := exec.LookPath("gmi")
 	if err != nil {
 		return "", errors.New("gmi (lieer) not found on PATH")
@@ -406,32 +489,32 @@ func gmiLocked(gmiDir, nmConfig string, term io.Writer, env []string, args ...st
 	// Unbuffered and UTF-8, as the engine runs it (gmi.PythonEnv): term is
 	// a pipe, and the consent URL must reach it while lieer waits on the
 	// consent, not when lieer exits.
-	cmd.Env = withEnv(os.Environ(), append(append([]string{"NOTMUCH_CONFIG=" + nmConfig}, gmi.PythonEnv...), env...)...)
-	var out bytes.Buffer
+	cmd.Env = gmiEnvFor(nmConfig, env)
 	if term != nil {
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, term, term
-	} else {
-		cmd.Stdout, cmd.Stderr = &out, &out
+		return "", cmd.Run()
 	}
-	err = cmd.Run()
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	g, err := startGroup(cmd)
+	if err != nil {
+		return "", err
+	}
+	err = g.run(ctx)
 	return out.String(), err
 }
 
 // gmiCmd is one gmi run under the account's lock.
-func gmiCmd(gmiDir, nmConfig string, term io.Writer, args ...string) (string, error) {
-	release, err := lockAccount(gmiDir)
+func gmiCmd(ctx context.Context, gmiDir, nmConfig string, args ...string) (string, error) {
+	release, err := lockAccount(ctx, gmiDir)
 	if err != nil {
 		return "", err
 	}
 	defer release()
-	return gmiLocked(gmiDir, nmConfig, term, nil, args...)
+	return gmiLocked(ctx, gmiDir, nmConfig, nil, nil, args...)
 }
 
-func loadAccount(cfgFlag, name string) (config.Account, error) {
-	cfgPath, err := configPath(cfgFlag)
-	if err != nil {
-		return config.Account{}, err
-	}
+func loadAccount(cfgPath, name string) (config.Account, error) {
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return config.Account{}, err
@@ -443,8 +526,8 @@ func loadAccount(cfgFlag, name string) (config.Account, error) {
 	return a, nil
 }
 
-// accountAuth runs lieer's consent flow for an account, then proves the
-// token with a label listing. It never reads the credentials lieer writes.
+// accountAuth is `pneu account auth`: here, or on a client, on its server
+// with the consent forwarded to this machine's browser.
 func accountAuth(args []string) error {
 	fs := flag.NewFlagSet("pneu account auth", flag.ContinueOnError)
 	cfgFlag := fs.String("config", "", "config file (default ~/.config/pneu/config.json)")
@@ -456,7 +539,26 @@ func accountAuth(args []string) error {
 	if len(pos) != 1 {
 		return usageError{accountUsage}
 	}
-	a, err := loadAccount(*cfgFlag, pos[0])
+	if !config.ValidName(pos[0]) {
+		return usageError{fmt.Sprintf("bad account name %q: %s", pos[0], config.NameRule)}
+	}
+	cfgPath, err := configPath(*cfgFlag)
+	if err != nil {
+		return err
+	}
+	if target, ok, err := clientOf(cfgPath); err != nil || ok {
+		if err != nil {
+			return err
+		}
+		return newRemoteEnv(target).run(remote.Auth, remote.AuthRequest{Name: pos[0], Force: *force, ConsentOpen: remote.ConsentPrint})
+	}
+	return doAuth(cfgPath, pos[0], *force, termOut{})
+}
+
+// doAuth runs lieer's consent flow for an account, then proves the token
+// with a label listing. It never reads the credentials lieer writes.
+func doAuth(cfgPath, name string, force bool, o acctOut) error {
+	a, err := loadAccount(cfgPath, name)
 	if err != nil {
 		return err
 	}
@@ -465,8 +567,8 @@ func accountAuth(args []string) error {
 		return fmt.Errorf("%s has no lieer repository: run `pneu account add %s %s` first", a.Name, a.Name, a.Email)
 	}
 	secret := filepath.Join(filepath.Dir(a.NotmuchConfig), "client_secret.json")
-	if st != gmi.StateUnauthorized && !*force {
-		fmt.Printf("%s already has credentials; checking they work (--force replaces them)\n", a.Name)
+	if st != gmi.StateUnauthorized && !force {
+		o.say("%s already has credentials; checking they work (--force replaces them)", a.Name)
 	} else {
 		b, err := os.ReadFile(secret)
 		if err != nil {
@@ -482,16 +584,16 @@ func accountAuth(args []string) error {
 	// One lock across the consent and the check: released between them, the
 	// server (which looks every few seconds) would start the first pull and
 	// hold the lock through the check.
-	release, err := lockAccount(a.GmiDir)
+	release, err := lockAccount(o.ctx(), a.GmiDir)
 	if err != nil {
 		return err
 	}
 	defer release()
-	if st == gmi.StateUnauthorized || *force {
-		fmt.Printf("Opening Google's consent screen for %s. Sign in as %s.\n", a.Name, a.Email)
-		fmt.Println(`If Google says "Something went wrong", use a private window and sign in with your password.`)
+	if st == gmi.StateUnauthorized || force {
+		o.say("Opening Google's consent screen for %s. Sign in as %s.", a.Name, a.Email)
+		o.say(`If Google says "Something went wrong", use a private window and sign in with your password.`)
 		authArgs := []string{"auth", "-c", secret}
-		if *force {
+		if force {
 			authArgs = []string{"auth", "-f", "-c", secret}
 		}
 		// lieer -f deletes the credentials before consent: an interrupted
@@ -500,10 +602,10 @@ func accountAuth(args []string) error {
 		creds := filepath.Join(a.GmiDir, gmi.CredentialsFile)
 		aside := strings.TrimSuffix(creds, ".json") + ".pneu-old.json" // notmuch ignores *.json
 		kept := os.Rename(creds, aside) == nil
-		if _, err := gmiLocked(a.GmiDir, a.NotmuchConfig, &consentOpener{term: os.Stdout}, []string{"BROWSER=true"}, authArgs...); err != nil {
+		if err := o.consent(a.GmiDir, a.NotmuchConfig, []string{"BROWSER=true"}, authArgs...); err != nil {
 			if _, statErr := os.Stat(creds); kept && errors.Is(statErr, os.ErrNotExist) {
 				if os.Rename(aside, creds) == nil {
-					fmt.Println("Consent didn't finish; the previous credentials are back in place.")
+					o.say("Consent didn't finish; the previous credentials are back in place.")
 				}
 			}
 			os.Remove(aside)
@@ -514,7 +616,16 @@ func accountAuth(args []string) error {
 			return err
 		}
 	}
-	out, err := gmiLocked(a.GmiDir, a.NotmuchConfig, nil, nil, "pull", "-t")
+	vctx, cancel := context.WithTimeout(o.ctx(), verifyWait)
+	out, err := gmiLocked(vctx, a.GmiDir, a.NotmuchConfig, nil, nil, "pull", "-t")
+	timedOut := errors.Is(vctx.Err(), context.DeadlineExceeded)
+	cancel()
+	if o.ctx().Err() != nil {
+		return fmt.Errorf("checking the token: %w", o.ctx().Err()) // the client went
+	}
+	if timedOut {
+		return fmt.Errorf("checking the token: no answer from Gmail within %v", verifyWait)
+	}
 	if err != nil && !errors.As(err, new(*exec.ExitError)) {
 		return fmt.Errorf("checking the token: %w", err) // gmi didn't run
 	}
@@ -525,16 +636,16 @@ func accountAuth(args []string) error {
 		}
 		return fmt.Errorf("Gmail refused %s (%s): was consent given as another Google account? Rerun with --force", a.Email, msg)
 	}
-	fmt.Printf("Authorized: Gmail answers for %s.\n", a.Email)
+	o.say("Authorized: Gmail answers for %s.", a.Email)
 	if gmi.FileState(a.GmiDir) == gmi.StateNeedsPull {
-		cfg, _ := config.Load(mustConfigPath(*cfgFlag))
+		cfg, _ := config.Load(cfgPath)
 		switch running, knows := serverKnows(cfg.Port, a.Name); {
 		case running && knows:
-			fmt.Println("The running pneu server starts downloading the mail within seconds, newest first.")
+			o.say("The running pneu server starts downloading the mail within seconds, newest first.")
 		case running:
-			fmt.Println(restartNote(a.Name))
+			o.say("%s", restartNote(a.Name))
 		default:
-			fmt.Println("Start the pneu server (INSTALL.md step 6); it downloads the mail itself, newest first.")
+			o.say("Start the pneu server (INSTALL.md step 6); it downloads the mail itself, newest first.")
 		}
 	}
 	return nil
@@ -544,35 +655,69 @@ func accountAuth(args []string) error {
 // the port replace it.
 var checkAuthPort = gmi.CheckAuthPort
 
-// consentOpener passes `gmi auth`'s output through to the terminal and
-// opens the consent URL it announces in the default browser, once, without
-// waiting for the browser. lieer itself runs with BROWSER=true: its
-// webbrowser.open runs $BROWSER (which Omarchy sets in interactive shells)
-// and waits for it to exit, and a browser that wasn't already running exits
-// only when it's closed, so Google's redirect would sit unanswered on
-// localhost:8080 until then.
+// consentOpener reads `gmi auth`'s output line by line and opens the
+// consent URL it announces, once, without waiting for the browser. lieer
+// itself runs with BROWSER=true: its webbrowser.open runs $BROWSER (which
+// Omarchy sets in interactive shells) and waits for it to exit, and a
+// browser that wasn't already running exits only when it's closed, so
+// Google's redirect would sit unanswered on localhost:8080 until then.
+//
+// term gets the output as it comes (the terminal), or lines gets each
+// line but the consent URL's (a client's event stream). open is openURL
+// here, or the consent-url event (consentOpen "print").
 type consentOpener struct {
 	term   io.Writer
+	lines  func(string)
+	open   func(string) error
 	line   []byte
 	opened bool
 }
 
+// maxGmiLine bounds the line consentOpener holds; the consent URL's line
+// is far shorter, and the rest of a longer line is dropped.
+const maxGmiLine = 16 << 10
+
 func (c *consentOpener) Write(b []byte) (int, error) {
-	n, err := c.term.Write(b)
+	n := len(b)
+	var err error
+	if c.term != nil {
+		n, err = c.term.Write(b)
+	}
 	for _, ch := range b {
 		if ch != '\n' {
-			c.line = append(c.line, ch)
+			if len(c.line) < maxGmiLine {
+				c.line = append(c.line, ch)
+			}
 			continue
 		}
-		if u, ok := gmi.ConsentURL(string(c.line)); ok && !c.opened {
+		c.endLine()
+	}
+	return n, err
+}
+
+// endLine handles the line held so far.
+func (c *consentOpener) endLine() {
+	line := strings.TrimSuffix(string(c.line), "\r")
+	c.line = c.line[:0]
+	if u, ok := gmi.ConsentURL(line); ok {
+		if !c.opened {
 			c.opened = true
-			if oerr := openURL(u); oerr != nil {
+			if oerr := c.open(u); oerr != nil && c.term != nil {
 				fmt.Fprintf(c.term, "Couldn't open a browser (%v): open the URL above yourself.\n", oerr)
 			}
 		}
-		c.line = c.line[:0]
+		return
 	}
-	return n, err
+	if c.lines != nil && strings.TrimSpace(line) != "" {
+		c.lines(line)
+	}
+}
+
+// flush handles a last line without a newline.
+func (c *consentOpener) flush() {
+	if len(c.line) > 0 {
+		c.endLine()
+	}
 }
 
 // openURL opens u with xdg-open in its own session and doesn't wait for it.
@@ -584,11 +729,6 @@ func openURL(u string) error {
 	}
 	go cmd.Wait()
 	return nil
-}
-
-func mustConfigPath(p string) string {
-	p, _ = configPath(p)
-	return p
 }
 
 func restartNote(name string) string {
@@ -631,8 +771,8 @@ func lastLine(s string) string {
 	return s
 }
 
-// accountStatus prints each account's state: the running server's view
-// (status.json) when it's fresh, else what lieer's files say.
+// accountStatus is `pneu account status`: here, or on a client, on its
+// server.
 func accountStatus(args []string) error {
 	fs := flag.NewFlagSet("pneu account status", flag.ContinueOnError)
 	cfgFlag := fs.String("config", "", "config file (default ~/.config/pneu/config.json)")
@@ -644,9 +784,35 @@ func accountStatus(args []string) error {
 	if err != nil {
 		return err
 	}
+	if target, ok, err := clientOf(cfgPath); err != nil || ok {
+		if err != nil {
+			return err
+		}
+		// One name or none: the request carries one.
+		if len(pos) > 1 {
+			return usageError{"on a client, pneu account status takes at most one account name"}
+		}
+		req := remote.StatusRequest{}
+		if len(pos) == 1 {
+			if !config.ValidName(pos[0]) {
+				return usageError{fmt.Sprintf("bad account name %q: %s", pos[0], config.NameRule)}
+			}
+			req.Name = pos[0]
+		}
+		return newRemoteEnv(target).run(remote.Status, req)
+	}
+	return doStatus(cfgPath, pos, termOut{})
+}
+
+// doStatus prints each account's state: the running server's view
+// (status.json) when it's fresh, else what lieer's files say.
+func doStatus(cfgPath string, names []string, o acctOut) error {
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return err
+	}
+	if cfg.Server != nil {
+		return fmt.Errorf("this machine is a client of %s: accounts live on the server", cfg.Server.SSH)
 	}
 	live := map[string]web.StatusAccount{}
 	server := "the server isn't running; states are from lieer's files"
@@ -663,7 +829,7 @@ func accountStatus(args []string) error {
 	}
 	found := false
 	for _, a := range cfg.Accounts {
-		if len(pos) > 0 && !slices.Contains(pos, a.Name) {
+		if len(names) > 0 && !slices.Contains(names, a.Name) {
 			continue
 		}
 		found = true
@@ -678,11 +844,11 @@ func accountStatus(args []string) error {
 				line += " · " + *l.Error
 			}
 		}
-		fmt.Println(line)
+		o.say("%s", line)
 	}
 	if !found {
 		return fmt.Errorf("no such account")
 	}
-	fmt.Printf("(%s)\n", server)
+	o.say("(%s)", server)
 	return nil
 }

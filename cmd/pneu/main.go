@@ -78,6 +78,9 @@ func main() {
 	default:
 		err = usageError{fmt.Sprintf("unknown command %q; usage: pneu [serve|open|gmi|account|peer|client|agent|reset-window|update|source|version] ...", cmd)}
 	}
+	if errors.As(err, new(reported)) {
+		os.Exit(1) // already said, as an event
+	}
 	if err != nil {
 		log.Print("pneu: ", err)
 		if errors.As(err, new(usageError)) {
@@ -348,7 +351,7 @@ func listenControl(srv *web.Server, ps *peer.Server) *control.Server {
 	}
 	h := control.Handler{Launch: srv.Launch, ResetWindow: srv.Auth.ArmClearSite,
 		Situation: func() control.Situation {
-			return control.Situation{Mode: control.ModeServer, Failing: srv.Failing()}
+			return control.Situation{Mode: control.ModeServer, Failing: srv.Failing(), Reauth: srv.Reauthing()}
 		}}
 	if ps != nil {
 		h.PeersReload = ps.Reload
@@ -466,6 +469,11 @@ func runGmi(args []string) error {
 	cfg, err := loadConfig(fs, args)
 	if err != nil {
 		return err
+	}
+	if cfg.Server != nil {
+		// lieer and the mail are the server's; only account add, auth and
+		// status are forwarded (pneu account), not arbitrary gmi arguments.
+		return fmt.Errorf("this machine is a client of %s: lieer runs on the server. Run it there: %s '~/.local/bin/pneu gmi <account> ...'", cfg.Server.SSH, config.SSHHint(cfg.Server.SSH, true))
 	}
 	var names []string
 	for _, a := range cfg.Accounts {

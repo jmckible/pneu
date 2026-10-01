@@ -154,6 +154,9 @@ test('menu: Fix with agent for failing accounts in both versions; Reopen only af
   assert.deepEqual(ids(m(v1()), true), ['open', 'reopen', 'reset']);
   assert.match(S.accountLine(sick, m(v2())), /^work: 2 failed syncs · x$/);
   assert.match(S.accountLine({ name: 'w', state: 'unauthorized' }, m(v2())), /pneu account auth w on dell\)$/);
+  assert.equal(S.accountLine({ name: 'w', state: 'reauth' }, m(v2())), 'w: Gmail access expired or was revoked (pneu account auth w here, or Fix with agent)');
+  assert.equal(S.accountLine({ name: '$(id)', state: 'reauth' }, m(v2())), '$(id): Gmail access expired or was revoked (pneu account auth <account> here, or Fix with agent)');
+  assert.equal(S.accountLine({ name: 'w', state: 'reauth' }, m(v1())), 'w: Gmail access expired or was revoked; reconnect in pneu');
 });
 
 // Every string a hostile server can put in a client's status.json, and

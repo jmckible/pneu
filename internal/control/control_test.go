@@ -486,6 +486,8 @@ func TestParseSituation(t *testing.T) {
 		` {"mode":"client","link":"starting"} ` + "\n",
 		`{"mode":"client","link":"up","update":"server-older"}`,
 		`{"mode":"client","link":"refused","update":"different"}`,
+		`{"mode":"client","link":"up","failing":["work"],"reauth":1}`,
+		`{"mode":"server","failing":["work"],"more":2,"reauth":3}`,
 	} {
 		if _, err := ParseSituation([]byte(ok)); err != nil {
 			t.Errorf("%s: %v", ok, err)
@@ -507,6 +509,9 @@ func TestParseSituation(t *testing.T) {
 		`{"mode":"client","link":"up","update":"newer"}`, `{"mode":"client","link":"up","update":"__proto__"}`,
 		`{"mode":"client","link":"up","update":"different","update":"server-older"}`,
 		`{"mode":"server","update":"server-older"}`,
+		`{"mode":"server","reauth":1}`, `{"mode":"server","failing":["work"],"reauth":2}`,
+		`{"mode":"server","failing":["work"],"reauth":-1}`, `{"mode":"server","failing":["work"],"reauth":"1"}`,
+		`{"mode":"server","failing":["work"],"reauth":1,"reauth":1}`,
 	} {
 		if _, err := ParseSituation([]byte(bad)); err == nil {
 			t.Errorf("accepted %s", bad)

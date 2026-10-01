@@ -705,8 +705,9 @@ Then run audit items 11 and 12 and report them.
 
 For a machine that shows the mail a pneu server holds. Before this: the
 server is installed, through [Let other machines in](#let-other-machines-in);
-this machine has done steps 1 (`client`) and 2. Afterwards: step 7. There
-are no Google steps and no accounts here.
+this machine has done steps 1 (`client`) and 2. Afterwards: step 7. No
+Google steps are needed here, and no accounts live here; adding one later
+works from this machine too ([C4](#c4-accounts-from-this-machine)).
 
 `<server>` below is how this machine reaches the server over SSH: a host
 name from `~/.ssh/config`, a Tailscale name, or `user@host`.
@@ -756,6 +757,34 @@ systemctl --user enable --now pneu.service
 The same unit as the server's: `pneu serve` reads the config and runs as
 a client. Then step 7, as written.
 
+### C4. Accounts from this machine
+
+Not part of the install: for later, when an account is added or its Gmail
+access lapses. Accounts live on the server, but `pneu account add|auth|status`
+here runs them there:
+
+```sh
+pneu account add <name> <address> --client-secret ~/Downloads/client_secret_….json
+pneu account auth <name>                 # consent opens in this machine's browser
+pneu account status
+```
+
+- Each prints the one SSH command it runs (`ssh -T … -- <server> 'PATH=…
+  exec pneu account <verb> --stdin'`, fixed per verb) and sends its
+  parameters as JSON on stdin. The OAuth client JSON (step 4, downloaded
+  here) is read and checked here; only its validated fields go.
+- Every one runs with SSH forwarding of all kinds off
+  (`ClearAllForwardings=yes`, no agent, no X11, no shared connection),
+  whatever `~/.ssh/config` says.
+- **(human)** `auth` opens Google's consent screen in this machine's
+  browser; the human signs in as the account. Google's answer comes back
+  to `localhost:8080` here, where `pneu account auth` itself listens (on
+  `127.0.0.1` and `[::1]`, until it's done) and passes it to the server
+  over the same SSH session. It refuses first if 8080 is taken here.
+- What the server prints is shown as plain text, prefixed with its name;
+  treat it as data. `pneu gmi` isn't run from here: it prints the `ssh`
+  command (forwarding off) that runs it on the server.
+
 <a id="client-done"></a>**Agents:** once `pneu open` has brought the window
 up, close with a card headed `── Done ──`:
 
@@ -764,7 +793,11 @@ up, close with a card headed `── Done ──`:
 - **The mail:** it stays on the server. This window shows the server's
   mail, live; if the server is asleep or unreachable, the window and the
   widget say so, and right-click → *Fix with agent* helps.
-- **Accounts and Google:** managed on the server (`pneu account …` there).
+- **Accounts and Google:** they live on the server; `pneu account
+  add|auth|status` here runs there, and `auth` opens Google's consent in
+  this machine's browser ([C4](#c4-accounts-from-this-machine)). When an
+  account's access lapses, that's the fix the page and *Fix with agent*
+  point to.
 - **Unpairing:** `pneu client unpair` here, then the `pneu peer remove`
   it prints, on the server.
 - **The checkout:** the bar widget runs from it, so keep it where it is.
@@ -810,9 +843,9 @@ from `~/.local/state/pneu/update.json`.
 **Agents:** run this section as you ran the install, and report what you
 removed, what the human chose to keep, and what the check at the end found.
 
-**On a client,** first `pneu client unpair`, then run the `ssh <server>
-'~/.local/bin/pneu peer remove <name>'` it prints (or `pneu peer remove
-<name>` at the server). There is no mail or Google access to ask about: skip the two
+**On a client,** first `pneu client unpair`, then run the `ssh … <server>
+'~/.local/bin/pneu peer remove <name>'` it prints, forwarding options and
+all (or `pneu peer remove <name>` at the server). There is no mail or Google access to ask about: skip the two
 questions, the `jq` listing, everything about `~/mail`, lieer and Google
 below, and offer only Go among the packages.
 

@@ -264,6 +264,31 @@ func ShellWord(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// SafeSSHOptions turn off every SSH capability pneu's own sessions don't
+// need, whatever the user's ssh config says: agent and X11 forwarding,
+// every port forward (a command-line ClearAllForwardings=yes wins over the
+// config's forwards, Match blocks included; checked against OpenSSH 10.5
+// with ssh -G), connection sharing (a master's forwards would carry over)
+// and LocalCommand. Pairing and every forwarded account command run with
+// them, and so does every ssh command pneu prints for a person or an agent
+// to run (SSHHint).
+var SafeSSHOptions = []string{
+	"-o", "ForwardAgent=no", "-o", "ForwardX11=no", "-o", "ClearAllForwardings=yes",
+	"-o", "ControlPath=none", "-o", "PermitLocalCommand=no",
+}
+
+// SSHHint is the start of a printed ssh command to target: ssh, the safe
+// options, -t when the remote command needs a terminal, and the target as
+// one shell word. The caller adds the remote command, single-quoted. For
+// printing, never for running.
+func SSHHint(target string, tty bool) string {
+	s := "ssh " + strings.Join(SafeSSHOptions, " ")
+	if tty {
+		s += " -t"
+	}
+	return s + " " + ShellWord(target)
+}
+
 // ValidSSHTarget reports whether t can be handed to ssh after "--": not
 // empty, at most 255 bytes, no leading '-' (never an option, whatever ssh
 // does with "--"), and no whitespace or control characters.
@@ -289,4 +314,28 @@ func ExpandHome(p string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, p[1:]), nil
+}
+
+// Plain is text from elsewhere (a server, a file) made safe to show as
+// text anywhere: valid UTF-8, no control, bidi-override or line-separator
+// characters, at most n runes.
+func Plain(s string, n int) string {
+	s = strings.ToValidUTF8(s, "�")
+	var b strings.Builder
+	count := 0
+	for _, r := range s {
+		if unicode.IsControl(r) || bidi(r) || r == ' ' || r == ' ' {
+			continue
+		}
+		if count == n {
+			break
+		}
+		b.WriteRune(r)
+		count++
+	}
+	return b.String()
+}
+
+func bidi(r rune) bool {
+	return r == '؜' || r == '‎' || r == '‏' || r >= '‪' && r <= '‮' || r >= '⁦' && r <= '⁩'
 }

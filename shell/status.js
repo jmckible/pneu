@@ -207,6 +207,9 @@ function accountLine(a, m) {
   var name = clean(a.name || "?", 64)
   var where = m && m.version === 2 ? " on " + m.server : ""
   if (a.state === undefined && a.pulled === false) return name + ": first pull not finished"
+  // A client's page can't run the consent (409 reauth-on-server);
+  // pneu account auth here forwards it to the server.
+  if (a.state === "reauth" && where) return name + ": Gmail access expired or was revoked (pneu account auth " + word(a.name) + " here, or Fix with agent)"
   if (a.state === "reauth") return name + ": Gmail access expired or was revoked; reconnect in pneu"
   if (a.state === "unconfigured") return name + ": not set up (pneu account add " + word(a.name) + " <address>" + where + ")"
   if (a.state === "unauthorized") return name + ": not connected to Gmail (pneu account auth " + word(a.name) + where + ")"

@@ -90,6 +90,28 @@ func FailingAccounts(accts []StatusAccount) []string {
 	return out
 }
 
+// ReauthCount counts the accounts whose Gmail access expired or was
+// revoked: a consent fixes them.
+func ReauthCount(accts []StatusAccount) int {
+	n := 0
+	for _, a := range accts {
+		if a.State == gmi.StateReauth {
+			n++
+		}
+	}
+	return n
+}
+
+// Reauthing is ReauthCount over the last status doc written.
+func (s *Server) Reauthing() int {
+	s.pubStatus.mu.Lock()
+	defer s.pubStatus.mu.Unlock()
+	if s.pubStatus.last == nil {
+		return 0
+	}
+	return ReauthCount(s.pubStatus.last.Accounts)
+}
+
 // Failing names the accounts failing in the last status doc written: the
 // server's half of an agent callout (control.Situation).
 func (s *Server) Failing() []string {

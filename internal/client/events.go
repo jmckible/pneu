@@ -683,28 +683,8 @@ func sane(t time.Time) bool {
 	return y >= 1 && y <= 9999
 }
 
-// plain is server text made safe to show as text anywhere: valid UTF-8,
-// no control, bidi-override or line-separator characters, at most n runes.
-func plain(s string, n int) string {
-	s = strings.ToValidUTF8(s, "�")
-	var b strings.Builder
-	count := 0
-	for _, r := range s {
-		if unicode.IsControl(r) || bidi(r) || r == ' ' || r == ' ' {
-			continue
-		}
-		if count == n {
-			break
-		}
-		b.WriteRune(r)
-		count++
-	}
-	return b.String()
-}
-
-func bidi(r rune) bool {
-	return r == '؜' || r == '‎' || r == '‏' || r >= '‪' && r <= '‮' || r >= '⁦' && r <= '⁩'
-}
+// plain is config.Plain: server text made safe to show as text.
+func plain(s string, n int) string { return config.Plain(s, n) }
 
 // oneWord keeps an upstream event name short and plain in the log.
 func oneWord(s string) string {

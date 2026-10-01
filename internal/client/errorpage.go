@@ -102,7 +102,7 @@ func explain(st link.State, server string) errorPage {
 	default: // refused, and anything new
 		p.Title = server + " is up, but pneu isn't answering"
 		p.Says = "pneu on " + server + " isn't running, or isn't letting other machines in."
-		p.Steps = []step{{Command: "ssh " + config.ShellWord(server) + " systemctl --user status pneu"}, fix}
+		p.Steps = []step{{Command: config.SSHHint(server, false) + " systemctl --user status pneu"}, fix}
 	}
 	return p
 }
