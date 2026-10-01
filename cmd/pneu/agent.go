@@ -114,7 +114,11 @@ func (e *actionEnv) agent(cfg config.Config, printOnly bool) error {
 	}
 	code := callout.Choose(f)
 	if code == callout.None {
-		fmt.Fprintln(e.stdout, "pneu agent: nothing for an agent to fix: the link is up and every account syncs.")
+		if f.Client {
+			fmt.Fprintln(e.stdout, "pneu agent: nothing for an agent to fix: the link is up and every account syncs.")
+		} else {
+			fmt.Fprintln(e.stdout, "pneu agent: nothing for an agent to fix: every account syncs.")
+		}
 		return nil
 	}
 	prompt, err := callout.Prompt(code, f)
