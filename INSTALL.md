@@ -198,6 +198,9 @@ the repo root.
    - `waitForServer` in `cmd/pneu/main.go`, `serverKnows` in
      `cmd/pneu/account.go` and `ProbeHTTP` in `internal/update`: requests
      to `127.0.0.1`, checking that a local pneu is up;
+   - `replayCallback` in `cmd/pneu/accountstdin.go`: server only, during
+     a `pneu account auth` run from a client, Google's consent redirect
+     handed on to lieer's own listener on `127.0.0.1:8080`;
    - `internal/control`: the control socket, a unix socket in
      `$XDG_RUNTIME_DIR/pneu` (no network);
    - `internal/tailscale`: tailscaled's local API, over its fixed unix
@@ -283,11 +286,19 @@ the repo root.
      omarchy-shell with your privileges, reads
      `~/.local/state/pneu/status.json`, and on click runs `pneu open` (or a
      command you configure). Its right-click menu runs only fixed commands
-     from `shell/status.js` (`pneu open`, `pneu agent`, `pneu
-     reset-window`), never anything built from the file it reads, and shows
-     that file's text as plain text.
+     from `shell/status.js` (`pneu open`, `pneu agent`, `pneu agent
+     -update`, `pneu reset-window`, and `pneu update` in
+     `omarchy-launch-floating-terminal-with-presentation`), never anything
+     built from the file it reads, and shows that file's text as plain
+     text.
 9. **Tests pass.** *After step 1:* `go vet ./... && go test ./...` and
-   `node --test web/*.test.js shell/*.test.js`.
+   `node --test web/*.test.js shell/*.test.js`. Some tests skip;
+   `go test -v ./... | grep -B1 -- '--- SKIP'` shows why. One always does
+   (`TestUpdateKilledMidBuild`'s subprocess helper), and one may (it needs
+   `localhost:8080` free, and another package's test may just have used
+   it). On a client, which has no notmuch, every test that needs it
+   skips with "notmuch not on PATH"; report those as unverified there.
+   Any other reason is worth reporting.
 10. **lieer is what it claims to be.** *After step 1's fetch, before its
     install:* lieer comes from the AUR, and the fetch leaves exactly the
     files that get built in `~/.cache/pneu/lieer`. Read `PKGBUILD`: its
