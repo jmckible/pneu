@@ -14,7 +14,9 @@ import (
 	"html/template"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jmckible/pneu/internal/config"
 	"github.com/jmckible/pneu/internal/link"
@@ -63,6 +65,10 @@ type errorPage struct {
 	Steps                              []step
 	Retrying                           bool
 	Mark                               template.HTML // pneu's drawn mark (web.Mark)
+	// Waking: the link is reconnecting after this machine slept
+	// (link.State.Asleep), for Asleep: a progress page, not a failure.
+	Waking bool
+	Asleep string
 }
 
 // explain is the page for a reason, from local codes and the SSH target
@@ -76,6 +82,12 @@ func explain(st link.State, server string) errorPage {
 	case link.Starting:
 		// Just started, just woken, or reconnecting after a dropped
 		// connection: nothing to fix, only to wait for.
+		if st.Asleep > 0 {
+			p.Waking, p.Asleep = true, asleepText(st.Asleep)
+			p.Title = "Welcome back"
+			p.Says = "This machine was asleep, so pneu is reconnecting to " + server + ". Your mail is back in a moment."
+			break
+		}
 		p.Title, p.Says = "Connecting to "+server+"…", "pneu is opening its link to "+server+"."
 	case link.TailscaleDown:
 		p.Title = "Tailscale is off on this machine"
@@ -108,6 +120,26 @@ func explain(st link.State, server string) errorPage {
 		p.Steps = []step{{Command: config.SSHHint(server, false) + " systemctl --user status pneu"}, fix}
 	}
 	return p
+}
+
+// asleepText is a sleep's length in words: "a minute", "55 minutes",
+// "5 hours", "2 days".
+func asleepText(d time.Duration) string {
+	unit := func(n int, one, many string) string {
+		if n == 1 {
+			return "a " + one
+		}
+		return strconv.Itoa(n) + " " + many
+	}
+	switch {
+	case d < 2*time.Minute:
+		return "a minute"
+	case d < 2*time.Hour:
+		return unit(int(d/time.Minute), "minute", "minutes")
+	case d < 48*time.Hour:
+		return unit(int(d/time.Hour), "hour", "hours")
+	}
+	return unit(int(d/(24*time.Hour)), "day", "days")
 }
 
 // errorPage answers a page navigation with the error page, under the

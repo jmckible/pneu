@@ -22,6 +22,14 @@ main { max-width: 64ch; margin: 12vh auto; padding: 0 2ch; }
 body[data-retrying] .mark { animation: breathe 2.4s ease-in-out infinite; }
 @keyframes breathe { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { body[data-retrying] .mark { animation: none; } }
+/* The wake page's bar: indeterminate, a slice of accent sweeping the
+   track until the link is up and the page reloads. */
+.progress { position: relative; height: 3px; margin: 1.5em 0; overflow: hidden;
+  background: color-mix(in oklab, var(--fg) 12%, var(--bg)); border-radius: 2px; }
+.progress span { position: absolute; inset: 0 auto 0 0; width: 30%; background: var(--accent);
+  border-radius: 2px; animation: sweep 1.4s ease-in-out infinite; }
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+@media (prefers-reduced-motion: reduce) { .progress span { animation: none; width: 100%; opacity: 0.5; } }
 h1 { font-size: inherit; color: var(--accent-hot); margin: 0 0 1em; }
 ul { padding-left: 2ch; }
 li { margin: 0.3em 0; }

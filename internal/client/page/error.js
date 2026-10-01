@@ -38,14 +38,24 @@
   }
   if (window.EventSource) {
     var es = new EventSource('/events');
+    // moved: still down, but for another reason than this page says (a
+    // wake page whose window ran out on a real failure, or the reverse):
+    // a reload shows the page for it.
+    var shown = document.body.dataset.reason;
+    function moved(l) { return !!l && !up(l) && typeof l.reason === 'string' && l.reason !== shown; }
     es.addEventListener('hello', function (e) {
       try {
         last = JSON.parse(e.data).link;
         if (up(last)) reloadIf(last, upDelay());
+        else if (moved(last)) location.reload();
       } catch (err) { /* ignore */ }
     });
     es.addEventListener('link', function (e) {
-      try { last = JSON.parse(e.data); reloadIf(last, 0); } catch (err) { /* ignore */ }
+      try {
+        last = JSON.parse(e.data);
+        if (up(last)) reloadIf(last, 0);
+        else if (moved(last)) location.reload();
+      } catch (err) { /* ignore */ }
     });
   }
   var btn = document.getElementById('retry');

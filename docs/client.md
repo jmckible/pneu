@@ -606,7 +606,15 @@ When the link isn't up, page requests get a local page (with
   (every stream with it), the link says `starting` (a reason from before
   the sleep is stale) and an attempt runs at once; `pin-mismatch` stays.
   `launch`, every proxied request and every `RoundTripOn` check first,
-  since super+m can beat the ticker. status.json is rewritten too (its
+  since super+m can beat the ticker. For a minute after (`Waking`), a
+  failure a network still coming back explains (`tailscale-down`,
+  `node-offline`, `refused`; a resume takes seconds to bring Wi-Fi and
+  the tailnet back) keeps the link `starting`, logged as `waking`, and
+  is retried every second; pin, pairing and protocol answers show at
+  once. `State.Asleep` carries the sleep while that lasts, and a page
+  load gets a welcome-back page with an indeterminate progress bar in
+  place of the error page (no steps, no button); any page reloads when
+  the link's reason moves from the one it shows. status.json is rewritten too (its
   heartbeat slept with everything else). A server rewrites its
   status.json on waking and syncs every account 15s later, once the
   network is back (a sync into a dead network would count as a failure).

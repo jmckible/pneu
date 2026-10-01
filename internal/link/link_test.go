@@ -894,3 +894,45 @@ func TestReconnect(t *testing.T) {
 		t.Fatal("no new session")
 	}
 }
+
+// Within the wake window a network still coming back keeps the link
+// starting, with how long it slept, retried every BackoffMin; past it
+// the real reason shows. Up again ends the window.
+func TestWakeWindow(t *testing.T) {
+	keys := linktest.NewKeys(t)
+	u := linktest.StartUpstream(t, keys.Server, keys.Creds.Identity.SPKI, nil)
+	api := linktest.NewAPI()
+	var zz sleeper
+	l := start(t, api, keys, u.Port, func(l *link.Link) {
+		link.SetWake(l, zz.clock())
+		l.Timing.Waking = 400 * time.Millisecond
+		l.Timing.BackoffMax = 5 * time.Second // a doubling backoff would show
+	})
+	waitReason(t, l, link.Up)
+	if st := l.State(); st.Asleep != 0 {
+		t.Fatalf("asleep while up: %+v", st)
+	}
+
+	api.Set(func(a *linktest.API) { a.State = "Stopped" }) // Wi-Fi not back yet
+	zz.sleep(55 * time.Minute)
+	l.CheckWake()
+	time.Sleep(150 * time.Millisecond) // several attempts at BackoffMin
+	if st := l.State(); st.Reason != link.Starting || (st.Asleep - 55*time.Minute).Abs() > time.Second || !strings.Contains(st.Detail, "tailscale-down") {
+		t.Fatalf("in the window: %+v", st)
+	}
+	waitReason(t, l, link.TailscaleDown)
+	if st := l.State(); st.Asleep != 0 {
+		t.Fatalf("asleep past the window: %+v", st)
+	}
+
+	// Back within the window: up, and the window is over.
+	zz.sleep(time.Hour)
+	l.CheckWake()
+	waitReason(t, l, link.Starting)
+	api.Set(func(a *linktest.API) { a.State = "Running" })
+	waitReason(t, l, link.Up)
+	link.GoDown(l) // a failure after it is reported as itself
+	if st := l.State(); st.Reason != link.Refused || st.Asleep != 0 {
+		t.Fatalf("after up: %+v", st)
+	}
+}

@@ -295,7 +295,9 @@ and build order; this file is the working contract. Read PLAN.md before touching
   Sleep (`internal/wake`, docs/client.md "Waking from sleep"): every Go
   timer stops in suspend, so the link, the client's status.json and a
   server's status.json and sync watch for a wall-clock jump instead;
-  on one the session goes and the link says `starting`. A request that
+  on one the session goes and the link says `starting`, and stays so
+  through transient failures for `link.Waking` (the page shows a
+  welcome-back progress page off `State.Asleep`). A request that
   finds the link `starting` waits up to `SettleWait` for it; a safe one
   (GET/HEAD, no body) that dies on a live session is retried once on a
   fresh one (`Link.Reconnect`), a mutation never; a failed page

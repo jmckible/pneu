@@ -62,6 +62,10 @@ type State struct {
 	Reason Reason
 	Since  time.Time
 	Detail string
+	// Asleep is set while the link is starting within Waking of this
+	// machine waking (woke): how long it slept. The error page shows a
+	// wake page for it, not a failure.
+	Asleep time.Duration
 }
 
 // Hello is what the server's /peer/hello said on connect, validated.
@@ -89,6 +93,8 @@ const (
 	// (launch, focus, R), which must answer fast on a laptop just woken.
 	HelloWait = 10 * time.Second
 	ProbeWait = 3 * time.Second
+	// Waking is Timing.Waking outside tests.
+	Waking = time.Minute
 	// maxHello bounds the hello document.
 	maxHello = 64 << 10
 	// maxAccounts bounds hello's account set (status.json's limit too).
@@ -101,6 +107,11 @@ type Timing struct {
 	BackoffMin, BackoffMax   time.Duration
 	HelloWait, ProbeWait     time.Duration
 	Dial, Handshake          time.Duration
+	// Waking is how long after a wake a failure that a network still
+	// coming back explains (tailscale-down, node-offline, refused) keeps
+	// the link starting, retried every BackoffMin rather than backing
+	// off: a resume takes seconds to bring Wi-Fi and the tailnet back.
+	Waking time.Duration
 }
 
 // DefaultTiming is the link's clock outside tests.
@@ -110,6 +121,7 @@ func DefaultTiming() Timing {
 		BackoffMin: BackoffMin, BackoffMax: BackoffMax,
 		HelloWait: HelloWait, ProbeWait: ProbeWait,
 		Dial: 5 * time.Second, Handshake: 10 * time.Second,
+		Waking: Waking,
 	}
 }
 
@@ -151,6 +163,10 @@ type Link struct {
 	// wake notices this machine slept (wake.go): every timer above
 	// stopped with it, so the session goes and an attempt follows.
 	wake *wake.Clock
+	// wokeAt and asleep are the last wake, until the link is up again
+	// (zero after); waking() is within Timing.Waking of it.
+	wokeAt time.Time
+	asleep time.Duration
 
 	kick chan struct{}
 	stop chan struct{}
@@ -196,7 +212,39 @@ func (l *Link) Close() {
 func (l *Link) State() State {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.state
+	st := l.state
+	if st.Reason == Starting && l.wakingLocked() {
+		st.Asleep = l.asleep
+	}
+	return st
+}
+
+// wakingLocked: within Timing.Waking of the last wake, not yet up since.
+func (l *Link) wakingLocked() bool {
+	return !l.wokeAt.IsZero() && time.Since(l.wokeAt) < l.Timing.Waking
+}
+
+func (l *Link) waking() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.wakingLocked()
+}
+
+// transient: a reason a network still coming back after a wake explains.
+// The rest (pin, pairing, protocol) are answers, shown at once.
+func transient(r Reason) bool {
+	return r == TailscaleDown || r == NodeOffline || r == Refused
+}
+
+// failed records an attempt's failure: within the wake window a
+// transient one keeps the link starting (logged, as no state change
+// is), anything else is the reason.
+func (l *Link) failed(reason Reason, detail string) {
+	if transient(reason) && l.waking() {
+		log.Printf("link: waking: %s: %s", reason, detail)
+		reason, detail = Starting, "reconnecting after sleep ("+string(reason)+": "+detail+")"
+	}
+	l.setDown(nil, reason, detail)
 }
 
 // Hello is the last connect's hello; nil while never up.
@@ -341,6 +389,9 @@ func (l *Link) CheckWake() {
 func (l *Link) woke(asleep time.Duration) {
 	l.mu.Lock()
 	s, pin := l.sess, l.state.Reason == PinMismatch
+	if !pin {
+		l.wokeAt, l.asleep = time.Now(), asleep
+	}
 	l.mu.Unlock()
 	if pin {
 		return
@@ -387,7 +438,7 @@ func (l *Link) run() {
 		switch {
 		case l.attempt():
 			delay = l.Timing.BackoffMin
-		case kicked || delay == 0:
+		case kicked || delay == 0 || l.waking():
 			delay = l.Timing.BackoffMin
 		default:
 			delay = min(delay*2, l.Timing.BackoffMax)
@@ -403,7 +454,7 @@ func (l *Link) attempt() bool {
 	checked := time.Now()
 	target, user, reason, detail := l.resolve()
 	if reason != "" {
-		l.setDown(nil, reason, detail)
+		l.failed(reason, detail)
 		return false
 	}
 	s, ok := l.newSession(target)
@@ -413,7 +464,7 @@ func (l *Link) attempt() bool {
 	h, reason, detail := l.sayHello(s, l.Timing.HelloWait)
 	if reason != "" {
 		l.retire(s)
-		l.setDown(nil, reason, detail)
+		l.failed(reason, detail)
 		return false
 	}
 	if l.beforePublish != nil {
@@ -431,11 +482,12 @@ func (l *Link) attempt() bool {
 		// A slow hello outlasted the whois that vouched for it.
 		l.mu.Unlock()
 		l.retire(s)
-		l.setDown(nil, TailscaleDown, "the whois lease ran out before hello finished")
+		l.failed(TailscaleDown, "the whois lease ran out before hello finished")
 		return false
 	}
 	old := l.sess
 	l.sess, l.hello, l.user = s, h, user
+	l.wokeAt, l.asleep = time.Time{}, 0
 	l.expiry = expiry
 	s.timer = time.AfterFunc(time.Until(expiry), func() { l.expire(s) })
 	changed := l.setLocked(State{Reason: Up, Since: time.Now(), Detail: "connected to " + target.String()})

@@ -110,3 +110,39 @@ func TestSafeRetry(t *testing.T) {
 		t.Fatalf("fetch failing twice: %d %q", resp.StatusCode, body)
 	}
 }
+
+// Starting after a wake is a welcome-back page with a progress bar: no
+// steps, no reason code, no button. Starting otherwise is the usual page.
+func TestWakePage(t *testing.T) {
+	var b strings.Builder
+	st := link.State{Reason: link.Starting, Since: time.Now(), Asleep: 55 * time.Minute}
+	if err := errorTmpl.Execute(&b, explain(st, "dell")); err != nil {
+		t.Fatal(err)
+	}
+	page := b.String()
+	for _, want := range []string{"Welcome back", "reconnecting to dell", `class="progress"`, "Asleep for 55 minutes", `<svg class="mark"`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("wake page lacks %q", want)
+		}
+	}
+	for _, not := range []string{"<ul>", `id="retry"`, "<code>starting</code>"} {
+		if strings.Contains(page, not) {
+			t.Errorf("wake page has %q", not)
+		}
+	}
+	b.Reset()
+	st.Asleep = 0
+	errorTmpl.Execute(&b, explain(st, "dell"))
+	if p := b.String(); strings.Contains(p, "Welcome back") || strings.Contains(p, "progress") || !strings.Contains(p, "Connecting to dell") {
+		t.Errorf("starting without a wake:\n%s", p)
+	}
+	for d, want := range map[time.Duration]string{
+		30 * time.Second: "a minute", 90 * time.Second: "a minute", 2 * time.Minute: "2 minutes",
+		55 * time.Minute: "55 minutes", 2 * time.Hour: "2 hours", 5*time.Hour + 40*time.Minute: "5 hours",
+		47 * time.Hour: "47 hours", 49 * time.Hour: "2 days",
+	} {
+		if got := asleepText(d); got != want {
+			t.Errorf("asleepText(%v) = %q, want %q", d, got, want)
+		}
+	}
+}
