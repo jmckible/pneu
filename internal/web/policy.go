@@ -53,7 +53,13 @@ var securityHeaders = []string{
 	"X-Content-Type-Options", "Referrer-Policy", "X-Frame-Options",
 	"Cross-Origin-Resource-Policy", "Cross-Origin-Opener-Policy",
 	"Content-Security-Policy", "Content-Security-Policy-Report-Only", PolicyHeader,
+	"Clear-Site-Data",
 }
+
+// ClearSiteData is what a navigation gets once Reset window data is armed
+// (Auth.ArmClearSite): the origin's cache and storage, a service worker's
+// registration with them. Not cookies: the session stays.
+const ClearSiteData = `"cache", "storage"`
 
 var errPolicy = errors.New("unknown policy class")
 
@@ -112,6 +118,8 @@ type policyWriter struct {
 	// untyped: the header went without a Content-Type (Untyped), so no
 	// body may follow: net/http would sniff one.
 	untyped bool
+	// clearSite: this response carries ClearSiteData (Auth.ArmClearSite).
+	clearSite bool
 	// check sees every response once its headers are final; tests only.
 	check func(rt *Route, status int, h http.Header, r *http.Request)
 }
@@ -157,6 +165,9 @@ func (w *policyWriter) WriteHeader(code int) {
 		h.Del("Content-Disposition")
 	}
 	p.Apply(h)
+	if w.clearSite {
+		h.Set("Clear-Site-Data", ClearSiteData)
+	}
 	cache := CacheNoStore
 	if w.route != nil {
 		cache = w.route.Cache

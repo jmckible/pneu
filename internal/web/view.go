@@ -41,27 +41,29 @@ type viewLabel struct {
 	Gen   uint64 `json:"gen"`
 }
 
-// threadRef is one thread a write touched.
-type threadRef struct {
+// ThreadRef is one thread a write touched.
+type ThreadRef struct {
 	Account string `json:"account"`
 	Thread  string `json:"thread"`
 }
 
-// viewEvent is SSE `view`. No threads means anything may have changed (a
+// ViewEvent is SSE `view`. No threads means anything may have changed (a
 // sync). From is the writing page's X-Pneu-Window: a hint for that page to
 // skip its own refresh, never an authority for anything.
-type viewEvent struct {
+type ViewEvent struct {
 	Epoch   string      `json:"epoch"`
 	Gen     uint64      `json:"gen"`
 	From    string      `json:"from"`
-	Threads []threadRef `json:"threads,omitempty"`
+	Threads []ThreadRef `json:"threads,omitempty"`
 }
 
-// helloEvent is the first event on every /events stream.
-type helloEvent struct {
+// HelloEvent is the first event on every /events stream. Status is the
+// last status doc broadcast, null before the first.
+type HelloEvent struct {
 	Epoch    string        `json:"epoch"`
 	Gen      uint64        `json:"gen"`
-	Accounts []accountView `json:"accounts"`
+	Accounts []AccountView `json:"accounts"`
+	Status   *StatusDoc    `json:"status"`
 }
 
 // viewLabel reads the generation. A page reads it before its notmuch query:
@@ -83,11 +85,11 @@ func (s *Server) ViewChanged() { s.viewChanged("", nil) }
 
 // viewChanged bumps the generation and broadcasts `view`, returning the new
 // label (the writing page's response carries it).
-func (s *Server) viewChanged(from string, threads []threadRef) viewLabel {
+func (s *Server) viewChanged(from string, threads []ThreadRef) viewLabel {
 	s.view.mu.Lock()
 	defer s.view.mu.Unlock()
 	s.view.gen++
-	s.Hub.Broadcast("view", viewEvent{Epoch: s.view.epoch, Gen: s.view.gen, From: from, Threads: threads})
+	s.Hub.Broadcast("view", ViewEvent{Epoch: s.view.epoch, Gen: s.view.gen, From: from, Threads: threads})
 	return viewLabel{s.view.epoch, s.view.gen}
 }
 
@@ -111,10 +113,10 @@ const threadLookup = 5 * time.Second
 // threadsOf is the threads holding ids, for `view`. On failure it is nil,
 // which pages read as "anything may have changed": a missed thread would be
 // a stale page, an extra one only a refetch.
-func (s *Server) threadsOf(acct notmuch.Account, ids []string) []threadRef {
+func (s *Server) threadsOf(acct notmuch.Account, ids []string) []ThreadRef {
 	ctx, cancel := context.WithTimeout(context.Background(), threadLookup)
 	defer cancel()
-	var out []threadRef
+	var out []ThreadRef
 	seen := map[string]bool{}
 	for _, c := range chunkIDs(ids) {
 		got, err := acct.Threads(ctx, notmuch.IDsQuery(c))
@@ -124,7 +126,7 @@ func (s *Server) threadsOf(acct notmuch.Account, ids []string) []threadRef {
 		for _, t := range got {
 			if !seen[t] {
 				seen[t] = true
-				out = append(out, threadRef{acct.Name, t})
+				out = append(out, ThreadRef{acct.Name, t})
 			}
 		}
 	}
@@ -132,25 +134,28 @@ func (s *Server) threadsOf(acct notmuch.Account, ids []string) []threadRef {
 }
 
 // subscribe registers a stream and takes its hello. marks.mu (AccountChanged's
-// read-and-broadcast) and view.mu (every bump) are held across both, so
-// every `account` and `view` event either went out before the subscription,
-// and hello's snapshot includes it, or comes after hello on the stream: none
-// is queued with state older than the snapshot. The Hub needs no gen filter.
-func (s *Server) subscribe() (chan []byte, helloEvent) {
+// read-and-broadcast), view.mu (every bump) and pubStatus.mu (every status
+// broadcast) are held across both, so every `account`, `view` and `status`
+// event either went out before the subscription, and hello's snapshot
+// includes it, or comes after hello on the stream: none is queued with
+// state older than the snapshot. The Hub needs no gen filter.
+func (s *Server) subscribe() (chan []byte, HelloEvent) {
 	s.marks.mu.Lock()
 	defer s.marks.mu.Unlock()
 	s.view.mu.Lock()
 	defer s.view.mu.Unlock()
-	c := s.Hub.subscribe()
+	s.pubStatus.mu.Lock()
+	defer s.pubStatus.mu.Unlock()
+	c := s.Hub.Subscribe()
 	accts := s.accountViews()
 	if accts == nil {
-		accts = []accountView{}
+		accts = []AccountView{}
 	}
-	return c, helloEvent{Epoch: s.view.epoch, Gen: s.view.gen, Accounts: accts}
+	return c, HelloEvent{Epoch: s.view.epoch, Gen: s.view.gen, Accounts: accts, Status: s.pubStatus.last}
 }
 
 // events handles GET /events: hello, then the Hub's broadcasts.
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	c, hello := s.subscribe()
-	s.Hub.serve(w, r, c, encodeEvent("hello", hello))
+	s.Hub.Serve(w, r, c, EncodeEvent("hello", hello))
 }

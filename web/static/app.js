@@ -13,6 +13,9 @@
   var search = document.querySelector('form.search input[name=q]');
   var lastKey = 0;
   var tri = Pneu.triage || null; // base.html loads triage.js; see `ready` below
+  // Client mode's link (link.js): null on a server, whose hello has none.
+  var lk = Pneu.link || null;
+  var linkInfo = null;
 
   function storage(fn) {
     try { return fn(window.sessionStorage); } catch (e) { return null; }
@@ -877,9 +880,12 @@
 
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
+  // tagError is a failed write's error; err.link is a client daemon's
+  // Pneu-Link outcome when the server's answer never came (fail says it).
   function tagError(res, data) {
     var err = new Error((data && data.error) || 'HTTP ' + res.status);
     err.status = res.status;
+    err.link = lk ? lk.outcome(res.headers, data) : '';
     return err;
   }
 
@@ -1021,7 +1027,12 @@
     undoShown = true;
   }
 
+  // fail says a write failed. On a client, one that never reached the
+  // server says so (safe to press again), and one whose outcome is unknown
+  // says the next hello will show the truth (onHello reconciles by gen).
   function fail(what, err) {
+    var lt = err && err.link && lk && lk.failText(err.link, linkInfo);
+    if (lt) { flash(lt, 'error'); return; }
     flash(what + ' failed: ' + (err && err.message || 'network error'), 'error');
   }
 
@@ -1650,7 +1661,7 @@
     return fetch('/sync', { method: 'POST', credentials: 'same-origin', headers: writeHeaders({ Accept: 'application/json' }) })
       .then(function (res) {
         return res.json().catch(function () { return null; }).then(function (data) {
-          if (!res.ok || !data || !data.ok) throw new Error((data && data.error) || 'HTTP ' + res.status);
+          if (!res.ok || !data || !data.ok) throw tagError(res, data);
         });
       })
       .catch(function (err) { lineAsked(); throw err; });
@@ -1850,7 +1861,15 @@
     evs.forEach(onView);
   }
 
+  // setLink takes a client daemon's link view (hello's, or SSE `link`).
+  function setLink(l) {
+    if (!lk || !l || typeof l !== 'object') return;
+    linkInfo = l;
+    renderLine();
+  }
+
   function onHello(h) {
+    if (h.link) setLink(h.link);
     heldViews = []; // hello counts them
     (h.accounts || []).forEach(accountEvent);
     var at = tri.viewLabel(h.epoch, h.gen);
@@ -2156,9 +2175,13 @@
     return Math.floor(m / (24 * 60)) + 'd ago';
   }
 
-  // lineState is the line's state: { state, text }, state one of checking,
-  // error, stale, fresh, or '' (nothing to say: no ready account has synced).
+  // lineState is the line's state: { state, text }, state one of link (a
+  // client's link down: first, since nothing else on the line is current
+  // then), checking, error, stale, fresh, or '' (nothing to say: no ready
+  // account has synced).
   function lineState() {
+    var down = lk && lk.lineState(linkInfo);
+    if (down) return down;
     var accts = readyAccounts();
     if (askedAt || accts.some(busy)) return { state: 'checking', text: 'Checking…' };
     var sick = accts.filter(function (a) { return (a.failures || 0) >= SICK_FAILURES; });
@@ -2195,7 +2218,7 @@
     clearTimeout(ageTimer);
     ageTimer = st.state === 'fresh' || st.state === 'stale' ? setTimeout(renderLine, AGE_TICK) : 0;
     // Announce a change of state, not the age ticking over.
-    var said = st.state + (st.state === 'error' ? st.text : '');
+    var said = st.state + (st.state === 'error' || st.state === 'link' ? st.text : '');
     if (lineLive && lineSaid !== null && said !== lineSaid) lineLive.textContent = st.text;
     lineSaid = said;
     if (syncInfo && syncInfo.open) syncInfo.replaceChildren(syncDetails());
@@ -2272,6 +2295,17 @@
     });
     if (!acctOrder.length) dl.appendChild(el('dd', null, 'no accounts'));
     box.appendChild(dl);
+    // A client's link: its state and both builds (none on a server).
+    var rows = lk ? lk.details(linkInfo) : [];
+    if (rows.length) {
+      box.appendChild(el('h2', null, 'Link'));
+      var ldl = el('dl');
+      rows.forEach(function (row) {
+        ldl.appendChild(el('dt', null, row[0]));
+        ldl.appendChild(el('dd', null, row[1]));
+      });
+      box.appendChild(ldl);
+    }
     var every = syncEvery < 60000 ? Math.round(syncEvery / 1000) + 's' : Math.round(syncEvery / 60000) + 'm';
     var foot = el('p', 'foot', 'Checks every ' + every + ' · ');
     foot.appendChild(el('kbd', null, 'R'));
@@ -2321,6 +2355,10 @@
       if (d && d.op !== 'push') syncEvent(d.account, false);
     });
     events.addEventListener('theme', reloadTheme);
+    // A client daemon's own: its link to the server changed.
+    events.addEventListener('link', function (e) {
+      try { setLink(JSON.parse(e.data)); } catch (err) { /* ignore */ }
+    });
     events.addEventListener('account', function (e) {
       try { accountEvent(JSON.parse(e.data)); } catch (err) { /* ignore */ }
     });

@@ -404,7 +404,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dest := "/"
-	var threads []threadRef // a new message's thread is new: unknown, so every page refreshes
+	var threads []ThreadRef // a new message's thread is new: unknown, so every page refreshes
 	if data.InReplyTo != "" {
 		// lieer stores the sent copy itself, so it is usually in the thread
 		// already; the original's thread is the one to show either way.
@@ -413,7 +413,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 			log.Printf("send %s: thread of %s: %v", acct.Name, orig, err)
 		} else if t != "" {
 			dest = "/t/" + url.PathEscape(acct.Name) + "/" + url.PathEscape(t)
-			threads = []threadRef{{acct.Name, t}}
+			threads = []ThreadRef{{acct.Name, t}}
 		}
 	}
 	s.Sends.record(rec, sendAccepted, dest)

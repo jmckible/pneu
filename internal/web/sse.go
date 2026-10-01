@@ -26,7 +26,15 @@ func NewHub() *Hub {
 // buffer is full is dropped rather than stalling everyone; its EventSource
 // reconnects and the page re-renders from notmuch anyway.
 func (h *Hub) Broadcast(name string, payload any) {
-	msg := encodeEvent(name, payload)
+	// Nobody listening: no marshal (a client daemon relays whatever a
+	// server sends, and pays for it only when a page is open).
+	h.mu.Lock()
+	n := len(h.clients)
+	h.mu.Unlock()
+	if n == 0 {
+		return
+	}
+	msg := EncodeEvent(name, payload)
 	if msg == nil {
 		return
 	}
@@ -42,8 +50,8 @@ func (h *Hub) Broadcast(name string, payload any) {
 	}
 }
 
-// encodeEvent is one SSE event, nil if payload doesn't marshal.
-func encodeEvent(name string, payload any) []byte {
+// EncodeEvent is one SSE event, nil if payload doesn't marshal.
+func EncodeEvent(name string, payload any) []byte {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("sse: marshal %s: %v", name, err)
@@ -64,7 +72,10 @@ func (h *Hub) Close() {
 	}
 }
 
-func (h *Hub) subscribe() chan []byte {
+// Subscribe registers a stream for Serve. A caller that pairs it with a
+// snapshot (hello) holds the lock its publishers broadcast under across
+// both, so nothing older than the snapshot is ever queued behind it.
+func (h *Hub) Subscribe() chan []byte {
 	c := make(chan []byte, 16)
 	h.mu.Lock()
 	h.clients[c] = struct{}{}
@@ -81,10 +92,10 @@ func (h *Hub) unsubscribe(c chan []byte) {
 	h.mu.Unlock()
 }
 
-// serve streams c, already subscribed (Server.subscribe): subscribed
+// Serve streams c, already subscribed (Server.subscribe): subscribed
 // before the preamble, so once the client sees ": open" no broadcast can be
 // missed. first, the stream's hello, goes out ahead of anything queued.
-func (h *Hub) serve(w http.ResponseWriter, r *http.Request, c chan []byte, first []byte) {
+func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, c chan []byte, first []byte) {
 	defer h.unsubscribe(c)
 	rc := http.NewResponseController(w)
 	hdr := w.Header()
@@ -123,3 +134,24 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request, c chan []byte, first
 		}
 	}
 }
+
+// The shapes of `syncing`, `sync` and `auth`, which the engine's hooks
+// broadcast (cmd/pneu) and a client daemon decodes and re-encodes
+// (docs/client.md, "Events"). `account` is AccountView, `view` ViewEvent,
+// `status` StatusDoc, `hello` HelloEvent.
+type (
+	SyncingEvent struct {
+		Account string `json:"account"`
+	}
+	SyncEvent struct {
+		Account string    `json:"account"`
+		Op      string    `json:"op"`
+		Changed bool      `json:"changed"`
+		At      time.Time `json:"at"`
+	}
+	AuthEvent struct {
+		Account string `json:"account"`
+		OK      bool   `json:"ok"`
+		Error   string `json:"error"`
+	}
+)

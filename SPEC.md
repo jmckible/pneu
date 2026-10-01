@@ -84,7 +84,11 @@ them here if they're wrong.
   act on: a chip on the cursor message, a viewable attachment in the
   thread, a `List-Unsubscribe` header on the cursor message.
 - **Sync state.** A short status line at the header's far right says how
-  current the view is. In priority order: `Checking…` with an accent
+  current the view is. In priority order: on a client (docs/client.md),
+  `Can't reach <server> · retrying` in `--accent-hot` while its link to
+  the server is down (`<server>` is the SSH target it was paired with;
+  the page keeps what it shows, and the line comes back when the link
+  does); `Checking…` with an accent
   braille spinner while any account's sync is queued or running, or an
   `R`/focus request hasn't been answered yet (the server says queued at
   once; the line gives up waiting after 10s); `<account>: sync failing`
@@ -112,7 +116,16 @@ them here if they're wrong.
   Clicking the line opens its details (Esc or a click closes it), and the
   `?` overlay leads with the same: per account, the last sync as a time
   and an age, whether it's checking now or queued, failures and the last
-  error, and the sync period.
+  error, and the sync period; on a client also the link (connected, or
+  why not, and since when) and both builds' revisions.
+  On a client a write that couldn't reach the server says so instead of
+  its usual failure: `Not sent: can't reach <server>.` when nothing left
+  this machine (pressing again is safe), `<server> didn't answer; checking
+  when it's back.` when it may have landed; the next `hello` (the link
+  back) brings the generation, and the list reconciles. A page loaded
+  while the link is down is the client's own error page: what's wrong in
+  local words, the bar-menu action or terminal command that fixes it, and
+  a reload once the link is up. A server never shows any of this.
   `R` asks for a sync on every account now (`POST /sync`, coalesced with
   one already waiting). Opening the window asks too: `pneu open` sends
   `launch` over the control socket (docs/client.md) before it opens or

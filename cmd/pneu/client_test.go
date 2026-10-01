@@ -407,22 +407,22 @@ func TestStartClient(t *testing.T) {
 	sock := filepath.Join(sockBase, "pneu", "control")
 
 	// No runtime dir: refused, and the credentials weren't the reason.
-	if _, err := startClient(cfg, keys.ClientDir, "", control.ErrNoRuntimeDir, linktest.NewAPI(), auth); err == nil || !strings.Contains(err.Error(), "control socket") {
+	if _, err := startClient(cfg, keys.ClientDir, "", control.ErrNoRuntimeDir, linktest.NewAPI(), auth, ""); err == nil || !strings.Contains(err.Error(), "control socket") {
 		t.Fatalf("without a runtime dir: %v", err)
 	}
 	// Unpaired: the socket and lock come first, then the refusal, and
 	// neither is left behind.
 	empty := filepath.Join(t.TempDir(), "peer")
-	if _, err := startClient(cfg, empty, sock, nil, linktest.NewAPI(), auth); err == nil || !strings.Contains(err.Error(), "pair") {
+	if _, err := startClient(cfg, empty, sock, nil, linktest.NewAPI(), auth, ""); err == nil || !strings.Contains(err.Error(), "pair") {
 		t.Fatalf("unpaired: %v", err)
 	}
-	c, err := startClient(cfg, keys.ClientDir, sock, nil, linktest.NewAPI(), auth)
+	c, err := startClient(cfg, keys.ClientDir, sock, nil, linktest.NewAPI(), auth, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// A second daemon exits.
 	sock2 := filepath.Join(sockBase, "two", "control")
-	if _, err := startClient(cfg, keys.ClientDir, sock2, nil, linktest.NewAPI(), auth); err == nil || !strings.Contains(err.Error(), "another pneu client") {
+	if _, err := startClient(cfg, keys.ClientDir, sock2, nil, linktest.NewAPI(), auth, ""); err == nil || !strings.Contains(err.Error(), "another pneu client") {
 		t.Fatalf("second daemon: %v", err)
 	}
 	// unlink over the real socket.
@@ -463,7 +463,7 @@ func TestUnpairTransaction(t *testing.T) {
 	started := make(chan error, 1)
 	e.beforeDelete = func() {
 		go func() {
-			c, err := startClient(cfg, e.credDir, filepath.Join(sockBase, "pneu", "control"), nil, linktest.NewAPI(), auth)
+			c, err := startClient(cfg, e.credDir, filepath.Join(sockBase, "pneu", "control"), nil, linktest.NewAPI(), auth, "")
 			if c != nil {
 				c.close()
 			}

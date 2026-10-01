@@ -138,10 +138,26 @@ func Write(path string, c Config) error {
 	return os.Rename(f.Name(), path)
 }
 
+// MaxName bounds an account name, in bytes.
+const MaxName = 64
+
 // ValidName reports whether name can be an account name: it becomes a path
-// segment and a command-line word.
+// segment and a command-line word, and is shown as plain text (pages, the
+// bar's status.json, a client's, from a server that may be hostile). Valid
+// UTF-8 of graphic characters only: no space, no control or format
+// character (bidi overrides included), no line or paragraph separator, no
+// slash, not starting with '-' or '.', at most MaxName bytes. Rejected,
+// never normalized.
 func ValidName(name string) bool {
-	return name != "" && !strings.ContainsAny(name, "/ ") && !strings.HasPrefix(name, "-") && !strings.HasPrefix(name, ".")
+	if name == "" || len(name) > MaxName || !utf8.ValidString(name) || strings.HasPrefix(name, "-") || strings.HasPrefix(name, ".") {
+		return false
+	}
+	for _, r := range name {
+		if r == '/' || !unicode.IsGraphic(r) || unicode.IsSpace(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c Config) normalize() (Config, error) {

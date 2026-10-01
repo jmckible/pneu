@@ -27,3 +27,13 @@ func GoDown(l *Link) {
 	l.mu.Unlock()
 	l.setDown(s, Refused, "test")
 }
+
+// Current is the live session's id, 0 while down.
+func Current(l *Link) SessionID {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.sess == nil {
+		return 0
+	}
+	return l.sess.id
+}

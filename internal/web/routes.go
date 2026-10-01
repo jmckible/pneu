@@ -34,6 +34,10 @@ type Route struct {
 	Upstream bool
 	// PeerOnly routes exist only on the peer listener (/peer/hello).
 	PeerOnly bool
+	// ClientOnly routes exist only on a client daemon (/client/*: its link
+	// state, retry, and the error page's assets); both of a server's
+	// listeners leave them out. They're Local, with no server Handler.
+	ClientOnly bool
 	// Types are the policy classes the route may answer with, each with
 	// the parsed media types allowed under it. anyInert is any type /part
 	// may serve (never an active one; SVG only per Dest).
@@ -161,11 +165,20 @@ var Routes = []Route{
 	{Method: "POST", Pattern: "/accounts/{account}/reauth", Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).reauth)},
 	{Method: "POST", Pattern: "/accounts/{account}/reauth/cancel", Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).reauthCancel)},
 	{Method: "GET", Pattern: "/peer/hello", PeerOnly: true, Types: jsonTypes, Cache: CacheNoStore, Handler: handler((*Server).peerHello)},
+	// A client daemon's own (docs/client.md, "Unreachable, mismatch,
+	// unknown outcomes"): read-only link state, a retry with no input, and
+	// the error page's embedded assets. Nothing else under /client/ exists.
+	{Method: "GET", Pattern: "/client/link", Local: true, ClientOnly: true, Types: jsonTypes, Cache: CacheNoStore},
+	{Method: "POST", Pattern: "/client/retry", Local: true, ClientOnly: true, Types: jsonTypes, Cache: CacheNoStore},
+	{Method: "GET", Pattern: "/client/static/", Local: true, ClientOnly: true, Cache: CacheNoStore,
+		Types: map[Policy][]string{PolicyData: {"text/css", "text/javascript", "text/plain"}}},
 }
 
-// onLoopback and onPeer say which listener serves a route.
-func onLoopback(rt *Route) bool { return !rt.PeerOnly }
+// onLoopback and onPeer say which of a server's listeners serves a
+// route; onClient, which routes a client daemon answers or proxies.
+func onLoopback(rt *Route) bool { return !rt.PeerOnly && !rt.ClientOnly }
 func onPeer(rt *Route) bool     { return rt.PeerOnly || !rt.Local || rt.Upstream }
+func onClient(rt *Route) bool   { return !rt.PeerOnly }
 
 // routeMux builds a ServeMux from the table, each route served by h(route).
 // The client proxy builds its matcher the same way, so matching (escaped
@@ -196,7 +209,39 @@ func (s *Server) routesFor(keep func(*Route) bool) *http.ServeMux {
 // h(route) and told its route as the server's handlers are. Anything else
 // is the mux's own 404, answered locally.
 func ClientRoutes(h func(rt *Route) http.Handler) *http.ServeMux {
-	return routeMux(Routes, onLoopback, func(rt *Route) http.Handler { return routed(rt, h(rt)) })
+	return routeMux(Routes, onClient, func(rt *Route) http.Handler { return routed(rt, h(rt)) })
+}
+
+// RouteOf is the route the client's mux would match r to, nil for none
+// (tests check every answer against it).
+func RouteOf(r *http.Request) *Route {
+	_, pat := clientMatcher.Handler(r)
+	for i := range Routes {
+		if rt := &Routes[i]; onClient(rt) && rt.Method+" "+rt.Pattern == pat {
+			return rt
+		}
+	}
+	return nil
+}
+
+var clientMatcher = routeMux(Routes, onClient, func(*Route) http.Handler { return http.NotFoundHandler() })
+
+// HTMLPolicy is the class rt answers HTML under, if it may: app, or
+// compose on the form's routes. A client daemon's error page goes out
+// under it in place of the page the route would have served.
+func HTMLPolicy(rt *Route) (Policy, bool) {
+	for _, p := range []Policy{PolicyApp, PolicyCompose} {
+		if slices.Contains(rt.Types[p], "text/html") {
+			return p, true
+		}
+	}
+	return "", false
+}
+
+// Navigation reports whether r is a top-level page load (Fetch metadata):
+// a window's document, not a script's fetch or a frame.
+func Navigation(r *http.Request) bool {
+	return r.Header.Get("Sec-Fetch-Mode") == "navigate" && r.Header.Get("Sec-Fetch-Dest") == "document"
 }
 
 // routed tells the middleware's writer which route answers, for its cache

@@ -1,11 +1,11 @@
 package client
 
 import (
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -242,11 +242,8 @@ func TestHostileUpstream(t *testing.T) {
 			w.Header().Set("Location", "//evil.example/x")
 			answer(w, "compose", "", http.StatusSeeOther, "")
 		}, func(t *testing.T, resp *http.Response, body string) {
-			var j struct {
-				OK   bool
-				Link string
-			}
-			if resp.StatusCode != 502 || resp.Header.Get(LinkHeader) != Unknown || json.Unmarshal([]byte(body), &j) != nil || j.OK || j.Link != Unknown || resp.Header.Get("Location") != "" {
+			// /send's errors are text (its route answers no JSON).
+			if resp.StatusCode != 502 || resp.Header.Get(LinkHeader) != Unknown || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/plain") || resp.Header.Get("Location") != "" {
 				t.Fatalf("%d %v %q", resp.StatusCode, resp.Header, body)
 			}
 		}},
@@ -381,8 +378,13 @@ func TestHostileUpstream(t *testing.T) {
 // server-only hello, a wrong method, a service worker's script, upgrades.
 func TestRefusedLocally(t *testing.T) {
 	r, u, _ := hostileRig(t)
-	u.SetHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { answer(w, "data", "text/plain", 200, "upstream") }))
-	before := u.Requests.Load()
+	var upstream atomic.Int32 // the daemon's own /events aside
+	u.SetHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/events" {
+			upstream.Add(1)
+		}
+		answer(w, "data", "text/plain", 200, "upstream")
+	}))
 	for _, c := range []struct {
 		method, path string
 		hdr          map[string]string
@@ -406,7 +408,7 @@ func TestRefusedLocally(t *testing.T) {
 			t.Errorf("%s %s %v: %d %q", c.method, c.path, c.hdr, resp.StatusCode, body)
 		}
 	}
-	if n := u.Requests.Load() - before; n != 0 {
+	if n := upstream.Load(); n != 0 {
 		t.Fatalf("%d requests went upstream", n)
 	}
 }

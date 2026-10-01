@@ -223,8 +223,14 @@ func TestProtocol(t *testing.T) {
 		"other protocol": `{"protocol":99,"epoch":"ab"}`,
 		"bad account":    `{"protocol":1,"epoch":"ab","accounts":[{"name":"-x","email":"a@b"}]}`,
 		"bad email":      `{"protocol":1,"epoch":"ab","accounts":[{"name":"x","email":"a b@c"}]}`,
-		"no epoch":       `{"protocol":1}`,
-		"not json":       `{"protocol":1,`,
+		// Names are shown as text on this machine: anything not plain is
+		// refused, never cleaned.
+		"bidi name":    `{"protocol":1,"epoch":"ab","accounts":[{"name":"work\u202egro","email":"a@b.c"}]}`,
+		"newline name": `{"protocol":1,"epoch":"ab","accounts":[{"name":"a\nb","email":"a@b.c"}]}`,
+		"control name": `{"protocol":1,"epoch":"ab","accounts":[{"name":"a\u0007","email":"a@b.c"}]}`,
+		"line sep":     `{"protocol":1,"epoch":"ab","accounts":[{"name":"a\u2028b","email":"a@b.c"}]}`,
+		"no epoch":     `{"protocol":1}`,
+		"not json":     `{"protocol":1,`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			u := linktest.StartUpstream(t, keys.Server, keys.Creds.Identity.SPKI, nil)
@@ -748,5 +754,37 @@ func TestUnpairWaitsForDial(t *testing.T) {
 	}
 	if st := l.State(); st.Reason != link.NotPaired {
 		t.Fatalf("%+v", st)
+	}
+}
+
+// Stalled blames only the session that carried the stream: one already
+// replaced is left alone, the live one goes down.
+func TestStalledNamesItsSession(t *testing.T) {
+	keys := linktest.NewKeys(t)
+	u := linktest.StartUpstream(t, keys.Server, keys.Creds.Identity.SPKI, http.HandlerFunc(stream))
+	l := start(t, linktest.NewAPI(), keys, u.Port, nil)
+	waitReason(t, l, link.Up)
+	req, _ := http.NewRequest("GET", "https://server/stream", nil)
+	resp, a, err := l.RoundTripOn(req)
+	if err != nil || a == 0 || a != link.Current(l) {
+		t.Fatalf("A: %v %d %d", err, a, link.Current(l))
+	}
+	resp.Body.Close()
+	// A goes down and B replaces it before A's stall is reported.
+	link.GoDown(l)
+	l.Retry()
+	waitReason(t, l, link.Up)
+	b := link.Current(l)
+	if b == 0 || b == a {
+		t.Fatalf("B %d, A %d", b, a)
+	}
+	l.Stalled(a)
+	time.Sleep(100 * time.Millisecond)
+	if st := l.State(); st.Reason != link.Up || link.Current(l) != b {
+		t.Fatalf("A's stall took B down: %+v, session %d", st, link.Current(l))
+	}
+	l.Stalled(b)
+	if st := l.State(); st.Reason != link.Refused {
+		t.Fatalf("B's own stall: %+v", st)
 	}
 }

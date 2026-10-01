@@ -173,7 +173,7 @@ func serve(args []string) error {
 		// other windows see it without its push.
 		OnStart: func(account string, op gmi.Op) {
 			if op == gmi.OpSync {
-				srv.Hub.Broadcast("syncing", map[string]any{"account": account})
+				srv.Hub.Broadcast("syncing", web.SyncingEvent{Account: account})
 			}
 			if op == gmi.OpSync || op == gmi.OpPull {
 				srv.AccountChanged(account)
@@ -184,7 +184,7 @@ func serve(args []string) error {
 		// `sync` to the page too: the list refreshes.
 		OnSynced: func(account string, r gmi.Result) {
 			if r.Op == gmi.OpSync || r.Op == gmi.OpPull || (r.Op == gmi.OpPush && r.Changed) {
-				srv.Hub.Broadcast("sync", map[string]any{"account": account, "op": r.Op, "changed": r.Changed, "at": r.Started.Add(r.Duration)})
+				srv.Hub.Broadcast("sync", web.SyncEvent{Account: account, Op: string(r.Op), Changed: r.Changed, At: r.Started.Add(r.Duration)})
 				if r.Changed {
 					srv.ViewChanged()
 				}
@@ -200,7 +200,7 @@ func serve(args []string) error {
 			if err != nil {
 				msg = err.Error()
 			}
-			srv.Hub.Broadcast("auth", map[string]any{"account": account, "ok": err == nil, "error": msg})
+			srv.Hub.Broadcast("auth", web.AuthEvent{Account: account, OK: err == nil, Error: msg})
 			srv.AccountChanged(account)
 		},
 	})
@@ -330,7 +330,7 @@ func listenControl(srv *web.Server, ps *peer.Server) *control.Server {
 		log.Printf("pneu: no control socket: %v; pneu open won't sync on launch", err)
 		return nil
 	}
-	h := control.Handler{Launch: srv.Launch}
+	h := control.Handler{Launch: srv.Launch, ResetWindow: srv.Auth.ArmClearSite}
 	if ps != nil {
 		h.PeersReload = ps.Reload
 	}

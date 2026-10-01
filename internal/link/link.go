@@ -141,6 +141,7 @@ type Link struct {
 	// Unpair ran: no session is created or published after.
 	owned    map[*session]struct{}
 	unpaired bool
+	lastID   SessionID // the last session's (newSession)
 	// Seams for tests: beforePublish runs between hello and publishing,
 	// beforeClose inside each session's close before its connections go.
 	beforePublish, beforeClose func()
@@ -239,11 +240,23 @@ type DownError struct{ Reason Reason }
 
 func (e *DownError) Error() string { return "link: not up (" + string(e.Reason) + ")" }
 
+// SessionID names one up period's session, so a failure seen on a stream
+// can be pinned on the session that carried it and not on a later one.
+// Never 0.
+type SessionID uint64
+
 // RoundTrip sends req to the server over the live session: the scheme and
 // authority are the session's (the address it resolved and checked, as
 // the peer listener's Host check wants it), whatever req says. Down, it
 // fails with a *DownError before anything is dialed.
 func (l *Link) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, _, err := l.RoundTripOn(req)
+	return resp, err
+}
+
+// RoundTripOn is RoundTrip, also naming the session that carried it: the
+// only one a failure on that response may be blamed on (Stalled).
+func (l *Link) RoundTripOn(req *http.Request) (*http.Response, SessionID, error) {
 	l.mu.Lock()
 	s, reason := l.sess, l.state.Reason
 	if s != nil && !time.Now().Before(l.expiry) {
@@ -254,7 +267,7 @@ func (l *Link) RoundTrip(req *http.Request) (*http.Response, error) {
 		if req.Body != nil {
 			req.Body.Close()
 		}
-		return nil, &DownError{Reason: reason}
+		return nil, 0, &DownError{Reason: reason}
 	}
 	out := req.Clone(req.Context())
 	out.URL.Scheme, out.URL.Host, out.Host = "https", s.host, s.host
@@ -262,7 +275,25 @@ func (l *Link) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err != nil && req.Context().Err() == nil {
 		l.Retry() // a failing connection: a probe settles the state
 	}
-	return resp, err
+	return resp, s.id, err
+}
+
+// Stalled is the event stream's silence watchdog (docs/client.md,
+// "Liveness"): nothing from the server, not even its 25s heartbeat, for
+// 60s means the connection is dead though nothing has failed on it yet (a
+// laptop that slept). id is the session that carried the stream
+// (RoundTripOn): if it's still live it goes down with every stream on it,
+// and an attempt follows at once, which names the real reason. A session
+// already replaced is left alone: the stall was the old one's.
+func (l *Link) Stalled(id SessionID) {
+	l.mu.Lock()
+	s := l.sess
+	l.mu.Unlock()
+	if s == nil || s.id != id {
+		return
+	}
+	l.setDown(s, Refused, "the server's event stream went quiet")
+	l.Retry()
 }
 
 // ---- the loop ---------------------------------------------------------------
@@ -694,7 +725,7 @@ func parseHello(b []byte) (*Hello, Reason, string) {
 	}
 	seen := map[string]bool{}
 	for _, a := range doc.Accounts {
-		if !config.ValidName(a.Name) || len(a.Name) > 64 || seen[a.Name] || !validEmail(a.Email) {
+		if !config.ValidName(a.Name) || seen[a.Name] || !validEmail(a.Email) {
 			return nil, Protocol, "hello's account set is out of shape"
 		}
 		seen[a.Name] = true

@@ -28,7 +28,7 @@ func TestHarnessThreadPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The #accounts strip as accountsJSON writes it, one ready account.
-	acct, err := json.Marshal([]accountView{{Name: "personal", State: gmi.StateReady, Pulled: true}})
+	acct, err := json.Marshal([]AccountView{{Name: "personal", State: gmi.StateReady, Pulled: true}})
 	if err != nil {
 		t.Fatal(err)
 	}

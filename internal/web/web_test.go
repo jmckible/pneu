@@ -362,7 +362,7 @@ func TestSSE(t *testing.T) {
 	if got := readBlock(); got != ": open\n" {
 		t.Fatalf("preamble %q", got)
 	}
-	if got, want := readBlock(), "event: hello\ndata: {\"epoch\":\""+s.view.epoch+"\",\"gen\":0,\"accounts\":[]}\n"; got != want {
+	if got, want := readBlock(), "event: hello\ndata: {\"epoch\":\""+s.view.epoch+"\",\"gen\":0,\"accounts\":[],\"status\":null}\n"; got != want {
 		t.Fatalf("first event %q, want %q", got, want)
 	}
 	// Subscribed before the preamble flushed, so this broadcast is not lost.

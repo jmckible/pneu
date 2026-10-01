@@ -42,6 +42,9 @@ const (
 	// Unlink, to a client's daemon only (pneu client unpair): forget the
 	// pairing and close the link's connections; ok once they're closed.
 	Unlink Command = "unlink"
+	// ResetWindow arms Clear-Site-Data on the next navigation the daemon
+	// answers (the bar menu's Reset window data, docs/client.md N3).
+	ResetWindow Command = "reset-window"
 	// PeersReload, as "peers-reload <generation> <hash>", asks the daemon to
 	// make that generation of peers.json live (ReloadPeers).
 	PeersReload Command = "peers-reload"
@@ -109,6 +112,8 @@ type Handler struct {
 	Client bool
 	// Unlink (client only) returns once the link's connections are closed.
 	Unlink func() error
+	// ResetWindow arms the next navigation's Clear-Site-Data; nil: refused.
+	ResetWindow func()
 }
 
 // Server accepts commands on the socket until Close.
@@ -272,6 +277,12 @@ func (s *Server) answer(cmd Command) string {
 		if err := s.h.Unlink(); err != nil {
 			return "error " + oneLine(err.Error())
 		}
+		return "ok"
+	case ResetWindow:
+		if s.h.ResetWindow == nil {
+			return "error reset-window unavailable"
+		}
+		s.h.ResetWindow()
 		return "ok"
 	case Status:
 		b, err := json.Marshal(Self())

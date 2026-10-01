@@ -69,7 +69,7 @@ and build order; this file is the working contract. Read PLAN.md before touching
   the final header write (1xx writes are swallowed) and named in
   `Pneu-Policy`; SVG is never `data`; a handler picks one with `usePolicy`
   or gets `app` for HTML and `data` otherwise. Never set a security header
-  in a handler. Routes come only from the table (`routes.go` `Routes`): a
+  (`Clear-Site-Data` included: only `Auth.ArmClearSite` does) in a handler. Routes come only from the table (`routes.go` `Routes`): a
   new route is an entry with its classes and their media types, its
   disposition, Sec-Fetch-Dest, redirect and cache rules, or it doesn't
   exist. `Checker.Check` is the contract; every response in the web tests
@@ -86,7 +86,8 @@ and build order; this file is the working contract. Read PLAN.md before touching
   as the page does. `X-Pneu-Window` (`from`) is a hint for skipping one
   page's own refresh; nothing may authorize or trust anything on it.
   `/events` subscribes and snapshots `hello` under the locks that order
-  `view` and `account`: keep new state events behind the same locks.
+  `view`, `account` and `status`: keep new state events behind the same
+  locks. A client daemon does the same for its pages under its one mutex.
 - Nothing writes to an account whose first pull hasn't completed
   (`Server.readOnly`): no tags, undo, mark-read or send. Its closing lastmod
   would swallow the write, and a resumed pull's label refresh would revert it.
@@ -131,7 +132,9 @@ and build order; this file is the working contract. Read PLAN.md before touching
 - The control socket, `$XDG_RUNTIME_DIR/pneu/control` (`internal/control`,
   docs/client.md), is the only way a process outside the browser talks to
   the server, and no page can reach it: one command line per connection
-  from a fixed set (`launch`, `status`, `unlink` (a client's daemon only:
+  from a fixed set (`launch`, `status`, `reset-window` (arms
+  `Clear-Site-Data: "cache", "storage"` for the next authenticated
+  same-origin top-level navigation, once, either mode), `unlink` (a client's daemon only:
   it drops the link and acks once its connections are closed; `pneu client
   unpair` sends it before deleting anything), `peers-reload <gen> <hash>`
   (a client's daemon refuses it), whose
@@ -194,6 +197,28 @@ and build order; this file is the working contract. Read PLAN.md before touching
   (pending, live, going down) has finished closing. Pairing runs one fixed `ssh -T -o … -- <target> 'pneu peer
   add --stdin'`, the request on stdin and the answer parsed strictly
   (`peer.ParseAddResult`).
+  Its live side (docs/client.md "As built: step 5b"): exactly one upstream
+  `/events`, whose first event must be `hello` and after which only
+  `syncing`, `sync`, `account`, `auth`, `status` and `view` pass, each
+  ≤ 64 KiB, decoded into its `web` type, held to shape (accounts in the
+  link hello's set, enums, plain bounded text, a view's gen above the
+  last) and re-encoded; never raw bytes, never `link`/`theme`/`hello`
+  from upstream; every byte and block charged to a token-bucket budget
+  (`client.Budget`) before parsing, over it the stream closes and backs
+  off, reset only after 60s healthy. 60s of silence calls down the
+  session that carried the stream (`Link.Stalled(id)`), never a later
+  one. Account names are `config.ValidName` everywhere: plain graphic
+  text, refused (never cleaned) at the server's config, the link's hello
+  and the handshake.
+  Pages get the daemon's own `hello` (state as last known, plus `link`),
+  `link` on every change, its own desk's `theme`. The server's name shown
+  anywhere is the SSH target, never hello's. status.json there is version
+  2 (`client.StatusV2`: this daemon's `updated`/`running`, the last valid
+  status's counts within limits, `server` in local codes), at most one
+  write a second. A page navigation while the link isn't up is the
+  binary's own error page (`/client/static/`); `/client/link` (read) and
+  `/client/retry` (no input) are the only other `/client/` routes, all
+  `ClientOnly` entries in the route table.
 - `peers.json` (`$XDG_STATE_HOME/pneu`, 0600, O_NOFOLLOW, a generation and
   a hash over its content) is written only by `pneu peer add|remove` under
   an flock on `peers.lock`, a file never replaced (N8), with temp + fsync +
@@ -209,6 +234,8 @@ and build order; this file is the working contract. Read PLAN.md before touching
   health, onboarding `state` and first-pull `progress`, `running`, `updated`. The server rewrites it at startup, after every
   sync or push, 500ms after a burst of tag writes, every 5 minutes, and with
   `running:false` on a clean stop; the widget calls it stale at 20 minutes.
+  Each rewrite is also SSE `status` (the same doc), and `/events`' hello
+  carries the last one: a client's status.json (version 2) is built from it.
   Never put the token, a nonce, or message content in it.
 - `pneu gmi <account> <args>` takes the account's flock (the engine's lock,
   waiting up to 10 minutes), sets `NOTMUCH_CONFIG`, cds to the lieer dir, and

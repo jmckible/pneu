@@ -62,11 +62,23 @@ func ServeTheme(w http.ResponseWriter, p string) {
 const ThemePoll = 2 * time.Second
 
 // WatchTheme broadcasts SSE `theme` whenever the theme file changes, so open
-// pages restyle without a reload. The hook replaces the file by rename, so a
-// new inode counts as a change, as do mtime, size, and appearing or going.
-// Polling os.Stat keeps it stdlib; it runs until ctx ends.
+// pages restyle without a reload. It runs until ctx ends.
 func (s *Server) WatchTheme(ctx context.Context, every time.Duration) {
-	p := s.ThemePath
+	WatchTheme(ctx, s.ThemePath, every, func() { s.Hub.Broadcast("theme", ThemeEvent{At: time.Now().Unix()}) })
+}
+
+// ThemeEvent is SSE `theme`: this desk's theme file changed. A client
+// daemon sends its own (its desk's file) and never relays the server's.
+type ThemeEvent struct {
+	At int64 `json:"at"`
+}
+
+// WatchTheme calls changed whenever the theme file at p ("": ThemePath())
+// changes: the server's watcher and a client daemon's, each on its own
+// desk's file. The hook replaces the file by rename, so a new inode counts
+// as a change, as do mtime, size, and appearing or going. Polling os.Stat
+// keeps it stdlib; it runs until ctx ends.
+func WatchTheme(ctx context.Context, p string, every time.Duration, changed func()) {
 	if p == "" {
 		var err error
 		if p, err = ThemePath(); err != nil {
@@ -84,7 +96,7 @@ func (s *Server) WatchTheme(ctx context.Context, every time.Duration) {
 		}
 		cur, _ := os.Stat(p)
 		if themeChanged(prev, cur) {
-			s.Hub.Broadcast("theme", map[string]any{"at": time.Now().Unix()})
+			changed()
 		}
 		prev = cur
 	}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -25,7 +26,7 @@ func TestFirstName(t *testing.T) {
 	}
 }
 
-func readStatus(t *testing.T, path string) (statusDoc, os.FileInfo, string) {
+func readStatus(t *testing.T, path string) (StatusDoc, os.FileInfo, string) {
 	t.Helper()
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -35,19 +36,19 @@ func readStatus(t *testing.T, path string) (statusDoc, os.FileInfo, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc statusDoc
+	var doc StatusDoc
 	if err := json.Unmarshal(b, &doc); err != nil {
 		t.Fatalf("status.json: %v\n%s", err, b)
 	}
 	return doc, fi, string(b)
 }
 
-func waitStatus(t *testing.T, path, what string, ok func(statusDoc) bool) statusDoc {
+func waitStatus(t *testing.T, path, what string, ok func(StatusDoc) bool) StatusDoc {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		if b, err := os.ReadFile(path); err == nil {
-			var doc statusDoc
+			var doc StatusDoc
 			if json.Unmarshal(b, &doc) == nil && ok(doc) {
 				return doc
 			}
@@ -122,7 +123,7 @@ func TestRunStatus(t *testing.T) {
 	go func() { f.s.RunStatus(ctx, path); close(done) }()
 	defer func() { cancel(); <-done }()
 
-	first := waitStatus(t, path, "a first write", func(d statusDoc) bool { return d.Running })
+	first := waitStatus(t, path, "a first write", func(d StatusDoc) bool { return d.Running })
 	_, fi, raw := readStatus(t, path)
 	if fi.Mode().Perm() != 0o600 {
 		t.Errorf("mode %04o, want 0600", fi.Mode().Perm())
@@ -138,7 +139,7 @@ func TestRunStatus(t *testing.T) {
 		t.Fatalf("fixture: %d unread ids in %s (%v), status %+v", len(ids), p.Name, err, first.Accounts[0])
 	}
 	tagOK(t, f.s, form("action", "read", "account", p.Name, "ids", esc(ids...)))
-	waitStatus(t, path, "the read thread", func(d statusDoc) bool {
+	waitStatus(t, path, "the read thread", func(d StatusDoc) bool {
 		return d.Accounts[0].Unread == 0 && d.Unread == first.Unread-first.Accounts[0].Unread
 	})
 
@@ -150,5 +151,114 @@ func TestRunStatus(t *testing.T) {
 	}
 	if matches, _ := filepath.Glob(filepath.Join(dir, ".status.json-*")); len(matches) != 0 {
 		t.Fatalf("temp files left behind: %v", matches)
+	}
+}
+
+// Every rewrite of the file is also SSE `status` with the same doc, and a
+// stream's hello carries the last one.
+func TestStatusBroadcast(t *testing.T) {
+	f := newTagFixture(t)
+	path := filepath.Join(t.TempDir(), "status.json")
+	c, h := f.s.subscribe()
+	defer f.s.Hub.unsubscribe(c)
+	if h.Status != nil {
+		t.Fatalf("hello status %+v before any write", h.Status)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { f.s.RunStatus(ctx, path); close(done) }()
+	ev := nextEvent(t, c, "status")
+	var got StatusDoc
+	if err := json.Unmarshal(ev, &got); err != nil {
+		t.Fatal(err)
+	}
+	file, _, _ := readStatus(t, path)
+	if !slices.EqualFunc(got.Accounts, file.Accounts, func(a, b StatusAccount) bool { return a.Name == b.Name && a.Unread == b.Unread }) ||
+		got.Updated != file.Updated || got.Unread != file.Unread || !got.Running {
+		t.Fatalf("event %+v, file %+v", got, file)
+	}
+	c2, h2 := f.s.subscribe()
+	defer f.s.Hub.unsubscribe(c2)
+	if h2.Status == nil || h2.Status.Updated != got.Updated {
+		t.Fatalf("hello status %+v", h2.Status)
+	}
+	cancel()
+	<-done
+	ev = nextEvent(t, c, "status")
+	if err := json.Unmarshal(ev, &got); err != nil || got.Running {
+		t.Fatalf("stop: %s", ev)
+	}
+}
+
+// nextEvent waits for the next `name` event on c and returns its data.
+func nextEvent(t *testing.T, c chan []byte, name string) []byte {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case msg := <-c:
+			n, data, ok := strings.Cut(strings.TrimPrefix(string(msg), "event: "), "\ndata: ")
+			if ok && n == name {
+				return []byte(strings.TrimSpace(data))
+			}
+		case <-deadline:
+			t.Fatalf("no %s event", name)
+		}
+	}
+}
+
+// No stream carries a `status` older than its hello's: each subscription
+// races status rewrites, whose docs carry an increasing clock.
+func TestHelloOrderedAgainstStatus(t *testing.T) {
+	s := serverFor(t, nil)
+	var mu sync.Mutex
+	tick := time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)
+	s.now = func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		tick = tick.Add(time.Second)
+		return tick
+	}
+	path := filepath.Join(t.TempDir(), "status.json")
+	const writes, subs = 400, 100
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range writes {
+			s.writeStatus(path, true)
+		}
+	})
+	errs := make(chan string, subs)
+	for range subs {
+		wg.Go(func() {
+			c, h := s.subscribe()
+			defer s.Hub.unsubscribe(c)
+			last := ""
+			if h.Status != nil {
+				last = h.Status.Updated
+			}
+			for {
+				select {
+				case msg, ok := <-c:
+					if !ok {
+						return // dropped as slow
+					}
+					_, data, _ := strings.Cut(string(msg), "\ndata: ")
+					var d StatusDoc
+					json.Unmarshal([]byte(data), &d)
+					if d.Updated <= last {
+						errs <- "hello or last at " + last + ", then " + d.Updated
+						return
+					}
+					last = d.Updated
+				case <-time.After(50 * time.Millisecond):
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Error(e)
 	}
 }

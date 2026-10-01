@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // CookieName carries the install token.
@@ -53,8 +54,38 @@ type Auth struct {
 	nonce      string // "" until StartLaunch: /open refuses everything
 	launchPath string
 
+	// clearArmed: the next navigation gets Clear-Site-Data (ArmClearSite).
+	clearArmed atomic.Bool
+
 	// check sees every response's final headers (policyWriter); tests only.
 	check func(rt *Route, status int, h http.Header, r *http.Request)
+}
+
+// ArmClearSite is the control socket's reset-window (docs/client.md,
+// "Service workers and a poisoned origin", N3): the next navigation this
+// daemon answers carries Clear-Site-Data, once. Best effort: a registered
+// worker may answer navigations itself, which is why the bar menu also
+// closes the windows and clears the origin through the browser.
+func (a *Auth) ArmClearSite() { a.clearArmed.Store(true) }
+
+// takeClearSite gives an authenticated request (a valid session cookie, or
+// /open's nonce) the armed Clear-Site-Data, if it's a top-level navigation
+// this browser made itself: our Host (Middleware checked it), and not
+// started by another site (Sec-Fetch-Site none, from the launcher or the
+// address bar, or same-origin). Anything else, a hostile page's
+// navigation or one from another profile without the cookie, leaves it
+// armed.
+func (a *Auth) takeClearSite(w http.ResponseWriter, r *http.Request) {
+	if !Navigation(r) {
+		return
+	}
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "none" && site != "same-origin" {
+		return
+	}
+	pw := findPolicyWriter(w)
+	if pw != nil && a.clearArmed.CompareAndSwap(true, false) {
+		pw.clearSite = true
+	}
 }
 
 func NewAuth(host, token string) *Auth {
@@ -103,6 +134,7 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 			http.Error(w, "pneu: no session. Launch pneu with `pneu open`, which loads its single-use /open URL.", http.StatusForbidden)
 			return
 		}
+		a.takeClearSite(w, r)
 		next.ServeHTTP(w, r)
 		w.finish()
 	})
@@ -141,6 +173,7 @@ func (a *Auth) Open(w http.ResponseWriter, r *http.Request) {
 	// which is a spent nonce. A request that already carries the session is
 	// simply sent home; the nonce is neither checked nor rotated.
 	if a.sessionOK(r) {
+		a.takeClearSite(w, r)
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
@@ -161,6 +194,7 @@ func (a *Auth) Open(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad or used launch nonce", http.StatusForbidden)
 		return
 	}
+	a.takeClearSite(w, r)
 	http.SetCookie(w, &http.Cookie{
 		Name:     CookieName,
 		Value:    a.token,

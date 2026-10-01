@@ -74,7 +74,7 @@ func TestLaunchQueuesEveryAccount(t *testing.T) {
 		t.Fatalf("/open queued %d syncs", f.sync.syncs)
 	}
 
-	events := f.s.Hub.subscribe()
+	events := f.s.Hub.Subscribe()
 	defer f.s.Hub.unsubscribe(events)
 	f.s.Launch()
 	if f.sync.syncs != len(f.env.Accounts) {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jmckible/pneu/internal/gmi"
@@ -43,16 +44,19 @@ func StatusPath() (string, error) {
 	return filepath.Join(dir, "status.json"), err
 }
 
-type statusDoc struct {
+// StatusDoc is status.json, version 1: the server's, and SSE `status`.
+// A client daemon writes version 2 from it (internal/client).
+type StatusDoc struct {
 	Version  int             `json:"version"`
 	Updated  string          `json:"updated"`
 	Running  bool            `json:"running"`
 	Unread   int             `json:"unread"`
 	Senders  []string        `json:"senders"`
-	Accounts []statusAccount `json:"accounts"`
+	Accounts []StatusAccount `json:"accounts"`
 }
 
-type statusAccount struct {
+// StatusAccount is one account in StatusDoc.
+type StatusAccount struct {
 	Name     string  `json:"name"`
 	Unread   int     `json:"unread"`
 	Pulled   bool    `json:"pulled"`
@@ -62,7 +66,7 @@ type statusAccount struct {
 	// State is the account's onboarding state (gmi.State); Progress its
 	// first pull's, while State is "pulling".
 	State    gmi.State     `json:"state"`
-	Progress *progressView `json:"progress"`
+	Progress *ProgressView `json:"progress"`
 }
 
 // StatusChanged asks for a rewrite now: a sync or push ended.
@@ -106,33 +110,53 @@ func (s *Server) RunStatus(ctx context.Context, path string) {
 	}
 }
 
+// writeStatus writes the file and broadcasts the same doc as SSE `status`
+// (a client daemon's bar reads it from there), built once. The broadcast
+// and the doc hello carries change together under status.mu.
 func (s *Server) writeStatus(path string, running bool) {
+	doc := s.statusSnapshot(running)
+	if err := WriteStatusFile(path, doc); err != nil {
+		log.Printf("status file: %v", err)
+	}
+	s.pubStatus.mu.Lock()
+	s.pubStatus.last = &doc
+	s.Hub.Broadcast("status", doc)
+	s.pubStatus.mu.Unlock()
+}
+
+// statusPub is the last status doc broadcast. mu spans each broadcast
+// and each /events subscription with its hello (Server.subscribe).
+type statusPub struct {
+	mu   sync.Mutex
+	last *StatusDoc
+}
+
+// WriteStatusFile writes a status doc (either version) to path as the bar
+// reads it: 0600, temp file and rename, so it never sees half a file.
+func WriteStatusFile(path string, doc any) error {
 	var b strings.Builder
 	enc := json.NewEncoder(&b)
 	enc.SetEscapeHTML(false) // read by QML, never by a browser
-	err := enc.Encode(s.statusSnapshot(running))
-	if err == nil {
-		err = writePrivate(path, b.String())
+	if err := enc.Encode(doc); err != nil {
+		return err
 	}
-	if err != nil {
-		log.Printf("status file: %v", err)
-	}
+	return writePrivate(path, b.String())
 }
 
 // statusSnapshot reads every account's database (readers never wait on
 // lieer's writer) and the engine's sync health. An account whose database
 // can't be read counts nothing rather than failing the whole file.
-func (s *Server) statusSnapshot(running bool) statusDoc {
-	doc := statusDoc{
+func (s *Server) statusSnapshot(running bool) StatusDoc {
+	doc := StatusDoc{
 		Version:  1,
 		Updated:  s.now().Format(time.RFC3339),
 		Running:  running,
 		Senders:  []string{},
-		Accounts: []statusAccount{},
+		Accounts: []StatusAccount{},
 	}
 	var threads []notmuch.ThreadSummary
 	for _, a := range s.Accounts {
-		sa := statusAccount{Name: a.Name}
+		sa := StatusAccount{Name: a.Name}
 		ctx, cancel := context.WithTimeout(context.Background(), statusReadTimeout)
 		if n, err := a.Count(ctx, unreadQuery, true); err != nil {
 			log.Printf("status file: %v", err)

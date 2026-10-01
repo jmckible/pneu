@@ -333,9 +333,13 @@ func serveClient(cfg config.Config, listen string) error {
 	if err != nil {
 		return err
 	}
+	statusPath, err := web.StatusPath()
+	if err != nil {
+		return err
+	}
 	auth := web.NewAuth(host, token)
 	sock, sockErr := control.SocketPath()
-	c, err := startClient(cfg, dir, sock, sockErr, tailscale.NewLocal(), auth)
+	c, err := startClient(cfg, dir, sock, sockErr, tailscale.NewLocal(), auth, statusPath)
 	if err != nil {
 		return err
 	}
@@ -351,6 +355,11 @@ func serveClient(cfg config.Config, listen string) error {
 	if err := auth.StartLaunch(launchPath); err != nil {
 		return err
 	}
+	// The live side: the upstream event stream, this desk's theme and
+	// status.json. It ends with ctx, writing running:false and closing
+	// every page's stream (which never goes idle for Shutdown).
+	liveDone := make(chan struct{})
+	go func() { c.d.Run(ctx); close(liveDone) }()
 	errc := make(chan error, len(lns))
 	for _, ln := range lns {
 		go func() { errc <- hs.Serve(ln) }()
@@ -359,9 +368,11 @@ func serveClient(cfg config.Config, listen string) error {
 	var serveErr error
 	select {
 	case serveErr = <-errc:
+		stop() // the status file still gets its running:false
 	case <-ctx.Done():
 	}
 	c.ctl.Close()
+	<-liveDone
 	if serveErr != nil {
 		return serveErr
 	}
@@ -389,7 +400,7 @@ type clientRun struct {
 // before loading any credentials: `pneu client unpair` can only reach a
 // daemon through the socket, and finds one without it by the lock (D1).
 // Without either there's no daemon.
-func startClient(cfg config.Config, dir, sock string, sockErr error, api link.API, auth *web.Auth) (*clientRun, error) {
+func startClient(cfg config.Config, dir, sock string, sockErr error, api link.API, auth *web.Auth, statusPath string) (*clientRun, error) {
 	// Held from taking the lifecycle lock until the credentials are
 	// loaded: an unpair in progress finishes first (E1).
 	pair, err := link.PairLock(dir, link.PairWait)
@@ -415,7 +426,7 @@ func startClient(cfg config.Config, dir, sock string, sockErr error, api link.AP
 	if sockErr != nil {
 		return fail(fmt.Errorf("client mode needs its control socket (%v): pneu client unpair reaches the daemon through it", sockErr))
 	}
-	if c.ctl, err = control.Listen(sock, control.Handler{Launch: c.launch, Client: true, Unlink: c.unlink}); err != nil {
+	if c.ctl, err = control.Listen(sock, control.Handler{Launch: c.launch, Client: true, Unlink: c.unlink, ResetWindow: auth.ArmClearSite}); err != nil {
 		return fail(fmt.Errorf("client mode needs its control socket: %w", err))
 	}
 	creds, err := link.LoadCreds(dir)
@@ -426,7 +437,8 @@ func startClient(cfg config.Config, dir, sock string, sockErr error, api link.AP
 		return fail(fmt.Errorf("config.json names server node %s but the pin is for %s: pneu client unpair, then pair again", cfg.Server.Node, creds.Pin.Node))
 	}
 	lk := link.New(api, creds, cfg.Server.Port)
-	d := client.New(client.Config{Auth: auth, Link: lk})
+	d := client.New(client.Config{Auth: auth, Link: lk, Server: cfg.Server.SSH, StatusPath: statusPath})
+	lk.OnChange = func(link.State) { d.LinkChanged() }
 	c.mu.Lock()
 	unlinked := c.unlinked
 	if !unlinked {

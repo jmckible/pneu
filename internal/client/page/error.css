@@ -1,0 +1,26 @@
+/* The client's own error page (internal/client/errorpage.go). The theme
+   sheet loads after this and supplies the four ends, as for the app. */
+:root {
+  color-scheme: dark;
+  --bg: #16181c;
+  --fg: #d6d8dc;
+  --accent: #7fb4ff;
+  --font: ui-monospace, "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root { color-scheme: light; --bg: #fbfbfa; --fg: #25272b; --accent: #1f5fbf; }
+}
+:root {
+  --muted: color-mix(in oklab, var(--fg) 75%, var(--bg));
+  --accent-hot: oklch(from var(--accent) l calc(c * 1.35) h);
+}
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 var(--font); }
+main { max-width: 64ch; margin: 12vh auto; padding: 0 2ch; }
+h1 { font-size: inherit; color: var(--accent-hot); margin: 0 0 1em; }
+ul { padding-left: 2ch; }
+li { margin: 0.3em 0; }
+code, b { color: var(--accent); font: inherit; }
+.note, .state, .foot { color: var(--muted); }
+.foot { margin-top: 2em; }
+button { font: inherit; color: var(--fg); background: none; border: 1px solid var(--muted); padding: 0.2em 1ch; cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: default; }

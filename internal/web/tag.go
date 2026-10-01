@@ -36,7 +36,7 @@ type tagOp struct {
 	Account string
 	Changes []string
 	IDs     []string
-	Threads []threadRef
+	Threads []ThreadRef
 }
 
 // tagActions maps an action to its tag changes and their exact inverse.
@@ -105,7 +105,7 @@ func (s *Server) tag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var ids []string
-	var threads []threadRef // known when resolved from thread:X
+	var threads []ThreadRef // known when resolved from thread:X
 	if strings.TrimSpace(f.Get("ids")) == "" && thread != "" && (action == "archive" || action == "trash") {
 		// A thread past maxTagIDs can't be sent as ids; the page sends
 		// thread= alone and this is the one write that resolves thread:X.
@@ -121,7 +121,7 @@ func (s *Server) tag(w http.ResponseWriter, r *http.Request) {
 			tagFail(w, http.StatusBadRequest, "no such thread")
 			return
 		}
-		threads = []threadRef{{acct.Name, thread}}
+		threads = []ThreadRef{{acct.Name, thread}}
 	} else {
 		var err error
 		if ids, err = parseIDs(f.Get("ids")); err != nil {
@@ -437,7 +437,7 @@ type syncStatus struct {
 	Running  bool          `json:"running"`
 	LastErr  *string       `json:"lastErr"` // null after any success
 	State    gmi.State     `json:"state"`
-	Progress *progressView `json:"progress"` // the first pull's, while pulling
+	Progress *ProgressView `json:"progress"` // the first pull's, while pulling
 }
 
 // status handles GET /status: per-account sync health, {} without a Syncer.

@@ -156,11 +156,11 @@ func TestPeerRoutes(t *testing.T) {
 		_, pp := peer.Handler(r)
 		key := rt.Method + " " + rt.Pattern
 		wantPeer := !rt.Local || rt.Upstream || rt.PeerOnly
-		if (pp == key) != wantPeer || (lp == key) == rt.PeerOnly {
+		if (pp == key) != wantPeer || (lp == key) == (rt.PeerOnly || rt.ClientOnly) {
 			t.Errorf("%s: loopback %q peer %q", key, lp, pp)
 		}
 	}
-	for _, p := range []string{"/open", "/theme.css"} {
+	for _, p := range []string{"/open", "/theme.css", "/client/link", "/client/static/error.js"} {
 		if _, pat := peer.Handler(httptest.NewRequest("GET", p, nil)); pat != "" {
 			t.Errorf("peer serves %s", p)
 		}

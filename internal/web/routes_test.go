@@ -246,11 +246,22 @@ func TestRouteTable(t *testing.T) {
 		if rt.PeerOnly {
 			m = s.peerRoutes() // TestPeerRoutes: only there
 		}
-		if _, pat := m.Handler(r); pat != key {
+		if rt.ClientOnly {
+			// Neither of a server's listeners has them; a client answers.
+			if _, pat := m.Handler(r); pat == key {
+				t.Errorf("%s served by the server", key)
+			}
+			if !rt.Local || rt.Handler != nil || !strings.HasPrefix(rt.Pattern, "/client/") {
+				t.Errorf("%s: a client route is Local, under /client/, with no server handler", key)
+			}
+		} else if _, pat := m.Handler(r); pat != key {
 			t.Errorf("%s: %s matched %q", key, r.URL.Path, pat)
 		}
-		if rt.Handler == nil || len(rt.Types) == 0 || rt.Cache == "" {
+		if rt.Handler == nil && !rt.ClientOnly || len(rt.Types) == 0 || rt.Cache == "" {
 			t.Errorf("%s: incomplete entry", key)
+		}
+		if got := RouteOf(r); got == nil && !rt.PeerOnly || got != nil && got.Method+" "+got.Pattern != key {
+			t.Errorf("%s: RouteOf %v", key, got)
 		}
 		for p, types := range rt.Types {
 			if !p.valid() || len(types) == 0 {
@@ -271,8 +282,11 @@ func TestRouteTable(t *testing.T) {
 		if (part || pdf || rt.Disposition == DispPart || rt.Dest == DestSVGImage) != (rt.Pattern == "/part/{account}/{msgid}/{n}") {
 			t.Errorf("%s: part rules off the part route", key)
 		}
-		if rt.Local != slices.Contains([]string{"/open", "/theme.css", "/events"}, rt.Pattern) {
+		if rt.Local != (slices.Contains([]string{"/open", "/theme.css", "/events"}, rt.Pattern) || rt.ClientOnly) {
 			t.Errorf("%s: Local %v", key, rt.Local)
+		}
+		if rt.ClientOnly != strings.HasPrefix(rt.Pattern, "/client/") {
+			t.Errorf("%s: ClientOnly %v", key, rt.ClientOnly)
 		}
 		if rt.Upstream != (rt.Pattern == "/events") || rt.PeerOnly != (rt.Pattern == "/peer/hello") {
 			t.Errorf("%s: Upstream %v, PeerOnly %v", key, rt.Upstream, rt.PeerOnly)
@@ -500,5 +514,71 @@ func TestLocalLocation(t *testing.T) {
 		if got, err := localLocation(loc, base); err == nil {
 			t.Errorf("accepted %q as %q", loc, got)
 		}
+	}
+}
+
+// reset-window (Auth.ArmClearSite): the next authenticated top-level
+// navigation this browser made itself carries Clear-Site-Data, once. A
+// fetch, a frame, another Host, a request without the session, another
+// site's navigation and a failed nonce all leave it armed; a good nonce
+// takes it. A handler can't set it.
+func TestClearSiteData(t *testing.T) {
+	s := newServer(t)
+	navNoCookie := func(r *http.Request) {
+		r.Header.Set("Sec-Fetch-Mode", "navigate")
+		r.Header.Set("Sec-Fetch-Dest", "document")
+		r.Header.Set("Sec-Fetch-Site", "same-origin")
+	}
+	nav := func(r *http.Request) { navNoCookie(r); withCookie(r) }
+	with := func(f func(*http.Request), k, v string) func(*http.Request) {
+		return func(r *http.Request) { f(r); r.Header.Set(k, v) }
+	}
+	s.Auth.ArmClearSite()
+	for _, c := range []struct {
+		why, path string
+		mod       func(*http.Request)
+	}{
+		{"a subresource", "/static/app.css", withCookie},
+		{"a fetch", "/status", with(withCookie, "Sec-Fetch-Mode", "cors")},
+		{"a frame", "/", with(nav, "Sec-Fetch-Dest", "iframe")},
+		{"another Host", "/", with(nav, "Host", "x")},
+		{"no session", "/", navNoCookie},
+		{"another site's navigation", "/", with(nav, "Sec-Fetch-Site", "cross-site")},
+		{"a same-site page's navigation", "/", with(nav, "Sec-Fetch-Site", "same-site")},
+		{"no fetch metadata", "/", with(nav, "Sec-Fetch-Site", "")},
+		{"a failed nonce", "/open?nonce=bad", navNoCookie},
+	} {
+		mod := c.mod
+		if c.why == "another Host" {
+			mod = func(r *http.Request) { nav(r); r.Host = "evil.example:7317" }
+		}
+		if w := do(s, "GET", c.path, mod); w.Header().Get("Clear-Site-Data") != "" {
+			t.Fatalf("%s took it", c.why)
+		}
+	}
+	if w := do(s, "GET", "/", nav); w.Code != 200 || w.Header().Get("Clear-Site-Data") != ClearSiteData {
+		t.Fatalf("navigation: %d %v", w.Code, w.Header())
+	}
+	if w := do(s, "GET", "/", nav); w.Header().Get("Clear-Site-Data") != "" {
+		t.Fatal("twice")
+	}
+
+	// The launcher's open: a good nonce takes it (Sec-Fetch-Site none).
+	launch := filepath.Join(t.TempDir(), "launch")
+	if err := s.Auth.StartLaunch(launch); err != nil {
+		t.Fatal(err)
+	}
+	u, _ := LaunchURL(launch, s.Auth.Origin)
+	_, q, _ := strings.Cut(u, "?")
+	s.Auth.ArmClearSite()
+	w := do(s, "GET", "/open?"+q, with(navNoCookie, "Sec-Fetch-Site", "none"))
+	if w.Code != 302 || w.Header().Get("Clear-Site-Data") != ClearSiteData {
+		t.Fatalf("/open: %d %v", w.Code, w.Header())
+	}
+
+	h := http.Header{"Clear-Site-Data": {`"*"`}}
+	PolicyData.Apply(h)
+	if h.Get("Clear-Site-Data") != "" {
+		t.Fatal("a class kept a handler's Clear-Site-Data")
 	}
 }

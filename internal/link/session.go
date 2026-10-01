@@ -50,6 +50,7 @@ func (e *dialError) Unwrap() error { return e.err }
 // would leave a busy connection, and the authorization it was checked
 // under, running (N9).
 type session struct {
+	id     SessionID
 	target netip.AddrPort
 	host   string // target as a Host header names it, as the peer listener checks it
 	tls    *tls.Config
@@ -94,7 +95,9 @@ func (l *Link) newSession(target netip.AddrPort) (*session, bool) {
 	if l.unpaired {
 		return nil, false
 	}
+	l.lastID++
 	s := &session{
+		id:     l.lastID,
 		target: target, host: target.String(),
 		tls:    PinnedTLS(l.id.Cert, l.pin),
 		dialTO: l.Timing.Dial, hsTO: l.Timing.Handshake,

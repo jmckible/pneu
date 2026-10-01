@@ -797,8 +797,10 @@ could leave one behind.
   executable content in the browser cache past its own repair (N2); set
   the session cookie; register a service worker (R4); or supply code
   (`pneu update` fetches from the recorded remote). **It can:** show false
-  mail, set non-HttpOnly cookies, keep the daemon parsing a steady stream
-  of valid events (coalesced into at most one status write per second),
+  mail, set non-HttpOnly cookies, keep the daemon parsing valid events up
+  to the stream's work budget (256 KiB and 50 events a second sustained,
+  bursts of 2 MiB and 200; past it the stream is closed and reopened with
+  backoff; status writes coalesced to one a second),
   and stream unbounded bodies into the browser. The browser tab's memory
   is dell's to exhaust, just as it is when dell's own app JS runs there
   (N14). The daemon's memory is bounded: one upstream connection,
@@ -1055,7 +1057,7 @@ Where the code differs from the plan above, or settles what it left open:
 ## As built: step 5a
 
 The client daemon's link, pairing and proxy. Events fan-out, status.json
-v2, the theme watcher, the error page and `/client/*` are step 5b.
+v2, the theme watcher, the error page and `/client/*` are step 5b (below).
 
 - **Packages.** `internal/link` is the client's side of the link:
   credentials, the pre-dial checks, the pinned transport, the lease, hello
@@ -1243,6 +1245,169 @@ v2, the theme watcher, the error page and `/client/*` are step 5b.
     from reading the config to writing it, and `unpair` reads the config
     only after taking the lock, so neither acts on the other's half-written
     state.
+
+## As built: step 5b
+
+The client daemon's live side: the event pipeline, local theme,
+status.json v2, the error page and `/client/*`, and Reset window data's
+daemon half.
+
+- **Server side.** Every status-file rewrite also broadcasts SSE `status`
+  with the same doc, built once (`web.WriteStatusFile` writes either
+  version). The last doc rides in `/events`' `hello` (`status`, null
+  before the first write), taken under a third lock, `pubStatus.mu`,
+  which each broadcast holds; `subscribe` takes `marks.mu`, `view.mu`,
+  `pubStatus.mu` in that order. `syncing`, `sync`, `auth` and `theme`
+  have typed shapes in `web` (`SyncingEvent`, `SyncEvent`, `AuthEvent`,
+  `ThemeEvent`), and `AccountView`, `ViewEvent`, `ThreadRef`, `StatusDoc`
+  and `HelloEvent` are exported, so the client decodes the server's own
+  types. `web.Protocol` stays 1.
+- **One upstream stream** (`internal/client/events.go`). `GET /events`
+  over the link whenever it's up (`WaitUp`), with the 10s header wait, a
+  `text/event-stream` answer and the right `Pneu-Protocol`. The reader
+  holds at most 64 KiB of any event: a longer line or event is read
+  through and marked, never buffered; comment blocks (the preamble, pings)
+  make no event and don't count toward the next. The first event must be
+  `hello`: its epoch hex, at most 16 accounts, each in **the link's
+  account set** (the one `/peer/hello` named, which lists every account
+  whether or not the server has a sync engine), anything else and the
+  stream is closed and reopened with backoff (1s to 30s). After it only
+  `syncing`, `sync`, `account`, `auth`, `status` and `view` pass, each
+  decoded into its `web` type and rebuilt field by field: account names
+  in the set, `gmi` states, phases and ops as enums, counts not below
+  zero, a percent only in 0–100, times re-formatted from RFC 3339 (else
+  null), window ids and thread ids by pattern, a view's threads at most
+  1000; free text (an account's error, an auth error) through `plain`:
+  valid UTF-8, no control, bidi-override or line-separator characters,
+  512 runes. A `view` must carry hello's epoch and a gen above the last
+  one taken. Anything else is dropped (logged at most once per 10s). A stream that ends with the link still up asks the
+  link for a probe; one that ends with the link reopens as soon as it's
+  back.
+- **Silence.** Every byte from the server resets a 60s timer; when it
+  fires, `Link.Stalled(id)` takes the session down (`refused`, "the event
+  stream went quiet") and kicks an attempt, which finds the real reason.
+  `id` is the session that carried the stream (`Link.RoundTripOn` names
+  it): a stall reported after that session was already replaced leaves
+  the new one alone (review G3).
+- **Work budget** (review G2). Two token buckets per stream, charged
+  before anything is parsed: every byte off the wire (comments, discarded
+  and oversized input included, so a line that never ends runs out of
+  budget) and every block a blank line ends (events and comments). The
+  defaults (`client.DefaultBudget`): 256 KiB/s with a 2 MiB burst, 50/s
+  with a 200 burst; a healthy server sends a few events a minute, a ping
+  every 25s and one hello of at most 64 KiB per connect. Over either, the
+  stream is closed and reopened with backoff (1s doubling to 30s), which
+  resets only once a stream has lasted 60s healthy, never on a valid
+  hello alone. Dropped events and stream ends are logged at most once per
+  10s, with a count of what was suppressed. A `Hub` with no subscribers
+  marshals nothing; the daemon's state still updates.
+- **The wire** (review G4). Lines end in LF, CR or CRLF, a CRLF split
+  across reads being one end; one leading UTF-8 BOM is skipped; `id` and
+  `retry` are ignored; a block dispatches only if it carried a data field
+  (or ran past the cap), so an event name alone, or `id`/`retry` alone,
+  before hello doesn't fail the handshake.
+- **Account names** (review G1). `config.ValidName` is now the plain-name
+  rule everywhere: valid UTF-8, graphic characters only (no control,
+  format or bidi characters, no space or line/paragraph separator), no
+  `/`, not starting `-` or `.`, at most 64 bytes. A server's config can't
+  hold another name, the link refuses a `/peer/hello` naming one
+  (`protocol`), and the handshake checks the set again. Rejected, never
+  cleaned.
+- **Local fan-out** (`live.go`). The daemon's own `web.Hub`. One mutex
+  spans every change to the daemon's state and its broadcast: the
+  handshake (state replaced, and a fresh `hello` to every open page, so a
+  page with an unknown outcome reconciles by gen), each relay (`account`
+  replaces that view; `syncing`/`sync` set its `running` as app.js does;
+  `view` moves gen; `status` replaces the doc and its arrival time), each
+  `link` and each `theme`. A page's `/events` subscribes and encodes its
+  `hello` under the same mutex: `{epoch, gen, accounts, status, link}`,
+  with `link` `{state: starting|up|down, since, reason, server, revision:
+  {client, server}}`. The state survives the link going down: a page
+  opened then renders the last-known views. `LinkChanged` (the link's
+  `OnChange`) reads the link's state under that mutex rather than taking
+  the call's: `OnChange` runs outside the link's lock, so two changes'
+  calls can arrive in either order.
+- **The server's name** in pages, the error page and status.json is the
+  SSH target the user paired with (`config.server.ssh`): local text,
+  known with the link never up. Hello's `name` is never shown.
+- **Theme.** `web.WatchTheme(ctx, path, every, changed)` is the watcher
+  both modes run on their own desk's file; the daemon broadcasts its own
+  `theme`. An upstream `theme` is never accepted.
+- **status.json v2** (`statusfile.go`): `{version: 2, updated, running,
+  unread, senders, accounts, server: {name, link, linkSince, statusAt,
+  reason, update}}`. `updated`/`running` are this daemon's; the counts are
+  the last valid upstream status (from hello or an event), held to ≤16
+  accounts, ≤5 senders, account names in the set, every string through
+  `plain` at 128 runes (a status past a limit is dropped whole); `link` and
+  `reason` are the link's local codes, `reason` null while up; `statusAt`
+  is when that status arrived here, null before one did; `update` is null
+  until step 7. Writes: at start, on every wake (a status, a link change)
+  but at most one per second, reading the state at write time (so the
+  latest wins and nothing else is held pending), every 5 minutes, and
+  `running: false` when the daemon stops. Markup in a sender name is kept
+  as text (QML renders PlainText; JSON isn't HTML-escaped). **The bar
+  widget accepts only version 1 until step 6**, so on a client it shows
+  `status.json unreadable` meanwhile; the server keeps writing version 1.
+- **Error page** (`errorpage.go`, `page/`). A GET navigation
+  (`Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`,
+  `web.Navigation`) on a route that may answer HTML gets it whenever the
+  link isn't up, and also when the send fails not-sent: 503, `Pneu-Link:
+  not-sent`, under the route's HTML class (`app`, or `compose` on the
+  form's routes; `web.HTMLPolicy`) installed through `Admitted.Install`.
+  A script's fetch, a frame, or any other route gets the plain not-sent
+  answer as before. The page is this binary's template and
+  `/client/static/error.{css,js}`, with this desk's `/theme.css`; it
+  names the reason in local words, the bar-menu action (Fix with agent,
+  Update pneu / Update <server>) and the terminal command where one fixes
+  it (`sudo tailscale up`; `pneu client unpair` then `pneu client pair
+  <ssh>`; `ssh <ssh> systemctl --user status pneu`). `pin-mismatch`
+  doesn't claim to retry, and nothing on any page offers to trust a key.
+  Its script reloads when the local `/events` says the link is up (a
+  `link` at once; a hello already up after a second, so a page served on
+  a send that failed before the link noticed can't loop), and its button
+  posts `/client/retry`.
+- **`/client/*`** is three routes in the shared table, `ClientOnly`
+  (Local, no server handler; neither of a server's listeners has them):
+  `GET /client/link` (the `link` view as JSON), `POST /client/retry`
+  (Auth's Origin and cookie, no query, no body, else 400; a probe when up,
+  an attempt when down), and `GET /client/static/` (the two files by name;
+  anything else, the directory included, a 404). Each answer goes through
+  the policy writer under its route's class, and the client tests run
+  Check on every answer the daemon makes itself (`web.RouteOf`).
+- **Not-sent errors on `/send`** are text/plain: its route answers no
+  JSON (`writeLinkError` follows the route's data types). 5a wrote JSON
+  there, outside the contract.
+- **Probes.** `launch` already retried (a 3s hello probe when up). `POST
+  /sync` from the page (R, focus) now asks for one before it's sent,
+  link up or down.
+- **Reset window data, daemon half.** The control socket's `reset-window`
+  (no arguments) arms `Auth.ArmClearSite`, in **both modes**: the next
+  authenticated top-level navigation gets `Clear-Site-Data: "cache",
+  "storage"`, once, set by the policy writer (`Clear-Site-Data` is one of
+  the headers a class owns, so no handler or upstream sets it).
+  Authenticated means a session cookie that validated, or `/open` with a
+  good nonce (or its fast path, with the cookie); a navigation is
+  `Sec-Fetch-Mode: navigate`, `Sec-Fetch-Dest: document`, and
+  `Sec-Fetch-Site` `none` or `same-origin`, on our Host. Anything else (no
+  session, a failed nonce, another site's or a same-site page's
+  navigation, a fetch or frame) leaves it armed (review G5). A worker's
+  script fetch (`Service-Worker: script`) is still a 404. The menu flow
+  is step 6.
+- **app.js** (`web/static/link.js`, the pure half, `web/link.test.js`).
+  A hello with `link`, and `link` events, set the line's link state; `down`
+  is `Can't reach <server> · retrying` in `--accent-hot`, ahead of
+  everything else. The details panel adds the link and both builds. A
+  failed write whose answer carries `Pneu-Link` (header, or the JSON's
+  `link`) toasts `Not sent: can't reach <server>.` or `<server> didn't
+  answer; checking when it's back.` in place of its usual failure; the
+  next hello's generation reconciles the list. With no `link` in hello (a
+  server) none of it shows.
+- **Review fix H1.** Codex closed G1, G3, G4 and G5; G2's budget held but a
+  `sync` event's `at` of `0000-01-01T00:00:00+01:00` parses, becomes year
+  −1 in UTC, and fails `MarshalJSON` in the Hub, which logged per event
+  outside the drop path's limiter. Every relayed time must now stay a
+  four-digit year in UTC (`sane`), or the event is dropped through the
+  limited path. The allowlist test fails on any encode-failure log line.
 
 ## Review status
 

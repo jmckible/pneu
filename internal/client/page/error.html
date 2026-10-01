@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · pneu</title>
+<link rel="stylesheet" href="/client/static/error.css">
+<link rel="stylesheet" href="/theme.css">
+<script src="/client/static/error.js" defer></script>
+</head>
+<body data-reason="{{.Reason}}">
+<main>
+<h1>{{.Title}}</h1>
+<p>{{.Says}}</p>
+{{if .Steps}}<ul>{{range .Steps}}
+<li>{{if .Menu}}In pneu's bar menu: <b>{{.Menu}}</b>{{else}}In a terminal: <code>{{.Command}}</code>{{end}}{{if .Note}} <span class="note">{{.Note}}</span>{{end}}</li>{{end}}
+</ul>{{end}}
+<p class="state">{{if .Retrying}}Retrying on its own; this page reloads when {{.Server}} is back.{{else}}Not retrying on its own: nothing connects until this is fixed. This page reloads once it is.{{end}}</p>
+<p><button id="retry" type="button">{{if .Retrying}}Try now{{else}}Check again{{end}}</button></p>
+<p class="foot">Since {{.Since}} · <code>{{.Reason}}</code></p>
+</main>
+</body>
+</html>

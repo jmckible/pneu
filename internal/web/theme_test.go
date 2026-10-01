@@ -47,7 +47,7 @@ func TestWatchThemeBroadcasts(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.ThemePath = p
-	c := s.Hub.subscribe()
+	c := s.Hub.Subscribe()
 	defer s.Hub.unsubscribe(c)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

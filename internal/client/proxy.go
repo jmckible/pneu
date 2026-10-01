@@ -12,6 +12,7 @@ import (
 	"net/http/httputil"
 	"net/textproto"
 	"net/url"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -59,9 +60,22 @@ func exchangeOf(r *http.Request) *exchange {
 	return ex
 }
 
-// proxy is a proxied route's handler.
+// proxy is a proxied route's handler. A page navigation while the link
+// isn't up gets the error page instead. POST /sync (R, and the page's
+// focus return) also asks the link for a probe, or an attempt when down:
+// the moment you look is when a dead link must be noticed (R12).
 func (d *Daemon) proxy(rt *web.Route) http.Handler {
+	syncRoute := rt.Method == http.MethodPost && rt.Pattern == "/sync"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if syncRoute {
+			d.up.Retry()
+		}
+		if pageNavigation(rt, r) {
+			if st := d.up.State(); st.Reason != link.Up {
+				d.errorPage(w, rt, st)
+				return
+			}
+		}
 		ex := &exchange{rt: rt, in: r}
 		fw := &finalWriter{w: w, ex: ex, hdr: http.Header{}}
 		d.rp.ServeHTTP(fw, r.WithContext(context.WithValue(r.Context(), exchangeKey{}, ex)))
@@ -161,29 +175,35 @@ func (d *Daemon) fail(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 	fw.wrote = true
-	var down *link.DownError
 	switch {
 	case errors.Is(err, errContract):
-		writeLinkError(fw.w, r, http.StatusBadGateway, Unknown, "the server's answer was refused")
+		writeLinkError(fw.w, ex.rt, ex.in, http.StatusBadGateway, Unknown, "the server's answer was refused")
 	case !ex.gotConn.Load():
-		if errors.As(err, &down) && ex.rt.Method == http.MethodPost && ex.rt.Pattern == "/sync" {
-			d.up.Retry() // R or focus while down: try the link now
-		}
 		reason, _ := link.Classify(err)
-		writeLinkError(fw.w, r, http.StatusBadGateway, NotSent, "Not sent: can't reach the server ("+string(reason)+").")
+		if pageNavigation(ex.rt, ex.in) {
+			// The link went down between the check and the send.
+			st := d.up.State()
+			if st.Reason == link.Up {
+				st = link.State{Reason: reason, Since: time.Now()}
+			}
+			d.errorPage(fw.w, ex.rt, st)
+			return
+		}
+		writeLinkError(fw.w, ex.rt, ex.in, http.StatusBadGateway, NotSent, "Not sent: can't reach the server ("+string(reason)+").")
 	default:
 		if r.Context().Err() == nil {
 			log.Printf("client: %s %s: %v", ex.in.Method, ex.rt.Pattern, err)
 		}
-		writeLinkError(fw.w, r, http.StatusGatewayTimeout, Unknown, "The server didn't answer; the outcome is unknown.")
+		writeLinkError(fw.w, ex.rt, ex.in, http.StatusGatewayTimeout, Unknown, "The server didn't answer; the outcome is unknown.")
 	}
 }
 
 // writeLinkError is a local answer through the middleware's writer (data
-// class, the route's cache rule).
-func writeLinkError(w http.ResponseWriter, r *http.Request, status int, outcome, msg string) {
+// class, the route's cache rule): JSON on a mutation whose route answers
+// JSON, text/plain otherwise (POST /send's errors are text).
+func writeLinkError(w http.ResponseWriter, rt *web.Route, r *http.Request, status int, outcome, msg string) {
 	w.Header().Set(LinkHeader, outcome)
-	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead || !slices.Contains(rt.Types[web.PolicyData], "application/json") {
 		http.Error(w, msg, status)
 		return
 	}
@@ -227,7 +247,7 @@ func (f *finalWriter) WriteHeader(code int) {
 	if a == nil || !a.Bodiless && a.Header.Get("Content-Type") == "" || a.Install(f.w, f.ex.rt) != nil {
 		// Only an admitted answer gets here; anything else is refused whole.
 		f.ex.admitted = nil
-		writeLinkError(f.w, f.ex.in, http.StatusBadGateway, Unknown, "the server's answer was refused")
+		writeLinkError(f.w, f.ex.rt, f.ex.in, http.StatusBadGateway, Unknown, "the server's answer was refused")
 		return
 	}
 	f.w.WriteHeader(code)

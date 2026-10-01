@@ -11,9 +11,11 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/jmckible/pneu/internal/link"
 	"github.com/jmckible/pneu/internal/web"
 )
 
@@ -28,14 +30,28 @@ type Upstream interface {
 	WaitUp(ctx context.Context) bool
 	// Email is an account's address from the server's hello.
 	Email(account string) (string, bool)
+	// State is the link's state; Hello the last connect's hello (nil
+	// before one), whose account set bounds every event.
+	State() link.State
+	Hello() *link.Hello
+	// RoundTripOn is RoundTrip naming the session that carried it;
+	// Stalled calls that session down, if it's still the live one: the
+	// event stream on it went quiet.
+	RoundTripOn(req *http.Request) (*http.Response, link.SessionID, error)
+	Stalled(link.SessionID)
 }
 
 // Config is what New needs.
 type Config struct {
 	Auth *web.Auth
 	Link Upstream
+	// Server is the SSH target the user paired with: the server's name in
+	// every page, the error page and status.json (never hello's name).
+	Server string
 	// ThemePath is this desk's theme file ("": web.ThemePath()).
 	ThemePath string
+	// StatusPath is this desk's status.json ("": none written).
+	StatusPath string
 }
 
 // Limits (docs/client.md, "Limits and timeouts").
@@ -52,6 +68,7 @@ const (
 type Daemon struct {
 	auth    *web.Auth
 	up      Upstream
+	server  string
 	checker web.Checker
 	theme   string
 	rp      *httputil.ReverseProxy
@@ -59,15 +76,39 @@ type Daemon struct {
 
 	idle      time.Duration
 	launching atomic.Bool
+
+	// The live side (live.go): mu spans every change to live and its
+	// broadcast on hub, and each browser's subscription with its hello.
+	mu   sync.Mutex
+	live live
+	hub  *web.Hub
+
+	statusPath string
+	statusWake chan struct{}
+	// Timing and the stream's budget, changed by tests before Run.
+	silence, statusGap, themePoll time.Duration
+	streamMin, streamMax, healthy time.Duration
+	budget                        Budget
+	onStatusWrite                 func() // tests only
+	// Rate-limited logs: dropped upstream events, and streams ending.
+	dropLog, streamLog logLimit
 }
 
 // New wires the daemon's routes: the table's, Local ones answered here,
-// the rest proxied, anything else a local 404.
+// the rest proxied, anything else a local 404. The link's OnChange must
+// call LinkChanged.
 func New(cfg Config) *Daemon {
 	d := &Daemon{
-		auth: cfg.Auth, up: cfg.Link, theme: cfg.ThemePath, idle: IdleBody,
-		checker: web.Checker{Origin: cfg.Auth.Origin, Email: cfg.Link.Email},
+		auth: cfg.Auth, up: cfg.Link, server: cfg.Server, theme: cfg.ThemePath, idle: IdleBody,
+		checker:    web.Checker{Origin: cfg.Auth.Origin, Email: cfg.Link.Email},
+		hub:        web.NewHub(),
+		statusPath: cfg.StatusPath,
+		statusWake: make(chan struct{}, 1),
+		silence:    Silence, statusGap: StatusGap, themePoll: web.ThemePoll,
+		streamMin: StreamMin, streamMax: StreamMax, healthy: Healthy, budget: DefaultBudget,
+		dropLog: logLimit{every: 10 * time.Second}, streamLog: logLimit{every: 10 * time.Second},
 	}
+	d.live.link = cfg.Link.State()
 	d.rp = &httputil.ReverseProxy{
 		Rewrite:        d.rewrite,
 		Transport:      &roundTripper{d},
@@ -87,6 +128,12 @@ func New(cfg Config) *Daemon {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { web.ServeTheme(w, d.theme) })
 		case "/events":
 			return http.HandlerFunc(d.events)
+		case "/client/link":
+			return http.HandlerFunc(d.linkJSON)
+		case "/client/retry":
+			return http.HandlerFunc(d.retry)
+		case "/client/static/":
+			return http.HandlerFunc(d.static)
 		}
 		return http.NotFoundHandler()
 	})
@@ -126,11 +173,19 @@ func headerHas(h http.Header, key, token string) bool {
 	return false
 }
 
-// events is the browser's /events. The client's fan-out of its one
-// upstream stream is the next build step; until then a page here has no
-// live updates.
-func (d *Daemon) events(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "live updates aren't built on clients yet", http.StatusServiceUnavailable)
+// Run is the daemon's live side until ctx ends: the one upstream event
+// stream, this desk's theme watcher and status.json. It returns once the
+// last status write (running false) is done and every page's stream is
+// closed.
+func (d *Daemon) Run(ctx context.Context) {
+	var wg sync.WaitGroup
+	wg.Go(func() { d.runUpstream(ctx) })
+	wg.Go(func() { web.WatchTheme(ctx, d.theme, d.themePoll, d.themeChanged) })
+	if d.statusPath != "" {
+		wg.Go(func() { d.runStatus(ctx) })
+	}
+	wg.Wait()
+	d.hub.Close()
 }
 
 // Launch is the control socket's `launch` (docs/client.md, R13): retry the

@@ -106,7 +106,7 @@ func TestAccountStateSurfaces(t *testing.T) {
 	if m == nil {
 		t.Fatalf("no #accounts strip:\n%s", body)
 	}
-	var views []accountView
+	var views []AccountView
 	if err := json.Unmarshal([]byte(html.UnescapeString(m[1])), &views); err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ func TestAccountSyncStateSurfaces(t *testing.T) {
 	if m == nil {
 		t.Fatalf("no data-accounts:\n%s", body)
 	}
-	var views []accountView
+	var views []AccountView
 	if err := json.Unmarshal([]byte(html.UnescapeString(m[1])), &views); err != nil {
 		t.Fatal(err)
 	}

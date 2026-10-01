@@ -65,6 +65,8 @@ type Server struct {
 	// RunStatus's wakeups, cap 1 so pending requests collapse.
 	statusNow, statusTags chan struct{}
 	marks                 accountMarks
+	// pubStatus is the last status doc, for hello (statusfile.go).
+	pubStatus statusPub
 	// Unsubscribe: preview tokens and the network side. Tests replace
 	// unsubDKIM's resolver and unsubHTTP's resolver, dialer and policy.
 	unsubTokens unsub.Store[unsubAction, unsubResult]

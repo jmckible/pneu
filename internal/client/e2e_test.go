@@ -204,6 +204,10 @@ func TestMutationOutcome(t *testing.T) {
 		keys := linktest.NewKeys(t)
 		got := make(chan string, 1)
 		u := linktest.StartUpstream(t, keys.Server, keys.Creds.Identity.SPKI, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/events" {
+				http.NotFound(w, r)
+				return
+			}
 			b, _ := io.ReadAll(r.Body)
 			got <- string(b)
 			panic(http.ErrAbortHandler) // the stream is reset: no answer
@@ -288,4 +292,58 @@ func TestDownErrorIsNotSent(t *testing.T) {
 	if _, err := l.RoundTrip(req); !errors.As(err, new(*link.DownError)) {
 		t.Fatalf("%v", err)
 	}
+}
+
+// The whole event path: the real server's /events over the peer listener
+// into the daemon's one stream, out to a page through the local Hub, and
+// the server's status into this desk's status.json.
+func TestEventsEndToEnd(t *testing.T) {
+	keys := linktest.NewKeys(t)
+	port, srv := realServer(t, keys)
+	r := newRig(t, keys, port, nil)
+	r.waitUp()
+	p := r.page()
+	h := p.handshaken()
+	if h.Link.State != "up" || h.Status != nil {
+		t.Fatalf("hello %+v", h)
+	}
+	epoch := h.Epoch
+
+	srv.Hub.Broadcast("theme", web.ThemeEvent{At: 1})
+	srv.Hub.Broadcast("syncing", web.SyncingEvent{Account: "personal"})
+	if ev := p.until("syncing", ownLinkUp); string(ev.data) != `{"account":"personal"}` {
+		t.Fatalf("syncing %s", ev.data)
+	}
+	srv.ViewChanged()
+	ev := p.until("view", ownLinkUp)
+	var v web.ViewEvent
+	if err := json.Unmarshal(ev.data, &v); err != nil || v.Epoch != epoch || v.Gen != h.Gen+1 {
+		t.Fatalf("view %s", ev.data)
+	}
+	srv.Hub.Broadcast("sync", web.SyncEvent{Account: "work", Op: "sync", At: time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)})
+	if ev := p.until("sync", ownLinkUp); string(ev.data) != `{"account":"work","op":"sync","changed":false,"at":"2026-09-30T10:00:00Z"}` {
+		t.Fatalf("sync %s", ev.data)
+	}
+
+	// The server's status file rewrite reaches this desk's status.json.
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { srv.RunStatus(ctx, filepath.Join(t.TempDir(), "status.json")); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	ev = p.until("status", ownLinkUp)
+	var st web.StatusDoc
+	if err := json.Unmarshal(ev.data, &st); err != nil || len(st.Accounts) != 2 {
+		t.Fatalf("status %s", ev.data)
+	}
+	doc := waitV2(t, r.status, "the server's status", func(d StatusV2) bool { return d.Server.StatusAt != nil })
+	if len(doc.Accounts) != 2 || doc.Unread != st.Unread || doc.Server.Link != "up" {
+		t.Fatalf("status.json %+v", doc)
+	}
+	// A new page gets it all in its hello; the server's theme never came.
+	p2 := r.page()
+	h2 := p2.handshaken()
+	if h2.Gen != v.Gen || h2.Status == nil || h2.Status.Unread != st.Unread {
+		t.Fatalf("later hello %+v", h2)
+	}
+	p.quiet(100 * time.Millisecond)
 }

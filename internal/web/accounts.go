@@ -20,23 +20,23 @@ import (
 	"github.com/jmckible/pneu/internal/gmi"
 )
 
-// accountView is one account's state, as the SSE `account` event and the
+// AccountView is one account's state, as the SSE `account` event and the
 // page's data-accounts carry it: the #accounts strip and the header's
 // status line both render from it.
-type accountView struct {
+type AccountView struct {
 	Name     string        `json:"name"`
 	State    gmi.State     `json:"state"`
 	Pulled   bool          `json:"pulled"`
 	Failures int           `json:"failures"` // consecutive
 	Error    *string       `json:"error"`    // null after any success
 	Authing  bool          `json:"authing"`  // a re-auth waits on the consent screen
-	Progress *progressView `json:"progress"` // the first pull's, while pulling
+	Progress *ProgressView `json:"progress"` // the first pull's, while pulling
 	LastSync *string       `json:"lastSync"` // RFC 3339; null until the first successful sync
 	Queued   bool          `json:"queued"`   // a sync was asked for and hasn't started
 	Running  bool          `json:"running"`  // a sync or first pull runs (never a push)
 }
 
-type progressView struct {
+type ProgressView struct {
 	Phase    gmi.Phase `json:"phase"`
 	Done     int       `json:"done"`
 	Total    int       `json:"total"`  // 0 while listing
@@ -45,8 +45,8 @@ type progressView struct {
 	Frontier *string   `json:"frontier"` // RFC 3339: mail is complete back to here
 }
 
-func viewOf(name string, st gmi.Status) accountView {
-	v := accountView{Name: name, State: st.State, Pulled: st.Pulled, Failures: st.Failures, Authing: st.Authing,
+func viewOf(name string, st gmi.Status) AccountView {
+	v := AccountView{Name: name, State: st.State, Pulled: st.Pulled, Failures: st.Failures, Authing: st.Authing,
 		Queued: st.Queued, Running: st.Syncing}
 	if !st.LastSync.IsZero() {
 		at := st.LastSync.Format(time.RFC3339)
@@ -57,7 +57,7 @@ func viewOf(name string, st gmi.Status) accountView {
 		v.Error = &msg
 	}
 	if p := st.Progress; p != nil {
-		pv := &progressView{Phase: p.Phase, Done: p.Done, Total: p.Total, Listed: p.Listed}
+		pv := &ProgressView{Phase: p.Phase, Done: p.Done, Total: p.Total, Listed: p.Listed}
 		if p.Total > 0 && (p.Phase == gmi.PhaseContent || p.Phase == gmi.PhaseMetadata) {
 			pct := min(100, p.Done*100/p.Total)
 			pv.Percent = &pct
@@ -72,11 +72,11 @@ func viewOf(name string, st gmi.Status) accountView {
 }
 
 // accountViews is every account's view; nil without a sync engine.
-func (s *Server) accountViews() []accountView {
+func (s *Server) accountViews() []AccountView {
 	if s.Syncer == nil {
 		return nil
 	}
-	out := make([]accountView, 0, len(s.Accounts))
+	out := make([]AccountView, 0, len(s.Accounts))
 	for _, a := range s.Accounts {
 		st, err := s.Syncer.Status(a.Name)
 		if err != nil {
@@ -263,14 +263,6 @@ func (s *Server) retryPull(w http.ResponseWriter, r *http.Request) {
 		OK bool `json:"ok"`
 	}{true})
 }
-
-// StatusDoc, StatusAccount and ProgressView are the status file's shapes,
-// for `pneu account status`.
-type (
-	StatusDoc     = statusDoc
-	StatusAccount = statusAccount
-	ProgressView  = progressView
-)
 
 // ReadStatus reads a status file written by RunStatus.
 func ReadStatus(path string) (StatusDoc, error) {

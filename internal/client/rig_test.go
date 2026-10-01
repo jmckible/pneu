@@ -36,9 +36,13 @@ type rig struct {
 	srv    *httptest.Server
 	hc     *http.Client
 	got1xx atomic.Int32 // informational responses the browser saw
+	// theme and status are this desk's theme file and status.json.
+	theme, status string
+	// stop ends the daemon's Run and waits for it.
+	stop func()
 }
 
-func newRig(t *testing.T, keys linktest.Keys, port int, api *linktest.API) *rig {
+func newRig(t *testing.T, keys linktest.Keys, port int, api *linktest.API, opts ...func(*Daemon)) *rig {
 	t.Helper()
 	if api == nil {
 		api = linktest.NewAPI()
@@ -46,15 +50,27 @@ func newRig(t *testing.T, keys linktest.Keys, port int, api *linktest.API) *rig 
 	l := link.New(api, keys.Creds, port)
 	l.Timing.BackoffMin, l.Timing.BackoffMax = 20*time.Millisecond, 100*time.Millisecond
 	l.Timing.ProbeWait = time.Second
+	auth := web.NewAuth(testHost, testToken)
+	dir := t.TempDir()
+	theme := filepath.Join(dir, "theme.css")
+	os.WriteFile(theme, []byte(":root { --bg: #102030; }"), 0o600)
+	status := filepath.Join(dir, "status.json")
+	d := New(Config{Auth: auth, Link: l, Server: "dell", ThemePath: theme, StatusPath: status})
+	d.themePoll = 20 * time.Millisecond
+	for _, f := range opts {
+		f(d)
+	}
+	l.OnChange = func(link.State) { d.LinkChanged() }
 	l.Start()
 	t.Cleanup(l.Close)
-	auth := web.NewAuth(testHost, testToken)
-	theme := filepath.Join(t.TempDir(), "theme.css")
-	os.WriteFile(theme, []byte(":root { --bg: #102030; }"), 0o600)
-	d := New(Config{Auth: auth, Link: l, ThemePath: theme})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { d.Run(ctx); close(done) }()
+	stop := func() { cancel(); <-done }
+	t.Cleanup(stop)
 	srv := httptest.NewServer(d)
 	t.Cleanup(srv.Close)
-	r := &rig{t: t, keys: keys, api: api, link: l, d: d, srv: srv}
+	r := &rig{t: t, keys: keys, api: api, link: l, d: d, srv: srv, theme: theme, status: status, stop: stop}
 	r.hc = &http.Client{
 		Transport:     &http.Transport{DisableCompression: true},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
@@ -124,6 +140,14 @@ func (r *rig) do(req *http.Request) (*http.Response, string) {
 	h := resp.Header
 	if h.Get(web.PolicyHeader) == "" || h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Cache-Control") == "" {
 		r.t.Errorf("%s %s: unpoliced answer %v", req.Method, req.URL.Path, h)
+	}
+	// Every answer the daemon makes itself meets its route's contract, as
+	// the server's do in the web tests (a proxied one passed Admit's).
+	rt := web.RouteOf(req)
+	if rt == nil || rt.Local || h.Get(LinkHeader) != "" {
+		if err := (web.Checker{Origin: testOrigin}).Check(rt, resp.StatusCode, h, req); err != nil {
+			r.t.Errorf("%s %s: %d breaks its route's contract: %v", req.Method, req.URL.Path, resp.StatusCode, err)
+		}
 	}
 	if req.URL.Path != "/open" && len(h.Values("Set-Cookie")) > 0 {
 		r.t.Errorf("%s %s: Set-Cookie passed: %v", req.Method, req.URL.Path, h.Values("Set-Cookie"))

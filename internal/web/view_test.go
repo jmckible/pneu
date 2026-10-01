@@ -20,9 +20,9 @@ func genOf(s *Server) uint64 {
 }
 
 // viewEvents decodes the `view` events queued on c, in order.
-func viewEvents(t *testing.T, c chan []byte) []viewEvent {
+func viewEvents(t *testing.T, c chan []byte) []ViewEvent {
 	t.Helper()
-	var out []viewEvent
+	var out []ViewEvent
 	for {
 		select {
 		case msg := <-c:
@@ -30,7 +30,7 @@ func viewEvents(t *testing.T, c chan []byte) []viewEvent {
 			if !ok || name != "view" {
 				continue
 			}
-			var ev viewEvent
+			var ev ViewEvent
 			if err := json.Unmarshal([]byte(strings.TrimSpace(data)), &ev); err != nil {
 				t.Fatal(err)
 			}
@@ -51,10 +51,10 @@ func fromWindow(id string) func(*http.Request) {
 // every stream and to the writer; a write that wrote nothing doesn't.
 func TestViewGenTagWrites(t *testing.T) {
 	f := newTagFixture(t)
-	c := f.s.Hub.subscribe()
+	c := f.s.Hub.Subscribe()
 	defer f.s.Hub.unsubscribe(c)
 	thread := strings.TrimPrefix(strings.TrimSpace(string(f.env.Account(t, "personal").Notmuch(t, "search", "--output=threads", "--", "id:"+kitchen1))), "thread:")
-	want := []threadRef{{"personal", thread}}
+	want := []ThreadRef{{"personal", thread}}
 
 	w := post(f.s, form("account", "personal", "ids", esc(kitchen1, kitchen2), "action", "archive"), fromWindow(window))
 	var resp tagResponse
@@ -142,14 +142,14 @@ func TestViewGenSend(t *testing.T) {
 	fx.sync.mu.Lock()
 	fx.sync.sendErr = nil
 	fx.sync.mu.Unlock()
-	c := fx.s.Hub.subscribe()
+	c := fx.s.Hub.Subscribe()
 	defer fx.s.Hub.unsubscribe(c)
 	if w := postSend(fx.s, v); w.Code != http.StatusSeeOther {
 		t.Fatalf("send: %d", w.Code)
 	}
 	thread := strings.TrimPrefix(strings.TrimSpace(string(fx.env.Account(t, "personal").Notmuch(t, "search", "--output=threads", "--", "id:"+cabin3))), "thread:")
 	evs := viewEvents(t, c)
-	if len(evs) != 1 || evs[0].Gen != 1 || !slices.Equal(evs[0].Threads, []threadRef{{"personal", thread}}) {
+	if len(evs) != 1 || evs[0].Gen != 1 || !slices.Equal(evs[0].Threads, []ThreadRef{{"personal", thread}}) {
 		t.Fatalf("events %+v", evs)
 	}
 }

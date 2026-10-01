@@ -386,3 +386,22 @@ func TestClientMode(t *testing.T) {
 		t.Fatalf("peers-reload on a client: %v", err)
 	}
 }
+
+// reset-window takes no arguments and arms the handler; without one it's
+// refused, never acked.
+func TestResetWindow(t *testing.T) {
+	var armed atomic.Int32
+	_, path := startServer(t, Handler{ResetWindow: func() { armed.Add(1) }})
+	if r, err := Send(path, ResetWindow, time.Second); err != nil || r != "ok" || armed.Load() != 1 {
+		t.Fatalf("reset-window: %q %v, %d", r, err, armed.Load())
+	}
+	for _, cmd := range []Command{"reset-window now", "reset-window ", "RESET-WINDOW"} {
+		if _, err := Send(path, cmd, time.Second); err == nil || armed.Load() != 1 {
+			t.Errorf("%q: %v", cmd, err)
+		}
+	}
+	_, none := startServer(t, Handler{})
+	if _, err := Send(none, ResetWindow, time.Second); err == nil || !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("without a handler: %v", err)
+	}
+}
