@@ -35,6 +35,45 @@ type Config struct {
 	// archive or is a window onto one, never both. `pneu client pair`
 	// writes it; the credentials live in the state dir, not here.
 	Server *Server `json:"server,omitempty"`
+	// Source is where `pneu update` takes code from (docs/client.md,
+	// "pneu update"; R15): this machine's own checkout, and the remote and
+	// branch recorded at install (`pneu source set`). Either kind of
+	// machine; absent, pneu update refuses and says how to record it.
+	Source *Source `json:"source,omitempty"`
+}
+
+// Source is the checkout pneu is built from. URL is the remote's URL when
+// it was recorded: pneu update refuses a remote that has since been
+// pointed elsewhere.
+type Source struct {
+	Dir    string `json:"dir"`
+	Remote string `json:"remote"`
+	URL    string `json:"url"`
+	Branch string `json:"branch"`
+}
+
+// remoteRE and branchRE are the names Source accepts: plain git names, no
+// leading '-' (never an option), no "..", no "@{", nothing a refspec would
+// read as more than a name.
+var (
+	remoteRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	branchRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$`)
+)
+
+// ValidSource reports what's wrong with s, or nil.
+func ValidSource(s Source) error {
+	switch {
+	case s.Dir == "" || !filepath.IsAbs(s.Dir) || filepath.Clean(s.Dir) != s.Dir:
+		return fmt.Errorf("source: dir %q isn't a clean absolute path", s.Dir)
+	case !remoteRE.MatchString(s.Remote) || strings.Contains(s.Remote, ".."):
+		return fmt.Errorf("source: bad remote %q", s.Remote)
+	case !branchRE.MatchString(s.Branch) || strings.Contains(s.Branch, "..") || strings.Contains(s.Branch, "//") ||
+		strings.HasSuffix(s.Branch, "/") || strings.HasSuffix(s.Branch, ".lock") || strings.HasSuffix(s.Branch, "."):
+		return fmt.Errorf("source: bad branch %q", s.Branch)
+	case s.URL == "" || len(s.URL) > 1024 || !utf8.ValidString(s.URL) || strings.IndexFunc(s.URL, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) }) >= 0:
+		return fmt.Errorf("source: bad url %q", s.URL)
+	}
+	return nil
 }
 
 // Server is a client's link to its server.
@@ -159,6 +198,11 @@ func ValidName(name string) bool { return nameRE.MatchString(name) }
 func (c Config) normalize() (Config, error) {
 	if c.Port == 0 {
 		c.Port = DefaultPort
+	}
+	if c.Source != nil {
+		if err := ValidSource(*c.Source); err != nil {
+			return Config{}, fmt.Errorf("config: %w", err)
+		}
 	}
 	if c.Server != nil {
 		switch {

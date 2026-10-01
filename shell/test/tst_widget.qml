@@ -41,4 +41,27 @@ TestCase {
     w.apply("", true)
     verify(w.tooltip.indexOf("no status yet") >= 0)
   }
+  // The version nudge: the update items by server.update, each running its
+  // fixed argv.
+  function test_update() {
+    w.bar = fakeBar
+    var now = new Date().toISOString()
+    var doc = function (state) {
+      return JSON.stringify({version: 2, updated: now, running: true, unread: 0, senders: [], accounts: [],
+        server: {name: "dell", link: "up", linkSince: now, statusAt: now, reason: null,
+          update: {state: state, client: "$(id)", server: "<b>x</b>"}}})
+    }
+    w.apply(doc("server-older"), false)
+    compare(w.menuItems.map(function (i) { return i.id }).join(","), "open,updateServer,reset")
+    compare(w.menuItems[1].label, "Update dell")
+    w.act("updateServer")
+    compare(JSON.stringify(Util.calls[Util.calls.length - 1]), '["pneu","agent","-update"]')
+    w.apply(doc("client-older"), false)
+    compare(w.menuItems.map(function (i) { return i.id }).join(","), "open,update,reset")
+    w.act("update")
+    compare(JSON.stringify(Util.calls[Util.calls.length - 1]), '["omarchy-launch-floating-terminal-with-presentation","pneu","update"]')
+    verify(w.tooltip.indexOf("right-click: Update pneu") >= 0, w.tooltip)
+    w.apply(doc("__proto__"), false)
+    compare(w.menuItems.map(function (i) { return i.id }).join(","), "open,reset")
+  }
 }

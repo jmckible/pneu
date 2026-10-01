@@ -90,8 +90,9 @@ boundary: it doesn't prove a click happened in QML, and it doesn't need to.
   server. Answered only after that generation is live (R8).
 - `situation`, from `pneu agent` (the bar menu's Fix with agent): the
   daemon's view in local codes, from which the CLI picks the prompt (R1;
-  as built: step 6). `reset-window`, from `pneu reset-window`. `update`
-  is step 7's.
+  as built: step 6). `reset-window`, from `pneu reset-window`.
+  `update-checked`, from `pneu update`: reread the skew cache (as built:
+  step 7).
 
 ## The link
 
@@ -488,8 +489,8 @@ browser. They show up only when relevant (R1):
   agent`, which asks the daemon over the control socket.
 - **Update pneu**, when `update` is set. Runs `pneu update` in a floating
   terminal.
-- **Update dell**, when dell is the older side. Runs `pneu client agent
-  update-server`.
+- **Update dell**, when dell is the older side. Runs `pneu agent
+  -update`, which picks `update-server` (as built: step 7).
 - **Reset window data** (R4, below).
 
 The agent prompt is a fixed template per situation. Its only
@@ -1640,6 +1641,270 @@ four findings, fixed:
   pairing's `peer remove`, the pending pairing's `peer list`, the error
   page's commands, and the agent prompt's. They're printed for the user,
   never run.
+
+## As built: step 7
+
+Versions, the update nudge and `pneu update` (R15, R16, N13).
+
+- **Build identity** is `control.Self()` (`vcs.revision`, `vcs.modified`)
+  everywhere: the daemon's `status`, hello, the page's link view, the
+  agent prompt and the new `pneu version` (`pneu <revision>`, `pneu
+  unknown` without a stamp, ` modified` after a dirty build).
+  `debug/buildinfo` reads the live binary's build from the file without
+  running anything, since a binary from before this step has no
+  `version` (U2). `web.Protocol` stays 1: the link
+  contract didn't change (hello already carried `revision` and
+  `modified`).
+- **Skew, decided where git is** (`internal/update`, `skew.go`). Same
+  revision and neither modified is the same build: no nudge. Anything else
+  is `different`, unless the skew cache says which is older for exactly
+  that pair of clean, 40-hex revisions: `client-older` or `server-older`.
+  **The daemon never runs git.** `pneu update --check` (and `pneu update`)
+  fetch the recorded remote, run `git merge-base --is-ancestor` both ways
+  in the recorded checkout (`cat-file -e` first: a revision the checkout
+  doesn't have is `unknown`), and write `$XDG_STATE_HOME/pneu/skew.json`
+  (the last 8 pairs, 0600, O_NOFOLLOW, ours, strict fields; anything else
+  is no cache); then `update-checked` over the control socket makes the
+  daemon reread it. Why not the daemon on a timer or on each hello: that
+  would put a `git fetch` (network, credentials, a repo that may be
+  mid-edit) inside a daemon that otherwise touches nothing but the link,
+  on a schedule nobody asked for; the answer is a fact about two commits,
+  so it can wait for the user's own check, and until then the nudge says
+  "different" and claims nothing. A pair keyed by revision can't go stale:
+  a new build on either side is a new pair. `vcs.time` and commit dates
+  are never read (a test makes the dates lie).
+- **Where it shows.** `status.json` v2 `server.update`: null, or `{state,
+  client, server}`, the state a local enum and each revision 40 hex or
+  `unknown` (`update.View`). The page's link view (hello, SSE `link`,
+  `/client/link`) carries the same `update`; `update-checked` broadcasts a
+  fresh `link`. The agent's `situation` gains `update` (parsed by token,
+  one of `control.UpdateCodes`, client only). The nudge comes from the
+  last hello, so it stays while the link is down; before any hello there's
+  none. A `protocol` mismatch keeps its own error state: its hello is
+  refused before the revision is read.
+- **The bar menu** (`shell/status.js` `ITEMS`): **Update pneu** for
+  `client-older` or `different`, running
+  `omarchy-launch-floating-terminal-with-presentation pneu update` (that
+  launcher joins its arguments into a `bash -c` line, so they're fixed
+  words; `pneu update` asks y/N in that terminal). **Update <server>** for
+  `server-older`, running `pneu agent -update`, which picks `update-server`
+  whatever else is wrong (plain `pneu agent` puts the link and failing
+  accounts first, and only then the version). Its label is the one with a
+  name in it: `Update ` and the file's cleaned `server.name`, drawn as
+  plain text; its command is the fixed argv. Neither makes a warning. The
+  tooltip adds a line saying which. The page's status line appends a
+  muted `Update available` (`link.js` `nudge`; the line widens for it),
+  and the details name the bar-menu item; a server shows none of it.
+- **Callouts.** `update-client` and `update-server` are fixed templates;
+  the only new interpolation is which side is older, as one of three fixed
+  phrases chosen by the local enum. Update-server tells the agent to run
+  `ssh -t <target> '~/.local/bin/pneu update'` (the server updates from its
+  own checkout), never to copy anything across. `protocol`'s prompt now
+  points at `pneu update` too.
+- **`pneu source set`** writes `source: {dir, remote, url, branch}` into
+  `config.json` (either mode; validated on load): the checkout's top
+  level, the current branch's upstream remote, that remote's URL, and the
+  branch, which must be the current local branch's name. No upstream and
+  exactly one remote: that remote, said on stderr. INSTALL.md step 2 runs
+  it. `pneu update` refuses without it, and refuses a remote whose URL now
+  differs from the recorded one.
+- **`pneu update`**, in order: the exclusive non-blocking flock on
+  `$XDG_RUNTIME_DIR/pneu/update.lock` (stable file, 0600, ours, in the
+  0700 control dir); an `update.json` left behind is dealt with first, and
+  the run stops there. Then: remote URL, clean tree (`status --porcelain`,
+  untracked files count), HEAD on the branch; `git fetch --no-tags <remote>
+  +refs/heads/<b>:refs/remotes/<remote>/<b>` and one `rev-parse` of that
+  ref as the target; HEAD must be its ancestor. Up to date means the
+  checkout at the target **and** the live binary built from it, clean;
+  otherwise (a checkout pulled by hand but never built) it rebuilds. It
+  shows `git log --format='%h %s'` (40 at most, control characters
+  dropped) and asks; with stdin not a terminal it refuses unless `--yes`.
+  The build is a `git worktree add --detach` of the target in a temp dir,
+  `go build -o ~/.local/bin/.pneu.new ./cmd/pneu` there, and `.pneu.new
+  version` must print exactly `pneu <target>`; the worktree is removed
+  and pruned whatever happens. A failed build or smoke check removes
+  `.pneu.new` and changes nothing else. All exec, no shell; git runs with
+  `GIT_DIR`, `GIT_WORK_TREE` and the like stripped from its environment.
+- **The record and its phases.** `update.json` (0600, strict) holds the
+  old HEAD, the live binary's build and SHA-256, the target and the new
+  binary's SHA-256. `built` is written after the smoke check, before the
+  recheck (clean, HEAD unmoved: an editor doesn't take the lock);
+  `deploying` before the first live change, then: copy the live binary to
+  `pneu.prev` (temp + rename), rename `.pneu.new` over `pneu`, `git merge
+  --ff-only <target>`, `systemctl --user restart pneu.service`;
+  `rolling-back` once a rollback starts. (U3, U4: the staged build is
+  `.pneu.new.<tx>`, named by the record's transaction id and re-hashed
+  just before the rename.) On success the record goes and
+  `pneu.prev` stays. The next run, finding one: `built` cleans up (nothing
+  live was touched); `deploying` with the old binary and old HEAD cleans
+  up; with the new binary, finishes (fast-forwards a clean checkout still
+  at the old HEAD, restarts, verifies) or rolls back if the checkout moved
+  or the build doesn't come up; anything else rolls back;
+  `rolling-back` finishes the rollback. Each step is idempotent and judged
+  by file hashes and HEAD, not by trusting the phase alone.
+- **Readiness** (20s, polled): the control socket's `status`, parsed by
+  token (`control.AskStatus`), must name the wanted revision and modified
+  flag with an instance other than the one before the restart, and a
+  `HEAD /` to `127.0.0.1:<port>` with pneu's Host must get Auth's 403 with
+  a `Pneu-Policy` header (U5, below, ties both to the same process). Not `/client/link` or `/status` as planned: both
+  sit behind the session cookie, and pneu update has no business reading
+  the install token; every answer pneu's middleware writes names its
+  class, so the cookieless 403 is pneu's and nobody else's.
+- **Rollback** restores the binary only from a file whose SHA-256 is the
+  recorded old one (else it stops, keeps the record and says so), resets
+  the checkout with `git reset --keep <old>` only if it's clean and exactly
+  at the target (else it leaves it and prints the command), restarts, and
+  verifies the old build the same way. The last line says where the
+  binary, the checkout and the service ended. Then the reminder:
+  `omarchy-restart-shell` for the widget, which `pneu update` doesn't run.
+- **Tests** run real git on temp repos (a bare origin, a checkout, a work
+  clone that pushes), a fake `go` whose build writes a stub `pneu` that
+  prints the revision it was built from (and whose `version -m` reads it
+  back), a fake `systemctl` that logs, and a real control socket whose
+  `status` plays a daemon that starts the live binary's build at each
+  restart (or never does, for a broken one). Interruptions are a test hook
+  that stops the run at a named point, then a second run recovers.
+
+## As built: step 7, review fixes (U1–U7)
+
+Codex found no path letting the server choose the installed revision, and
+seven ways the transaction could be wrong about itself; all fixed and
+mutation-checked:
+
+- **U1: no lazy fetch.** In a partial clone, `cat-file`/`merge-base` on a
+  revision the server named would fetch it from the promisor remote:
+  object fetching chosen by the server, outside the recorded fetch. Every
+  git call that only reads runs with `--no-lazy-fetch` **and**
+  `GIT_NO_LAZY_FETCH=1` (git 2.44+; checked on 2.55, either alone
+  suffices, an inherited `GIT_NO_LAZY_FETCH=0` is dropped); a missing
+  commit is `unknown`. The test is a real `--filter=blob:none` clone over
+  `file://` whose `remote.origin.uploadpack` is a logger: it never runs,
+  and plain git does run it for the same query. Steps that change the
+  checkout or its worktrees (fetch, `worktree add/remove/prune`, merge,
+  reset) run with `-c core.hooksPath=/dev/null`, so no repo-pointed hook
+  runs on them either.
+- **U2: nothing but git before the yes.** The live binary's build comes
+  from `debug/buildinfo.ReadFile`, not `go version -m` (which could fetch
+  and run a toolchain). Before confirmation only git plumbing runs, on the
+  recorded checkout; a test logs every `go` run and finds none. After the
+  yes, `go build` may fetch the toolchain the target's `go.mod` asks for,
+  as any build of it would.
+- **U3: children hold the lock.** Every child (git, go, the smoke check,
+  systemctl) inherits `update.lock` as fd 3, so the flock lives as long as
+  anything the updater started; each also gets `Pdeathsig: SIGKILL`, best
+  effort only (Linux sends it when the *thread* that forked exits, Go
+  doesn't end its threads here, and it reaches only the direct child).
+  The staged build is per transaction (`.pneu.new.<tx>`, `tx` in the
+  record), re-hashed just before the rename (a mismatch rolls back), and
+  stale staged builds are swept only while holding the lock with no
+  record. The test runs the updater as a real subprocess, SIGKILLs it
+  mid-build, and shows a second `pneu update` gets `ErrLocked` while the
+  orphaned build runs, then succeeds (sweeping litter) once it's gone.
+- **U4: durability.** The staged build is fsynced before it's hashed and
+  recorded; every directory sync after a rename is checked (a failed one
+  rolls back, or stops a rollback with the record kept); `update.json` is
+  removed and its directory synced, both checked, and a failure is
+  reported as "couldn't be cleared durably", never as success.
+- **U5: readiness names the process.** The control socket's `status`
+  gains `listening`, set only once the loopback listeners are bound and
+  served (a client's daemon built), and every answer the policy writer
+  makes, in both modes, carries `Pneu-Instance`: the same random
+  per-process id (`control.Instance`; not a secret, it only tells process
+  starts apart, and no CORS is ever granted). Upstream values are
+  replaced like any security header. Ready means the socket's instance is
+  new, listening, at the wanted build, **and** the cookieless loopback 403
+  names that same instance, so an old process still holding the port
+  fails. A baseline instance query that answers out of shape refuses the
+  update before anything (only "nothing answers" means no baseline). A
+  real-HTTP test probes pneu's actual Auth middleware. **Builds from
+  before this** answer `status` without `listening` and send no
+  `Pneu-Instance`: such a reply is *legacy* (`Info.Legacy`), not
+  malformed, so the first update from one works (the new build is held to
+  the full check), and a rollback to one is verified by its new instance,
+  its build and pneu's cookieless 403 alone, which the report says (V1,
+  below, narrows when).
+- **U6: the checkout after the merge.** After `merge --ff-only`, HEAD
+  must be the recorded branch at the target; otherwise the run says the
+  binary is deployed and where the checkout really is, and exits non-zero,
+  never calling the checkout updated (the binary isn't rolled back for
+  it). Recovery and rollback check the branch as well as HEAD.
+- **U7: strict files.** `update.json` and `skew.json` are read by token
+  (`strictObject`): exact keys, each once, all required, no null, nothing
+  after. An ambiguous record is refused with a message, never recovered.
+
+## As built: step 7, review fixes (V1–V3)
+
+Codex confirmed U1–U4 and U7 closed; U5 and U6 had three gaps left:
+
+- **V1: legacy only for the old build, only when recorded.** The target
+  is always held to full readiness (new instance, wanted build,
+  `listening:true`, HTTP `Pneu-Instance` equal to the control instance);
+  a target answering without `listening` is a readiness failure and rolls
+  back. The legacy check is allowed only for the old build in a rollback,
+  and only when `update.json` says the baseline daemon answered legacy
+  (`oldLegacy`, written at the baseline, read again by recovery).
+- **V2: one baseline helper.** `baseline()` answers absent (nothing
+  listens), an instance (and whether it was legacy), or an error; nothing
+  collapses an unreadable answer to "no baseline". The update refuses
+  before anything; recovery refuses and keeps `update.json`; a rollback
+  still restores the binary and restarts, but reports "restart freshness
+  couldn't be verified" and exits non-zero.
+- **V3: the checkout is read at the report.** Branch and HEAD are read
+  again right before every final report (an update finished, a recovery
+  finished, a rollback, the clean-up shortcuts), never taken from a
+  snapshot made before the restart and readiness wait. A checkout not on
+  the recorded branch at the revision the report would claim is said as
+  it is ("NOT at …: the checkout is on X at Y") and the run exits non-zero;
+  concurrent work is never undone. A rollback that finds HEAD at the old
+  revision on another branch says so, and after `reset --keep` branch and
+  HEAD are checked again.
+- **Detached git maintenance.** Steps that change the checkout also run
+  with `gc.auto=0` and `maintenance.auto=false`: git 2.47+ starts
+  `maintenance run --auto` detached after a fetch, and that process would
+  inherit the update lock and hold it past the run (found as a flaky
+  ErrLocked in the tests).
+
+## As built: step 7, review fixes (W1–W3)
+
+- **W1: every exit validates the checkout.** Each exit that speaks of the
+  checkout reads it at that moment and requires the recorded branch at the
+  revision that exit expects, else it says where it is and exits non-zero:
+  "Already up to date" (read after the fetch), `--check` (branch included,
+  reported from a reading after the fetch; another branch or a HEAD that
+  isn't an ancestor is an error), and recovery's two clean-up shortcuts
+  (the old HEAD).
+- **W2: one reading.** The verdict and the words come from one captured
+  (branch, HEAD) reading; it reads twice, and a third time if the two
+  differ, and reports the last.
+- **W3: no lock in long-lived helpers.** The network `git fetch` doesn't
+  inherit the update lock: a credential helper it starts
+  (`credential-cache--daemon`) can live on indefinitely and would hold the
+  lock, locking every later update out. That's safe because an orphaned
+  fetch can only move the remote-tracking ref, and every run re-resolves
+  the target and rechecks ancestry under the lock. Read-only git calls
+  don't inherit it either (they run while this process holds it); the
+  local steps that change things (worktree add/remove/prune, merge, reset,
+  `go build`, the smoke check, systemctl) do, and run with
+  `core.fsmonitor=false` so no fsmonitor daemon starts with it. `go build`
+  starts no persistent process: module or toolchain downloads (after the
+  yes, per the target's `go.mod` and GOPROXY) are its own children and
+  end with it. A test's fake fetch leaves a daemon-like grandchild with
+  the inherited fds, and the next update still takes the lock.
+
+**Residuals, accepted.** Git configuration that executes things stays
+trusted local configuration: `core.fsmonitor`, credential and transport
+helpers, `core.sshCommand`, configured clean/smudge filters; they are the
+user's own setup, as for any git command they run. A target's
+`.gitattributes` can activate a *configured* filter at the worktree
+checkout, which happens only after the user's yes. `Pdeathsig` is
+thread-scoped: Linux sends it when the forking thread exits, not the
+process; that it could fire early or late under Go is a hypothesis, not
+reproduced, and the lock (fd 3 in every child) is the guarantee either
+way. Any other program a lock-holding step might start and leave
+running (a configured filter or hook that daemonizes, though hooks are
+off) would hold the update lock while it lives: an availability cost
+(`pneu update` says another update or a program it started is running),
+never a correctness one.
 
 ## Review status
 

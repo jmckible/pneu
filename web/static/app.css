@@ -126,6 +126,12 @@ body > header #sync:focus-visible { outline: 1px dashed var(--accent); }
 body > header #sync[data-state=checking] { color: var(--accent); }
 body > header #sync[data-state=stale], body > header #sync[data-state=error], body > header #sync[data-state=link], body > header #sync[data-state=worker] { color: var(--accent-hot); }
 body > header #sync .spin:not(:empty) { margin-right: 1ch; }
+/* The version nudge (client only): a muted tail after whatever the line
+   says, in its own colour whatever the state's. The line widens for it
+   rather than cutting the state short. */
+body > header #sync .nudge { color: var(--muted); }
+body > header #sync .nudge:not(:empty)::before { content: " · "; }
+body > header #sync.nudged { width: auto; min-width: 28ch; max-width: 48ch; }
 /* Read to a screen reader, never drawn: #sync-live announces changes of
    state, not the ticking age. */
 .sr-only {

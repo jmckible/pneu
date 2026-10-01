@@ -484,6 +484,8 @@ func TestParseSituation(t *testing.T) {
 		`{"mode":"client","link":"up","serverRevision":"` + rev + `"}`,
 		`{"mode":"client","link":"pin-mismatch"}`,
 		` {"mode":"client","link":"starting"} ` + "\n",
+		`{"mode":"client","link":"up","update":"server-older"}`,
+		`{"mode":"client","link":"refused","update":"different"}`,
 	} {
 		if _, err := ParseSituation([]byte(ok)); err != nil {
 			t.Errorf("%s: %v", ok, err)
@@ -502,9 +504,64 @@ func TestParseSituation(t *testing.T) {
 		`{"mode":"server","more":-1}`, `{"mode":"server","more":1001}`, `{"mode":"server","more":1.5}`,
 		`{"mode":"server","failing":` + nine + `}`,
 		`{"mode":"server","failing":["$(id)"]}`, `{"mode":"server","failing":"work"}`,
+		`{"mode":"client","link":"up","update":"newer"}`, `{"mode":"client","link":"up","update":"__proto__"}`,
+		`{"mode":"client","link":"up","update":"different","update":"server-older"}`,
+		`{"mode":"server","update":"server-older"}`,
 	} {
 		if _, err := ParseSituation([]byte(bad)); err == nil {
 			t.Errorf("accepted %s", bad)
 		}
+	}
+}
+
+// status answers the build and instance; AskStatus parses it by token.
+func TestAskStatus(t *testing.T) {
+	_, path := startServer(t, Handler{})
+	in, err := AskStatus(path)
+	if err != nil || in != Self() {
+		t.Fatalf("%+v %v", in, err)
+	}
+	rev := strings.Repeat("cd", 20)
+	_, other := startServer(t, Handler{Status: func() Info { return Info{Revision: rev, Modified: true, Instance: "0011223344556677", Listening: true} }})
+	if in, err := AskStatus(other); err != nil || in.Revision != rev || !in.Modified || in.Instance != "0011223344556677" || !in.Listening {
+		t.Fatalf("%+v %v", in, err)
+	}
+	for _, bad := range []string{
+		`{"revision":"","modified":false}`,
+		`{"revision":"x","modified":false,"instance":"0011223344556677","listening":true}`,
+		`{"revision":"","modified":false,"instance":"0011223344556677","listening":"yes"}`,
+		`{"revision":"","modified":false,"instance":"zz"}`, `{"revision":"","modified":false,"instance":"0011223344556677","listening":true,"x":1}`,
+		`{"revision":"","revision":"","modified":false,"instance":"0011223344556677","listening":true}`,
+		`{"revision":"","modified":false,"instance":"0011223344556677","listening":true} x`,
+	} {
+		if _, err := ParseInfo([]byte(bad)); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+	// A daemon from before listening: legacy, not refused.
+	if in, err := ParseInfo([]byte(`{"revision":"","modified":false,"instance":"0011223344556677"}`)); err != nil || !in.Legacy || in.Listening {
+		t.Errorf("legacy reply: %+v %v", in, err)
+	}
+	if in, err := ParseInfo([]byte(`{"revision":"","modified":false,"instance":"0011223344556677","listening":false}`)); err != nil || in.Legacy {
+		t.Errorf("current reply: %+v %v", in, err)
+	}
+	if _, err := AskStatus(filepath.Join(sockDir(t), "nothing")); !errors.Is(err, ErrNotRunning) {
+		t.Errorf("not running: %v", err)
+	}
+}
+
+// update-checked is a client's only, with a handler.
+func TestUpdateChecked(t *testing.T) {
+	n := 0
+	_, path := startServer(t, Handler{Client: true, UpdateChecked: func() { n++ }})
+	if _, err := Send(path, UpdateChecked, time.Second); err != nil || n != 1 {
+		t.Fatalf("%v %d", err, n)
+	}
+	_, srv := startServer(t, Handler{UpdateChecked: func() { n++ }})
+	if _, err := Send(srv, UpdateChecked, time.Second); err == nil || n != 1 {
+		t.Fatalf("a server took update-checked: %v", err)
+	}
+	if _, err := Send(path, UpdateChecked+" x", time.Second); err == nil {
+		t.Fatal("update-checked took an argument")
 	}
 }

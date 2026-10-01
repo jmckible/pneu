@@ -3,6 +3,8 @@ package web
 import (
 	"errors"
 	"net/http"
+
+	"github.com/jmckible/pneu/internal/control"
 )
 
 // Policy is a response's security class: the complete set of security
@@ -53,8 +55,15 @@ var securityHeaders = []string{
 	"X-Content-Type-Options", "Referrer-Policy", "X-Frame-Options",
 	"Cross-Origin-Resource-Policy", "Cross-Origin-Opener-Policy",
 	"Content-Security-Policy", "Content-Security-Policy-Report-Only", PolicyHeader,
-	"Clear-Site-Data",
+	"Clear-Site-Data", InstanceHeader,
 }
+
+// InstanceHeader carries this process's random instance id
+// (control.Instance) on every answer, so pneu update can tell that the
+// HTTP listener it reached is the process the control socket names, not
+// an old one still holding the port. It only tells process starts apart;
+// pages can read it, which tells them nothing (no CORS is ever granted).
+const InstanceHeader = "Pneu-Instance"
 
 // ClearSiteData is what a navigation gets once Reset window data is armed
 // (Auth.ArmClearSite): the origin's cache and storage, a service worker's
@@ -94,6 +103,7 @@ func (p Policy) Apply(h http.Header) error {
 		h.Set("Content-Security-Policy", staticSVGCSP)
 	}
 	h.Set(PolicyHeader, string(p))
+	h.Set(InstanceHeader, control.Instance())
 	return nil
 }
 

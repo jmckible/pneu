@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,6 +26,7 @@ import (
 	"github.com/jmckible/pneu/internal/link"
 	"github.com/jmckible/pneu/internal/peer"
 	"github.com/jmckible/pneu/internal/tailscale"
+	"github.com/jmckible/pneu/internal/update"
 	"github.com/jmckible/pneu/internal/web"
 )
 
@@ -384,6 +386,8 @@ func serveClient(cfg config.Config, listen string) error {
 		go func() { errc <- hs.Serve(ln) }()
 		log.Printf("pneu (client of %s) listening on %s", cfg.Server.SSH, ln.Addr())
 	}
+	// The daemon is built and its loopback bound: status says listening.
+	control.MarkListening()
 	var serveErr error
 	select {
 	case serveErr = <-errc:
@@ -445,7 +449,7 @@ func startClient(cfg config.Config, dir, sock string, sockErr error, api link.AP
 	if sockErr != nil {
 		return fail(fmt.Errorf("client mode needs its control socket (%v): pneu client unpair reaches the daemon through it", sockErr))
 	}
-	if c.ctl, err = control.Listen(sock, control.Handler{Launch: c.launch, Client: true, Unlink: c.unlink, ResetWindow: auth.ArmClearSite, Situation: c.situation}); err != nil {
+	if c.ctl, err = control.Listen(sock, control.Handler{Launch: c.launch, Client: true, Unlink: c.unlink, ResetWindow: auth.ArmClearSite, Situation: c.situation, UpdateChecked: c.updateChecked}); err != nil {
 		return fail(fmt.Errorf("client mode needs its control socket: %w", err))
 	}
 	creds, err := link.LoadCreds(dir)
@@ -456,7 +460,11 @@ func startClient(cfg config.Config, dir, sock string, sockErr error, api link.AP
 		return fail(fmt.Errorf("config.json names server node %s but the pin is for %s: pneu client unpair, then pair again", cfg.Server.Node, creds.Pin.Node))
 	}
 	lk := link.New(api, creds, cfg.Server.Port)
-	d := client.New(client.Config{Auth: auth, Link: lk, Server: cfg.Server.SSH, StatusPath: statusPath})
+	skewPath := ""
+	if statusPath != "" {
+		skewPath = filepath.Join(filepath.Dir(statusPath), update.CacheFile)
+	}
+	d := client.New(client.Config{Auth: auth, Link: lk, Server: cfg.Server.SSH, StatusPath: statusPath, SkewPath: skewPath})
 	lk.OnChange = func(link.State) { d.LinkChanged() }
 	c.mu.Lock()
 	unlinked := c.unlinked
@@ -482,6 +490,17 @@ func (c *clientRun) launch() {
 
 // situation is the control socket's: the daemon's view, or starting
 // before the link exists.
+// updateChecked is update-checked: the daemon rereads skew.json, if it
+// exists yet.
+func (c *clientRun) updateChecked() {
+	c.mu.Lock()
+	d := c.d
+	c.mu.Unlock()
+	if d != nil {
+		d.UpdateChecked()
+	}
+}
+
 func (c *clientRun) situation() control.Situation {
 	c.mu.Lock()
 	d := c.d

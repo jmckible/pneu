@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jmckible/pneu/internal/link"
+	"github.com/jmckible/pneu/internal/update"
 	"github.com/jmckible/pneu/internal/web"
 )
 
@@ -34,14 +35,14 @@ type StatusV2 struct {
 // user paired with; Link and Reason are local codes; StatusAt is when the
 // last valid status arrived here (null before one did), so the bar can
 // call the counts stale while Updated keeps ticking. Update is the
-// version nudge, null until step 7 builds it.
+// version nudge (LinkView's), null when the builds are the same.
 type StatusServer struct {
-	Name      string  `json:"name"`
-	Link      string  `json:"link"` // starting | up | down
-	LinkSince string  `json:"linkSince"`
-	StatusAt  *string `json:"statusAt"`
-	Reason    *string `json:"reason"`
-	Update    *string `json:"update"`
+	Name      string       `json:"name"`
+	Link      string       `json:"link"` // starting | up | down
+	LinkSince string       `json:"linkSince"`
+	StatusAt  *string      `json:"statusAt"`
+	Reason    *string      `json:"reason"`
+	Update    *update.View `json:"update"`
 }
 
 // wakeStatus asks for a rewrite; requests while one waits collapse.
@@ -105,6 +106,7 @@ func (d *Daemon) statusDoc(running bool) StatusV2 {
 		r := string(st.Reason)
 		doc.Server.Reason = &r
 	}
+	doc.Server.Update = d.updateLocked()
 	if s := d.live.status; s != nil {
 		doc.Unread, doc.Senders, doc.Accounts = s.Unread, s.Senders, s.Accounts
 		at := d.live.statusAt.UTC().Format(time.RFC3339)

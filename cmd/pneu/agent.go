@@ -77,17 +77,18 @@ func (e *actionEnv) notify(urgency, title, body string) {
 func agentCmd(args []string) error {
 	fs := flag.NewFlagSet("pneu agent", flag.ContinueOnError)
 	printOnly := fs.Bool("print", false, "print the prompt instead of starting the agent")
+	onlyUpdate := fs.Bool("update", false, "only the version situations (the bar menu's Update <server>)")
 	cfg, err := loadConfig(fs, args)
 	if err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return usageError{"usage: pneu agent [-print]"}
+		return usageError{"usage: pneu agent [-print] [-update]"}
 	}
-	return newActionEnv().agent(cfg, *printOnly)
+	return newActionEnv().agent(cfg, *printOnly, *onlyUpdate)
 }
 
-func (e *actionEnv) agent(cfg config.Config, printOnly bool) error {
+func (e *actionEnv) agent(cfg config.Config, printOnly, onlyUpdate bool) error {
 	f := callout.Facts{Client: cfg.Server != nil, Revision: control.Self().Revision}
 	if f.Client {
 		f.SSH = cfg.Server.SSH
@@ -106,13 +107,20 @@ func (e *actionEnv) agent(cfg config.Config, printOnly bool) error {
 		if sit.Mode != want {
 			return fmt.Errorf("the running pneu is a %s, but this config makes a %s: restart it (systemctl --user restart pneu)", sit.Mode, want)
 		}
-		f.Daemon, f.Link, f.ServerRevision, f.Failing, f.More = true, sit.Link, sit.ServerRevision, sit.Failing, sit.More
+		f.Daemon, f.Link, f.ServerRevision, f.Failing, f.More, f.Update = true, sit.Link, sit.ServerRevision, sit.Failing, sit.More, sit.Update
 	case !f.Client:
 		return fmt.Errorf("pneu isn't answering here (%v): systemctl --user status pneu", err)
 	case !errors.Is(err, control.ErrNotRunning):
 		fmt.Fprintf(e.stderr, "pneu agent: no usable answer from the daemon (%v); treating it as unreachable.\n", err)
 	}
 	code := callout.Choose(f)
+	if onlyUpdate {
+		code = callout.ChooseUpdate(f)
+		if code == callout.None {
+			fmt.Fprintln(e.stdout, "pneu agent: no update to make: this machine and the server run the same build, or the daemon can't say.")
+			return nil
+		}
+	}
 	if code == callout.None {
 		if f.Client {
 			fmt.Fprintln(e.stdout, "pneu agent: nothing for an agent to fix: the link is up and every account syncs.")

@@ -21,6 +21,14 @@ TestCase {
     compare(Status.argv("agent").join(" "), "pneu agent")
     compare(Status.clean("x y"), "xy")
   }
+  function test_update() {
+    var raw = JSON.stringify({version: 2, updated: "2026-09-30T11:59:00Z", running: true, unread: 0, senders: [], accounts: [],
+      server: {name: "dell", link: "up", linkSince: "2026-09-30T11:50:00Z", statusAt: "2026-09-30T11:59:00Z", reason: null,
+        update: {state: "different", client: "unknown", server: "unknown"}}})
+    var m = Status.model(Status.parse(raw), false, Date.parse("2026-09-30T12:00:00Z"))
+    compare(Status.menu(m, false).map(function (i) { return i.id }).join(","), "open,update,reset")
+    compare(Status.argv("update").join(" "), "omarchy-launch-floating-terminal-with-presentation pneu update")
+  }
   function test_v1() {
     var m = Status.model(Status.parse('{"version":1,"updated":"2026-09-30T11:59:00Z","running":true,"unread":0,"senders":[],"accounts":[]}'), false, Date.parse("2026-09-30T12:00:00Z"))
     compare(m.warning, false)

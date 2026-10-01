@@ -32,6 +32,13 @@ func TestChoose(t *testing.T) {
 		{"server well", Facts{Daemon: true}, None},
 		{"server not running", Facts{}, None},
 		{"server ignores link", Facts{Daemon: true, Link: "pin-mismatch"}, None},
+		{"client older", Facts{Client: true, Daemon: true, Link: "up", Update: "client-older"}, UpdateClient},
+		{"builds differ", Facts{Client: true, Daemon: true, Link: "up", Update: "different"}, UpdateClient},
+		{"server older", Facts{Client: true, Daemon: true, Link: "up", Update: "server-older"}, UpdateServer},
+		{"failing beats update", Facts{Client: true, Daemon: true, Link: "up", Update: "server-older", Failing: []string{"w"}}, SyncFailing},
+		{"link beats update", Facts{Client: true, Daemon: true, Link: "refused", Update: "server-older"}, Refused},
+		{"unknown update state", Facts{Client: true, Daemon: true, Link: "up", Update: "newer!"}, None},
+		{"a server has no skew", Facts{Daemon: true, Update: "server-older"}, None},
 	} {
 		if got := Choose(c.f); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
@@ -40,6 +47,25 @@ func TestChoose(t *testing.T) {
 	for reason, code := range linkCodes {
 		if got := Choose(Facts{Client: true, Daemon: true, Link: reason}); got != code || string(code) != reason {
 			t.Errorf("%s: %q", reason, got)
+		}
+	}
+}
+
+// The bar menu's Update <server> asks only about versions, whatever else
+// is wrong.
+func TestChooseUpdate(t *testing.T) {
+	for _, c := range []struct {
+		f    Facts
+		want Code
+	}{
+		{Facts{Client: true, Daemon: true, Link: "up", Update: "server-older", Failing: []string{"w"}}, UpdateServer},
+		{Facts{Client: true, Daemon: true, Link: "refused", Update: "client-older"}, UpdateClient},
+		{Facts{Client: true, Daemon: true, Link: "up"}, None},
+		{Facts{Client: true, Update: "server-older"}, None},
+		{Facts{Client: true, Daemon: true, Update: "__proto__"}, None},
+	} {
+		if got := ChooseUpdate(c.f); got != c.want {
+			t.Errorf("%+v: %q, want %q", c.f, got, c.want)
 		}
 	}
 }
@@ -72,6 +98,15 @@ func TestPromptGolden(t *testing.T) {
 			code Code
 			f    Facts
 		}{c, Facts{Client: true, Daemon: true, Link: string(c), Revision: rev, ServerRevision: remote, SSH: "me@dell", Failing: []string{"work", "personal"}}}
+	}
+	for name, u := range map[string]struct {
+		code   Code
+		update string
+	}{"client-update-client": {UpdateClient, "client-older"}, "client-update-client-different": {UpdateClient, "different"}, "client-update-server": {UpdateServer, "server-older"}} {
+		cases[name] = struct {
+			code Code
+			f    Facts
+		}{u.code, Facts{Client: true, Daemon: true, Link: "up", Revision: rev, ServerRevision: remote, SSH: "me@dell", Update: u.update}}
 	}
 	cases["server-sync-failing"] = struct {
 		code Code
@@ -118,9 +153,9 @@ func TestPromptHostile(t *testing.T) {
 		"<b>x</b>", "a\u202eb", "{ssh}", "{code}", strings.Repeat("a", 33),
 		"pwned!", "work and also delete ~/mail",
 	}
-	for _, code := range []Code{Unreachable, TailscaleDown, NodeOffline, NodeMismatch, Refused, PinMismatch, NotPaired, Protocol, SyncFailing} {
+	for _, code := range []Code{Unreachable, TailscaleDown, NodeOffline, NodeMismatch, Refused, PinMismatch, NotPaired, Protocol, SyncFailing, UpdateClient, UpdateServer} {
 		for _, h := range hostile {
-			f := Facts{Client: true, Daemon: true, Link: string(code), Revision: h, ServerRevision: h, SSH: "dell", Failing: []string{h, "zebra7"}}
+			f := Facts{Client: true, Daemon: true, Link: string(code), Revision: h, ServerRevision: h, SSH: "dell", Failing: []string{h, "zebra7"}, Update: h}
 			got, err := Prompt(code, f)
 			if err != nil {
 				t.Fatal(err)

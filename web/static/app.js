@@ -2154,6 +2154,7 @@
   var lineEl = document.getElementById('sync');
   var lineText = lineEl && lineEl.querySelector('.text');
   var lineSpin = lineEl && lineEl.querySelector('.spin');
+  var lineNudge = lineEl && lineEl.querySelector('.nudge');
   var lineLive = document.getElementById('sync-live');
   var syncEvery = (Number(lineEl && lineEl.dataset.every) || 120) * 1000;
   var busySince = {}; // account -> when it last said queued or running
@@ -2229,7 +2230,12 @@
     var st = lineState();
     lineEl.dataset.state = st.state;
     lineText.textContent = st.text;
-    lineEl.setAttribute('aria-label', (st.text || 'Sync') + ' · details');
+    // A client's version nudge, appended muted (link.js; none on a server).
+    var nudge = lk ? lk.nudge(linkInfo) : '';
+    if (lineNudge) lineNudge.textContent = st.text ? nudge : '';
+    if (lineNudge && !st.text) lineText.textContent = nudge;
+    lineEl.classList.toggle('nudged', !!nudge);
+    lineEl.setAttribute('aria-label', (st.text || nudge || 'Sync') + (nudge && st.text ? ' · ' + nudge : '') + ' · details');
     if (st.state === 'checking' && !spinTimer) {
       lineSpin.textContent = SPIN_FRAMES[spinFrame];
       spinTimer = setInterval(function () {

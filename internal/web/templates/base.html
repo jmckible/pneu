@@ -21,7 +21,7 @@
 <svg class="mark" role="img" aria-label="pneu" viewBox="0 0 15 15">{{template "mark"}}</svg>
 <nav>{{range .Nav}}<a href="{{.Href}}"{{if .Active}} class="active" aria-current="page"{{end}}><kbd>{{.Key}}</kbd>{{.Name}}</a>{{end}}</nav>
 <form class="search" action="/search" method="get"><input name="q" type="search" value="{{.Query}}" placeholder="Search mail" autocomplete="off"></form>
-<button id="sync" type="button" title="Sync details" aria-haspopup="dialog"{{if .SyncEvery}} data-every="{{.SyncEvery}}"{{end}}><span class="spin" aria-hidden="true"></span><span class="text"></span></button>
+<button id="sync" type="button" title="Sync details" aria-haspopup="dialog"{{if .SyncEvery}} data-every="{{.SyncEvery}}"{{end}}><span class="spin" aria-hidden="true"></span><span class="text"></span><span class="nudge"></span></button>
 <span id="sync-live" class="sr-only" role="status" aria-live="polite"></span>
 </header>
 <div id="accounts" {{.Accounts}} aria-live="polite"></div>

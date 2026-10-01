@@ -9,11 +9,13 @@ package client
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
 	"github.com/jmckible/pneu/internal/control"
 	"github.com/jmckible/pneu/internal/link"
+	"github.com/jmckible/pneu/internal/update"
 	"github.com/jmckible/pneu/internal/web"
 )
 
@@ -26,6 +28,10 @@ type LinkView struct {
 	Reason   *string   `json:"reason"` // the link.Reason while not up, else null
 	Server   string    `json:"server"`
 	Revision Revisions `json:"revision"`
+	// Update is the version nudge (internal/update.Skew): null when both
+	// builds are the same, or before any hello; local enums and validated
+	// revisions only.
+	Update *update.View `json:"update"`
 }
 
 // Revisions are both builds' vcs.revision, "" when unknown; the server's
@@ -61,6 +67,9 @@ type live struct {
 	accounts []web.AccountView
 	status   *web.StatusDoc
 	statusAt time.Time
+	// skew is what pneu update last found about which build is older
+	// (skew.json); nil when it hasn't, or the file is unusable.
+	skew *update.Cache
 }
 
 // subscribe registers a browser stream and encodes its hello, under the
@@ -91,11 +100,49 @@ func (d *Daemon) linkViewLocked() LinkView {
 		r := string(st.Reason)
 		v.Reason = &r
 	}
-	v.Revision.Client = control.Self().Revision
+	v.Revision.Client = d.self().Revision
 	if h := d.up.Hello(); h != nil {
 		v.Revision.Server = h.Revision
 	}
+	v.Update = d.updateLocked()
 	return v
+}
+
+// updateLocked is the nudge: this binary's build against the server's
+// from the last hello (nil before one), ancestry only from the skew
+// cache. The daemon never runs git itself.
+func (d *Daemon) updateLocked() *update.View {
+	h := d.up.Hello()
+	if h == nil {
+		return nil
+	}
+	in := d.self()
+	return update.Skew(update.Build{Revision: in.Revision, Modified: in.Modified}, update.Build{Revision: h.Revision, Modified: h.Modified}, d.live.skew)
+}
+
+// loadSkew reads skew.json; an unusable file is no answer (logged), so
+// the nudge says only "different".
+func (d *Daemon) loadSkew() *update.Cache {
+	if d.skewPath == "" {
+		return nil
+	}
+	c, err := update.LoadCache(d.skewPath)
+	if err != nil {
+		log.Printf("client: %v", err)
+		return nil
+	}
+	return c
+}
+
+// UpdateChecked is the control socket's update-checked: pneu update wrote
+// skew.json. Pages get the link again, and status.json is rewritten.
+func (d *Daemon) UpdateChecked() {
+	c := d.loadSkew()
+	d.mu.Lock()
+	d.live.skew = c
+	d.hub.Broadcast("link", d.linkViewLocked())
+	d.mu.Unlock()
+	d.wakeStatus()
 }
 
 func linkState(r link.Reason) string {
@@ -186,6 +233,9 @@ func (d *Daemon) Situation() control.Situation {
 	d.mu.Lock()
 	if s := d.live.status; s != nil {
 		sit.Failing = web.FailingAccounts(s.Accounts)
+	}
+	if u := d.updateLocked(); u != nil {
+		sit.Update = u.State
 	}
 	d.mu.Unlock()
 	return sit

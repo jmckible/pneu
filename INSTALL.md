@@ -195,9 +195,9 @@ the repo root.
    *Before step 1:* search the non-test Go files for clients and dialers:
    `grep -rnE 'http\.(Get|Post|Head|NewRequest\w*|Client|DefaultClient)\b|net\.Dial|tls\.Dial|DialContext' --include='*.go' cmd internal web | grep -v _test.go | grep -v internal/testmail`
    should find only these:
-   - `waitForServer` in `cmd/pneu/main.go` and `serverKnows` in
-     `cmd/pneu/account.go`: requests to `127.0.0.1`, checking that a local
-     pneu is up;
+   - `waitForServer` in `cmd/pneu/main.go`, `serverKnows` in
+     `cmd/pneu/account.go` and `ProbeHTTP` in `internal/update`: requests
+     to `127.0.0.1`, checking that a local pneu is up;
    - `internal/control`: the control socket, a unix socket in
      `$XDG_RUNTIME_DIR/pneu` (no network);
    - `internal/tailscale`: tailscaled's local API, over its fixed unix
@@ -212,8 +212,10 @@ the repo root.
 
    A wider search also finds `https://mail.google.com/…` in
    `internal/web/mail.go`: a link the app renders, never fetched.
-   Everything else that goes to the internet is lieer's: `internal/gmi`
-   runs `gmi` as a subprocess.
+   Everything else that goes to the internet is lieer's (`internal/gmi`
+   runs `gmi` as a subprocess) and, only when you run `pneu update`, a
+   `git fetch` of the remote recorded with `pneu source set`
+   (`internal/update`).
 
    *After step 1:* `go list -deps ./cmd/pneu | grep pneu` lists the packages
    compiled in; `internal/testmail` is test and rehearsal tooling and is not
@@ -371,7 +373,14 @@ Now run the audit's *after step 1* checks and report before building.
 
 ```sh
 go build -o ~/.local/bin/pneu ./cmd/pneu
+pneu source set                                      # records this checkout, its remote and branch for pneu update
 ```
+
+`pneu source set` writes `source` into `~/.config/pneu/config.json`: this
+checkout, the remote its branch tracks (with that remote's URL) and the
+branch. [`pneu update`](#updating) takes code only from there, and refuses
+without it. On a branch with no upstream it uses the checkout's one remote
+and says so; name others with `-remote` and `-branch`.
 
 Everything below copies files out of the repo rather than linking to them, so
 a later `git pull` changes nothing that runs until you reinstall on purpose.
@@ -649,6 +658,7 @@ instead):
   offers Reconnect.
 - **Another account:** steps 3–5 again, then restart the service.
 - **The checkout:** the bar widget runs from it, so keep it where it is.
+  `pneu update` updates from it ([Updating](#updating)).
 - **Uninstalling:** the last section of this document; you can run it
   with them the same way.
 
@@ -758,6 +768,42 @@ up, close with a card headed `── Done ──`:
 - **Unpairing:** `pneu client unpair` here, then the `pneu peer remove`
   it prints, on the server.
 - **The checkout:** the bar widget runs from it, so keep it where it is.
+  `pneu update` updates from it ([Updating](#updating)); the bar menu
+  offers it when this machine and the server run different builds.
+
+## Updating
+
+On either kind of machine, from a terminal (it asks before changing
+anything):
+
+```sh
+pneu update --check     # fetch and say what's new; on a client, also which build is older
+pneu update             # fast-forward, build, swap, restart, verify; rolls back on failure
+```
+
+`pneu update` fetches the remote and branch recorded at step 2 (never
+anything from the other machine), refuses a dirty checkout, another branch,
+a remote whose URL changed, or history that isn't a fast-forward, shows the
+incoming commits and asks. It builds the new binary beside the old one
+first; only then does it keep the old binary as `~/.local/bin/pneu.prev`,
+swap the new one in, fast-forward the checkout and restart the service. If
+the new pneu doesn't answer as the new build within 20 seconds, it puts
+the old binary, the checkout (when it's still clean) and the service back,
+and says where everything ended. An update that was interrupted (a crash,
+a closed terminal) is finished or rolled back by the next `pneu update`,
+from `~/.local/state/pneu/update.json`.
+
+- **The bar widget** runs from the checkout, so its changes show after a
+  shell restart: `omarchy-restart-shell`. `pneu update` doesn't restart
+  the shell.
+- **The bar menu** offers *Update pneu* when this machine's pneu is older
+  than its server's, or the two differ (it runs `pneu update` in a
+  floating terminal), and *Update <server>* when the server's is older (it
+  starts your agent with how to run `pneu update` on the server, over
+  SSH). Which is older is only ever decided by git ancestry in this
+  machine's checkout, after `pneu update --check` (or an update) fetched.
+- **An install from before `pneu source set`:** run it once in the
+  checkout pneu was built from.
 
 ## Uninstall
 

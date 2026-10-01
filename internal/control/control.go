@@ -30,6 +30,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -56,6 +57,10 @@ const (
 	// SituationCmd answers what an agent callout needs to know (Situation),
 	// in local codes: `pneu agent`, from the bar menu's Fix with agent.
 	SituationCmd Command = "situation"
+	// UpdateChecked tells a client's daemon that `pneu update` wrote the
+	// skew cache: reread it (docs/client.md, "What skews"). No arguments;
+	// the daemon reads only its own file.
+	UpdateChecked Command = "update-checked"
 )
 
 const (
@@ -85,7 +90,27 @@ type Info struct {
 	Revision string `json:"revision"` // vcs.revision, "" when built without VCS info
 	Modified bool   `json:"modified"` // vcs.modified: built from a dirty tree
 	Instance string `json:"instance"` // random per process start: a restart changes it
+	// Listening: the daemon's loopback HTTP listeners are bound and served
+	// (a client's daemon also built), so an HTTP answer carrying Instance
+	// is this process's (pneu update's readiness check, N13).
+	Listening bool `json:"listening"`
+	// Legacy: the reply had no listening field, a daemon from before
+	// pneu update's readiness check (its HTTP answers name no instance).
+	// Set by ParseInfo, never sent.
+	Legacy bool `json:"-"`
 }
+
+// listening is MarkListening's.
+var listening atomic.Bool
+
+// MarkListening says this process's loopback HTTP is up: from here on
+// Status answers listening:true.
+func MarkListening() { listening.Store(true) }
+
+// Instance is this process's random id, the one Status answers and every
+// HTTP answer carries in Pneu-Instance. Not a secret: it only tells one
+// process start from another.
+func Instance() string { return instance }
 
 var instance = func() string {
 	b := make([]byte, 8)
@@ -95,7 +120,7 @@ var instance = func() string {
 
 // Self is this process's Info.
 func Self() Info {
-	in := Info{Instance: instance}
+	in := Info{Instance: instance, Listening: listening.Load()}
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		for _, s := range bi.Settings {
 			switch s.Key {
@@ -125,6 +150,10 @@ type Situation struct {
 	// MaxFailing of them; More counts the rest.
 	Failing []string `json:"failing,omitempty"`
 	More    int      `json:"more,omitempty"`
+	// Update is a client's skew state (internal/update: client-older,
+	// server-older, different); "" when the builds are the same or no
+	// hello has said the server's.
+	Update string `json:"update,omitempty"`
 }
 
 // MaxFailing bounds Situation.Failing, so the reply fits one line:
@@ -152,6 +181,11 @@ type Handler struct {
 	ResetWindow func()
 	// Situation is the daemon's view for an agent callout; nil: refused.
 	Situation func() Situation
+	// UpdateChecked (client only) rereads the skew cache; nil: refused.
+	UpdateChecked func()
+	// Status answers Status; nil: Self(). A seam for tests that play a
+	// daemon of another build.
+	Status func() Info
 }
 
 // Server accepts commands on the socket until Close.
@@ -327,8 +361,29 @@ func (s *Server) answer(cmd Command) string {
 			return "error situation unavailable"
 		}
 		return situationReply(s.h.Situation())
+	case UpdateChecked:
+		if !s.h.Client || s.h.UpdateChecked == nil {
+			return "error not a client"
+		}
+		s.h.UpdateChecked()
+		return "ok"
 	case Status:
-		b, err := json.Marshal(Self())
+		in := Self()
+		if s.h.Status != nil {
+			in = s.h.Status()
+		}
+		var b []byte
+		var err error
+		if in.Legacy {
+			// Only a test's Status plays a daemon from before listening.
+			b, err = json.Marshal(struct {
+				Revision string `json:"revision"`
+				Modified bool   `json:"modified"`
+				Instance string `json:"instance"`
+			}{in.Revision, in.Modified, in.Instance})
+		} else {
+			b, err = json.Marshal(in)
+		}
 		if err != nil {
 			return "error " + err.Error()
 		}
@@ -366,6 +421,10 @@ func situationReply(sit Situation) string {
 // values; a test there keeps the two in step): the only values a client's
 // Situation.Link may take.
 var LinkCodes = []string{"starting", "up", "tailscale-down", "node-offline", "node-mismatch", "refused", "pin-mismatch", "not-paired", "protocol"}
+
+// UpdateCodes are the skew states (internal/update; a test there keeps
+// the two in step): the only values Situation.Update may take.
+var UpdateCodes = []string{"client-older", "server-older", "different"}
 
 // MaxMore bounds Situation.More: a config holds far fewer accounts.
 const MaxMore = 1000
@@ -423,6 +482,8 @@ func ParseSituation(b []byte) (Situation, error) {
 			dst = &sit.Failing
 		case "more":
 			dst = &sit.More
+		case "update":
+			dst = &sit.Update
 		default:
 			return sit, fmt.Errorf("unknown field %q", key)
 		}
@@ -444,8 +505,11 @@ func ParseSituation(b []byte) (Situation, error) {
 		if sit.ServerRevision != "" && !revisionHex.MatchString(sit.ServerRevision) {
 			return sit, errors.New("serverRevision isn't 40 hex digits")
 		}
+		if sit.Update != "" && !slices.Contains(UpdateCodes, sit.Update) {
+			return sit, fmt.Errorf("unknown update state %q", sit.Update)
+		}
 	case ModeServer:
-		if sit.Link != "" || sit.ServerRevision != "" {
+		if sit.Link != "" || sit.ServerRevision != "" || sit.Update != "" {
 			return sit, errors.New("a server has no link")
 		}
 	default:
@@ -615,6 +679,84 @@ func peerUID(c *net.UnixConn) (int, error) {
 		return -1, cerr
 	}
 	return int(cred.Uid), nil
+}
+
+// AskStatus asks the daemon at path for its build and instance (Info),
+// parsed by token as strictly as a situation: the known keys once each,
+// revision, modified and instance required (listening absent: Legacy);
+// the revision empty or 40 hex, the instance 16 hex.
+func AskStatus(path string) (Info, error) {
+	reply, err := Send(path, Status, Timeout)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) {
+			return Info{}, fmt.Errorf("%w (%v)", ErrNotRunning, err)
+		}
+		return Info{}, err
+	}
+	in, err := ParseInfo([]byte(reply))
+	if err != nil {
+		return Info{}, fmt.Errorf("control: status: %w", err)
+	}
+	return in, nil
+}
+
+var instanceHex = regexp.MustCompile(`^[0-9a-f]{16}$`)
+
+// ParseInfo reads a status reply by token (see ParseSituation).
+func ParseInfo(b []byte) (Info, error) {
+	var in Info
+	dec := json.NewDecoder(bytes.NewReader(b))
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return in, errors.New("not a JSON object")
+	}
+	seen := map[string]bool{}
+	for dec.More() {
+		t, err := dec.Token()
+		if err != nil {
+			return in, err
+		}
+		key, _ := t.(string)
+		if seen[key] {
+			return in, fmt.Errorf("key %q twice", key)
+		}
+		seen[key] = true
+		var dst any
+		switch key {
+		case "revision":
+			dst = &in.Revision
+		case "modified":
+			dst = &in.Modified
+		case "instance":
+			dst = &in.Instance
+		case "listening":
+			dst = &in.Listening
+		default:
+			return in, fmt.Errorf("unknown field %q", key)
+		}
+		if err := dec.Decode(dst); err != nil {
+			return in, fmt.Errorf("%s: %w", key, err)
+		}
+	}
+	if t, err := dec.Token(); err != nil || t != json.Delim('}') {
+		return in, errors.New("unterminated object")
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return in, errors.New("trailing data after the object")
+	}
+	// listening is the one field an older daemon lacks: its reply is
+	// legacy, not malformed, so updating from it (or rolling back to it)
+	// works with what it can say.
+	if !seen["revision"] || !seen["modified"] || !seen["instance"] {
+		return in, errors.New("missing fields")
+	}
+	in.Legacy = !seen["listening"]
+	if in.Revision != "" && !revisionHex.MatchString(in.Revision) {
+		return in, errors.New("revision isn't 40 hex digits")
+	}
+	if !instanceHex.MatchString(in.Instance) {
+		return in, errors.New("instance isn't 16 hex digits")
+	}
+	return in, nil
 }
 
 // SendUnlink asks a client's daemon to forget its pairing, and returns

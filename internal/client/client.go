@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jmckible/pneu/internal/control"
 	"github.com/jmckible/pneu/internal/link"
 	"github.com/jmckible/pneu/internal/web"
 )
@@ -52,6 +53,9 @@ type Config struct {
 	ThemePath string
 	// StatusPath is this desk's status.json ("": none written).
 	StatusPath string
+	// SkewPath is pneu update's skew.json ("": no ancestry, so any
+	// difference is "different").
+	SkewPath string
 }
 
 // Limits (docs/client.md, "Limits and timeouts").
@@ -85,6 +89,9 @@ type Daemon struct {
 
 	statusPath string
 	statusWake chan struct{}
+	skewPath   string
+	// self is this binary's build (control.Self; tests play others).
+	self func() control.Info
 	// Timing and the stream's budget, changed by tests before Run.
 	silence, statusGap, themePoll time.Duration
 	streamMin, streamMax, healthy time.Duration
@@ -104,11 +111,14 @@ func New(cfg Config) *Daemon {
 		hub:        web.NewHub(),
 		statusPath: cfg.StatusPath,
 		statusWake: make(chan struct{}, 1),
+		skewPath:   cfg.SkewPath,
+		self:       control.Self,
 		silence:    Silence, statusGap: StatusGap, themePoll: web.ThemePoll,
 		streamMin: StreamMin, streamMax: StreamMax, healthy: Healthy, budget: DefaultBudget,
 		dropLog: logLimit{every: 10 * time.Second}, streamLog: logLimit{every: 10 * time.Second},
 	}
 	d.live.link = cfg.Link.State()
+	d.live.skew = d.loadSkew()
 	d.rp = &httputil.ReverseProxy{
 		Rewrite:        d.rewrite,
 		Transport:      &roundTripper{d},

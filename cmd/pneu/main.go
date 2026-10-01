@@ -9,6 +9,7 @@
 //	pneu client pair [-name <name>] <ssh-target> | unpair
 //	pneu agent [-print]
 //	pneu reset-window
+//	pneu update [--check] [--yes] | pneu source set [<checkout>] | pneu version
 package main
 
 import (
@@ -68,8 +69,14 @@ func main() {
 		err = agentCmd(args)
 	case "reset-window":
 		err = resetWindowCmd(args)
+	case "update":
+		err = updateCmd(args)
+	case "source":
+		err = sourceCmd(args)
+	case "version":
+		err = versionCmd(args)
 	default:
-		err = usageError{fmt.Sprintf("unknown command %q; usage: pneu [serve|open|gmi|account|peer|client|agent|reset-window] ...", cmd)}
+		err = usageError{fmt.Sprintf("unknown command %q; usage: pneu [serve|open|gmi|account|peer|client|agent|reset-window|update|source|version] ...", cmd)}
 	}
 	if err != nil {
 		log.Print("pneu: ", err)
@@ -248,6 +255,9 @@ func serve(args []string) error {
 		go func() { errc <- hs.Serve(ln) }()
 		log.Printf("pneu listening on %s", ln.Addr())
 	}
+	// Bound and served: the control socket's status says so (pneu update's
+	// readiness check; a connection now is queued until Serve takes it).
+	control.MarkListening()
 
 	var serveErr error
 	select {

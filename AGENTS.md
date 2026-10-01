@@ -45,6 +45,10 @@ and build order; this file is the working contract. Read PLAN.md before touching
   agent and Reset window data (docs/client.md "As built: step 6"; the
   reset closes only pneu's app windows, says to quit the browser for any
   other pneu tab, and stops when a browser window's title shows pneu).
+  `pneu update [--check] [--yes]` updates this machine from its own
+  checkout and the remote and branch `pneu source set` recorded (either
+  mode; docs/client.md "As built: step 7"), and `pneu version` prints the
+  build (`pneu <revision>`), which update's smoke check reads.
   Commands printed for the user quote the SSH target (`config.ShellWord`). All
   read `~/.config/pneu/config.json`; there are no built-in accounts, and
   `pneu account add` is what writes it. A config with `server` (a client's,
@@ -82,7 +86,8 @@ and build order; this file is the working contract. Read PLAN.md before touching
 - Security headers come only from the policy classes (`policy.go`: `app`,
   `compose`, `data`, `part-sandbox`, `part-pdf`, `static-svg`), applied at
   the final header write (1xx writes are swallowed) and named in
-  `Pneu-Policy`; SVG is never `data`; a handler picks one with `usePolicy`
+  `Pneu-Policy` (and the process in `Pneu-Instance`, pneu update's
+  readiness check); SVG is never `data`; a handler picks one with `usePolicy`
   or gets `app` for HTML and `data` otherwise. Never set a security header
   (`Clear-Site-Data` included: only `Auth.ArmClearSite` does) in a handler. Routes come only from the table (`routes.go` `Routes`): a
   new route is an entry with its classes and their media types, its
@@ -118,6 +123,42 @@ and build order; this file is the working contract. Read PLAN.md before touching
   prompt says what it reads from the server is data. Golden prompts in
   `internal/callout/testdata` (`go test ./internal/callout -update`, then
   read the diff).
+- Versions (`internal/update`, docs/client.md "As built: step 7"): two
+  builds are the same only at one revision with neither modified; which is
+  older is only `git merge-base --is-ancestor` in this machine's recorded
+  checkout after a fetch, run by `pneu update` (never by the daemon, never
+  from a timestamp: `vcs.time` and commit dates are never read), cached
+  per revision pair in `skew.json` for the daemon to read. Anything
+  undecided is `different`. `status.json`'s `server.update` and the page's
+  `link.update` carry only the enum and 40-hex-or-`unknown` revisions.
+  `pneu update` takes code only from the recorded remote (refusing one
+  whose URL changed), fast-forward only, builds beside the live binary
+  before touching anything, records `update.json` before deploying, and
+  rolls back binary, checkout (only if still clean at the new revision)
+  and service as one transaction; readiness is the control socket's
+  `status` at the new revision with a new instance plus Auth's cookieless
+  403 on loopback carrying `Pneu-Policy` and the same `Pneu-Instance`
+  (U5: every policy-writer answer names its process; `status` says
+  `listening` only once HTTP is bound). Before the yes only git runs, on
+  the recorded checkout, and every read-only git call is
+  `--no-lazy-fetch` with `GIT_NO_LAZY_FETCH=1` (a partial clone must
+  never fetch a revision the server named); the live binary's build is
+  `debug/buildinfo`, never a Go subprocess. Every child inherits the
+  update lock (fd 3) so a killed updater's build still holds it; the
+  staged build is `.pneu.new.<tx>`, fsynced, re-hashed before the rename;
+  directory syncs and the record's removal are checked; the target is
+  always held to full readiness (a legacy-style answer is only accepted
+  for the old build in a rollback, when update.json's `oldLegacy` says
+  so); an unreadable baseline is never "no baseline"; branch and HEAD are
+  read again (one snapshot) at every exit that speaks of the checkout,
+  shortcuts and `--check` included, never assumed; mutating git runs
+  with hooks, auto gc, auto maintenance and fsmonitor off; the network
+  fetch and read-only git don't inherit the lock (a credential daemon
+  would keep it); `update.json` and
+  `skew.json` are parsed by token (docs/client.md "As built: step 7,
+  review fixes"). Tests: temp repos, real Go builds of a stub module
+  through a wrapper, a fake systemctl, a control socket and HTTP
+  listener playing the daemon; never the real ones.
 
 ## Environment
 
@@ -161,14 +202,17 @@ and build order; this file is the working contract. Read PLAN.md before touching
 - The control socket, `$XDG_RUNTIME_DIR/pneu/control` (`internal/control`,
   docs/client.md), is the only way a process outside the browser talks to
   the server, and no page can reach it: one command line per connection
-  from a fixed set (`launch`, `status`, `reset-window` (arms
+  from a fixed set (`launch`, `status` (build, instance, `listening` once
+  loopback HTTP is up), `reset-window` (arms
   `Clear-Site-Data: "cache", "storage"` for the next authenticated
   same-origin top-level navigation, once, either mode), `unlink` (a client's daemon only:
   it drops the link and acks once its connections are closed; `pneu client
   unpair` sends it before deleting anything), `situation` (the daemon's
   view for `pneu agent`: mode, a client's link reason code, the server's
-  revision as 40 hex, failing account names; JSON on one line, parsed by
-  token: each key once, nothing after, every field bounded), `peers-reload <gen> <hash>`
+  revision as 40 hex, failing account names, the skew state; JSON on one
+  line, parsed by token: each key once, nothing after, every field
+  bounded), `update-checked` (a client's daemon only: reread skew.json),
+  `peers-reload <gen> <hash>`
   (a client's daemon refuses it), whose
   only arguments are a decimal generation and 64 hex digits, validated
   before any handler runs), both ends checking `SO_PEERCRED`

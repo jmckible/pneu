@@ -78,3 +78,20 @@ test('accountWord: a plain name, else <account>', () => {
 test('reasonText: an Object.prototype name is not a known reason', () => {
   for (const r of ['__proto__', 'constructor', 'toString']) assert.equal(L.reasonText(r, down), r);
 });
+
+test('the version nudge: muted tail on the line, a details row, nothing on a server', () => {
+  const nudged = (state) => ({ ...up, update: { state, client: rev, server: 'unknown' } });
+  assert.equal(L.nudge(nudged('client-older')), 'Update available');
+  assert.equal(L.nudge(nudged('server-older')), 'Update available');
+  assert.equal(L.nudge(nudged('different')), 'Update available');
+  assert.equal(L.nudge(up), '');
+  assert.equal(L.nudge({ ...up, update: null }), '');
+  assert.equal(L.nudge(null), '');
+  for (const bad of ['newer', '__proto__', 'toString', '', 3]) assert.equal(L.nudge(nudged(bad)), '', String(bad));
+  assert.equal(L.nudge({ ...up, update: 'client-older' }), '');
+  assert.deepEqual(L.details(nudged('server-older')).at(-1), ['update', 'dell runs an older pneu · Update dell (bar menu)']);
+  assert.deepEqual(L.details(nudged('client-older')).at(-1), ['update', 'this machine runs an older pneu · Update pneu (bar menu)']);
+  assert.equal(L.details(up).length, 3);
+  // Down keeps the nudge: the line shows the link first, the tail after.
+  assert.equal(L.nudge({ ...down, update: { state: 'different' } }), 'Update available');
+});

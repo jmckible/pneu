@@ -3,6 +3,7 @@ package client
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/jmckible/pneu/internal/control"
 	"net/http"
 	"os"
 	"strings"
@@ -76,6 +77,8 @@ func TestStatusFileV2(t *testing.T) {
 		// Valid events faster than a second's writes, within the stream's
 		// budget (TestStreamBudget floods past it).
 		d.budget.EventsBurst = 1000
+		// The server's build: no nudge (skew_test.go has the others).
+		d.self = func() control.Info { return control.Info{Revision: linktestRev} }
 		d.onStatusWrite = func() {
 			mu.Lock()
 			writes = append(writes, time.Now())

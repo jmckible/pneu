@@ -161,7 +161,7 @@ test('menu: Fix with agent for failing accounts in both versions; Reopen only af
 // command. Commands are the fixed argv, whatever the file says.
 test('nothing from the file reaches a command', () => {
   const evil = '"; rm -rf ~; echo "<b>$(id)</b>\u202e\n`reboot`';
-  const doc = v2({ name: evil, reason: evil, link: 'down' }, {
+  const doc = v2({ name: evil, reason: evil, link: 'down', update: { state: 'server-older', client: evil, server: evil } }, {
     senders: [evil, '<img src=x onerror=alert(1)>'],
     accounts: [{ name: evil, state: 'reauth', error: evil, failures: 9 }],
   });
@@ -177,11 +177,15 @@ test('nothing from the file reaches a command', () => {
     for (const item of S.menu(mm, pending)) {
       const argv = S.argv(item.id);
       assert.equal(JSON.stringify(argv), fixed[item.id]);
-      assert.equal(item.label, S.ITEMS[item.id].label);
+      // Update <server> is the one label with a name: the server's,
+      // cleaned (no newline, no bidi), drawn as plain text.
+      if (item.id === 'updateServer') assert.equal(item.label, 'Update ' + S.clean(evil, 64));
+      else assert.equal(item.label, S.ITEMS[item.id].label);
+      assert.ok(!/[\n\u202e]/.test(item.label));
       for (const s of strings) {
         if (s.length < 3) continue;
         assert.ok(!argv.some((a) => a.includes(s)), `${item.id}: ${s}`);
-        assert.ok(!item.label.includes(s));
+        if (item.id !== 'updateServer') assert.ok(!item.label.includes(s));
       }
     }
   }
@@ -198,6 +202,36 @@ test('nothing from the file reaches a command', () => {
   // The newline in the name is gone: it can't start a line of its own.
   assert.ok(tip.includes("Can't reach \"; rm -rf ~; echo \"<b>$(id)</b>`reboot` since"), tip);
   assert.ok(!tip.split('\n').some((l) => l.startsWith('`reboot`')));
+});
+
+// The version nudge (server.update): Update pneu when this machine is
+// behind or the builds just differ, Update <server> when the server is
+// behind; nothing for anything else, and nothing in version 1.
+test('menu: the update items by server.update', () => {
+  const up = (state, extra) => m(v2({ update: Object.assign({ state, client: 'a'.repeat(40), server: 'b'.repeat(40) }, extra) }));
+  assert.deepEqual(ids(up('client-older')), ['open', 'update', 'reset']);
+  assert.deepEqual(ids(up('different')), ['open', 'update', 'reset']);
+  assert.deepEqual(ids(up('server-older')), ['open', 'updateServer', 'reset']);
+  assert.equal(S.menu(up('server-older'), false)[1].label, 'Update dell');
+  for (const bad of ['newer', '__proto__', 'toString', 'constructor', 'client-older\n', '', 1, null]) {
+    assert.deepEqual(ids(up(bad)), ['open', 'reset'], String(bad));
+  }
+  for (const bad of [null, 'client-older', ['client-older'], { state: { toString: 1 } }]) {
+    assert.deepEqual(ids(m(v2({ update: bad }))), ['open', 'reset'], JSON.stringify(bad));
+  }
+  // An update never makes a warning, and a link down keeps Fix with agent first.
+  assert.equal(up('client-older').warning, false);
+  assert.deepEqual(ids(m(v2({ link: 'down', reason: 'refused', update: { state: 'server-older' } }))), ['open', 'agent', 'updateServer', 'reset']);
+  // Version 1 has no server block to nudge from.
+  assert.deepEqual(ids(m(Object.assign(v1(), { server: { update: { state: 'client-older' } } }))), ['open', 'reset']);
+  // The commands are the fixed ones: a floating terminal running pneu
+  // update, and the agent's version situation.
+  assert.deepEqual(S.argv('update'), ['omarchy-launch-floating-terminal-with-presentation', 'pneu', 'update']);
+  assert.deepEqual(S.argv('updateServer'), ['pneu', 'agent', '-update']);
+  // The tooltip says so; the revisions themselves never appear.
+  assert.match(S.tooltip(up('client-older'), fmt), /Update available: dell runs a newer pneu · right-click: Update pneu$/);
+  assert.match(S.tooltip(up('server-older'), fmt), /dell runs an older pneu · right-click: Update dell$/);
+  assert.ok(!S.tooltip(up('different'), fmt).includes('a'.repeat(40)));
 });
 
 test('word: a name in a suggested command, or <account>', () => {

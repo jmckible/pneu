@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"github.com/jmckible/pneu/internal/control"
 	"go/ast"
 	"go/parser"
 	gotoken "go/token"
@@ -43,6 +44,7 @@ func wantHeaders(p Policy, c CacheRule) map[string]string {
 		"Cross-Origin-Resource-Policy": "same-origin",
 		"Cross-Origin-Opener-Policy":   "same-origin",
 		"Pneu-Policy":                  string(p),
+		"Pneu-Instance":                control.Instance(),
 		"Cache-Control":                string(c),
 	}
 	switch p {

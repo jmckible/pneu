@@ -28,6 +28,9 @@ import "status.js" as Status
 // is an account downloading its mail for the first time: the count shows
 // its progress ("43%") instead, and the tooltip how far back it's complete.
 //
+// A client's server.update (the version nudge) adds Update pneu or Update
+// <server> to the menu; it's never a warning.
+//
 // Every string from the file is drawn as Text.PlainText (this file's Text
 // items, the shell's Buttons, the bar's tooltip), after status.js's clean().
 // None reaches a command: the menu runs only status.js's fixed argv, chosen

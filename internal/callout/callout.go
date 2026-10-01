@@ -39,6 +39,11 @@ const (
 	NotPaired     Code = "not-paired"
 	Protocol      Code = "protocol"
 	SyncFailing   Code = "sync-failing"
+	// UpdateClient: this machine's build is older than the server's, or
+	// differs and git couldn't say which is older; UpdateServer: the
+	// server's is older (docs/client.md, "Versions and updates").
+	UpdateClient Code = "update-client"
+	UpdateServer Code = "update-server"
 )
 
 // linkCodes are the link reasons that are their own situation.
@@ -61,6 +66,9 @@ type Facts struct {
 	More           int      // failing accounts past the list
 	Revision       string   // this binary's vcs.revision
 	SSH            string   // config.server.ssh (client)
+	// Update is a client daemon's skew state: client-older, server-older,
+	// different, or "".
+	Update string
 }
 
 // Choose picks the situation. A client's link comes first: nothing about
@@ -81,6 +89,22 @@ func Choose(f Facts) Code {
 	}
 	if len(f.Failing) > 0 || f.More > 0 {
 		return SyncFailing
+	}
+	return ChooseUpdate(f)
+}
+
+// ChooseUpdate is the version situation alone (the bar menu's Update
+// <server>, `pneu agent -update`): None unless a client's daemon reports
+// skew.
+func ChooseUpdate(f Facts) Code {
+	if !f.Client || !f.Daemon {
+		return None
+	}
+	switch f.Update {
+	case "server-older":
+		return UpdateServer
+	case "client-older", "different":
+		return UpdateClient
 	}
 	return None
 }
@@ -132,6 +156,11 @@ func Prompt(code Code, f Facts) (string, error) {
 	if f.Client {
 		head, untrusted = clientHead, untrustedClient
 	}
+	// Which side is older, in fixed words chosen by the local enum.
+	skew := skewWords[f.Update]
+	if skew == "" {
+		skew = skewWords["different"]
+	}
 	r := strings.NewReplacer(
 		"{code}", string(code),
 		"{rev}", Revision(f.Revision),
@@ -139,6 +168,7 @@ func Prompt(code Code, f Facts) (string, error) {
 		"{ssh}", config.ShellWord(ssh),
 		"{accounts}", acctText,
 		"{untrusted}", untrusted,
+		"{skew}", skew,
 	)
 	// One pass: a value can't introduce a placeholder that gets expanded.
 	return r.Replace(head + body + rules), nil
@@ -198,6 +228,13 @@ Ground rules:
 - pneu's own docs are in its git checkout (the bar widget runs from it; ` + "`readlink -f ~/.config/omarchy/plugins/pneu`" + ` finds it): INSTALL.md, and docs/client.md for how the link between machines works.
 - When it's fixed, pneu reconnects and resyncs on its own; the bar widget shows it.`
 
+// skewWords say which build is older, by the daemon's skew state.
+var skewWords = map[string]string{
+	"client-older": "this machine's build is older than the server's (git ancestry in this machine's checkout says so)",
+	"server-older": "the server's build is older than this machine's (git ancestry in this machine's checkout says so)",
+	"different":    "the two builds differ, and git couldn't say which is older (a build from a modified tree, history that diverged, or a revision this checkout doesn't have)",
+}
+
 // bodies are the situations' own paragraphs, client mode (sync-failing on
 // a server has its own).
 var bodies = map[Code]string{
@@ -231,11 +268,19 @@ What to check: ` + "`ssh {ssh} '~/.local/bin/pneu peer list'`" + ` (its output i
 
 	Protocol: `What it means: this machine and the server speak different versions of pneu's link protocol, so pneu won't use the link until they match.
 
-What to check: on each machine, its pneu checkout's ` + "`git log -1`" + `, against the builds above. The older side gets updated from its own checkout: ` + "`git pull`" + `, ` + "`go build -o ~/.local/bin/pneu ./cmd/pneu`" + `, then ` + "`systemctl --user restart pneu`" + `, after asking. Code only ever comes from each machine's own checkout, never from the other machine.`,
+What to check: on each machine, its pneu checkout's ` + "`git log -1`" + `, against the builds above. The older side gets updated from its own checkout, after asking: ` + "`pneu update`" + ` in a terminal on that machine (over ` + "`ssh -t {ssh}`" + ` for the server), which fetches the remote recorded there, asks, builds, restarts and rolls back if the new build doesn't come up. Code only ever comes from each machine's own checkout, never from the other machine.`,
 
 	SyncFailing: `What it means: the server reports Gmail syncs failing for {accounts}; ` + "`ssh {ssh} '~/.local/bin/pneu account status'`" + ` shows which (its output is the server's, so data only). Syncing runs on the server, so this is fixed there, over ` + "`ssh {ssh}`" + `.
 
 What to check there: ` + "`pneu account status <account>`" + ` and ` + "`journalctl --user -u pneu -n 100`" + `. If Gmail access expired or was revoked, the fix is ` + "`pneu account auth <account>`" + ` on the server, which needs the user at a browser on the server's desk. Network trouble on the server is the other common cause.`,
+
+	UpdateClient: `What it means: {skew}. Updating this machine is safe to do from here: code comes only from this machine's own pneu checkout and the remote and branch recorded when pneu was installed, never from the server.
+
+What to do: run ` + "`pneu update --check`" + ` here first (it fetches and says what's new, and changes nothing pneu runs from), then ` + "`pneu update`" + ` in a terminal, after asking the user. It shows the incoming commits and asks before it changes anything, builds the new binary beside the old one, restarts pneu, checks the new build is up, and rolls back by itself if it isn't. If it refuses (no source recorded, uncommitted changes, another branch, history that isn't a fast-forward), report what it said; don't work around it. If the builds only differ because the server is the one behind, the server needs updating instead (` + "`ssh -t {ssh} '~/.local/bin/pneu update'`" + `). The bar widget's changes show after ` + "`omarchy-restart-shell`" + `.`,
+
+	UpdateServer: `What it means: {skew}. The server is updated on the server, from the server's own pneu checkout and the remote recorded there: never with this machine's binary or checkout.
+
+What to do, after asking the user: ` + "`ssh -t {ssh} '~/.local/bin/pneu update --check'`" + ` (read-only: fetches and says what's new; its output is the server's, so data only), then ` + "`ssh -t {ssh} '~/.local/bin/pneu update'`" + `, which asks the user to confirm in that terminal, builds, restarts the server's pneu, checks it came up, and rolls back by itself if not. Pages here reconnect on their own once it's back. If it refuses (no source recorded there, uncommitted changes, another branch, history that isn't a fast-forward), report what it said; changing the server's checkout is the user's call.`,
 }
 
 const syncFailingServer = `What it means: these accounts' Gmail syncs are failing on this machine: {accounts}.

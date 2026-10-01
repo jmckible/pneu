@@ -102,7 +102,11 @@ them here if they're wrong.
   `--accent-hot` when idle and older than three sync periods; otherwise
   `Updated just now` / `Updated 3m ago`, muted. The age is the oldest
   account's last successful sync: the view is only as fresh as its
-  stalest account. Only ready accounts count; one in its first pull or
+  stalest account. On a client, whatever the line says gets a muted `·
+  Update available` after it while the version nudge stands (this
+  machine's build and the server's differ; docs/client.md "Versions and
+  updates"), and the details say which side is older and which bar-menu
+  item updates it. Only ready accounts count; one in its first pull or
   waiting on setup or reconnection is the `#accounts` strip's, and with
   no ready account synced yet the line is empty. A push (after a
   keystroke) never shows as checking. The age refreshes every 30s while
@@ -194,7 +198,13 @@ them here if they're wrong.
   click opens the menu: **Open pneu**; **Fix with agent** only when
   there's something to fix (an account failing; on a client also the link
   out, a protocol mismatch, its own daemon stopped or silent, the server
-  silent), which runs `pneu agent`; **Reopen pneu (reset done)** for 30
+  silent), which runs `pneu agent`; on a client **Update pneu** when
+  `server.update` says this machine is older or the builds just differ
+  (runs `pneu update` in Omarchy's floating terminal, which asks before
+  changing anything) or **Update <server>** when the server is older
+  (runs `pneu agent -update`, whose prompt says how to update it from the
+  server's own checkout), neither a warning, the tooltip saying which;
+  **Reopen pneu (reset done)** for 30
   minutes after a reset this widget started; **Reset window data…**,
   which first says what it does (closes pneu's app windows and deletes
   compose drafts saved in the browser; a pneu tab or popup needs the

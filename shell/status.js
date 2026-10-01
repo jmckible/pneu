@@ -48,16 +48,24 @@ var REASONS = {
   "protocol": "this machine and {s} run different versions"
 }
 
+// isUpdate: one of server.update.state's three values, compared.
+function isUpdate(v) {
+  return v === "client-older" || v === "server-older" || v === "different"
+}
+
 // The menu: every command is a fixed argv, run without a shell. Nothing
-// from status.json is ever put into one.
+// from status.json is ever put into one. Update pneu runs `pneu update` in
+// Omarchy's floating terminal (it asks before changing anything; the
+// launcher joins its arguments into a bash line, so they're fixed words);
+// Update <server> asks the agent, whose prompt says how to update the
+// server from its own checkout (docs/client.md "Versions and updates").
 var ITEMS = {
   open: { label: "Open pneu", argv: ["pneu", "open"] },
   agent: { label: "Fix with agent", argv: ["pneu", "agent"] },
+  update: { label: "Update pneu", argv: ["omarchy-launch-floating-terminal-with-presentation", "pneu", "update"] },
+  updateServer: { label: "Update the server", argv: ["pneu", "agent", "-update"] },
   reopen: { label: "Reopen pneu (reset done)", argv: ["pneu", "open"] },
   reset: { label: "Reset window data…", argv: ["pneu", "reset-window"] }
-  // Update pneu / Update <server>: step 7 (docs/client.md "Versions and
-  // updates") adds them here, shown when server.update is set, with fixed
-  // argv of their own.
 }
 
 // What Reset window data asks before it runs.
@@ -108,7 +116,8 @@ function model(doc, missing, now) {
     missing: !!missing, unreadable: doc === null, version: doc ? doc.version : 0,
     accounts: [], unread: 0, senders: [], updatedAt: NaN, stale: true, stopped: false,
     sick: [], pulling: [], pullPercent: -1,
-    server: null, link: "", connecting: false, linkDown: false, countsStale: false, statusAt: NaN, linkSince: NaN
+    server: null, link: "", connecting: false, linkDown: false, countsStale: false, statusAt: NaN, linkSince: NaN,
+    update: ""
   }
   if (!doc) { m.warning = true; return m }
   m.accounts = Array.isArray(doc.accounts) ? doc.accounts.filter(function (a) { return a && typeof a === "object" }) : []
@@ -142,6 +151,9 @@ function model(doc, missing, now) {
     m.connecting = m.link === "starting" && young
     m.linkDown = m.link === "down" || (m.link === "starting" && !young)
     m.countsStale = m.link !== "up" || !isFinite(m.statusAt) || now - m.statusAt > STALE_AFTER
+    // The version nudge: its state only, compared; anything else is none.
+    var u = s.update
+    if (u !== null && typeof u === "object" && !Array.isArray(u) && isUpdate(u.state)) m.update = u.state
   }
   // The counts can't be trusted: no file, this daemon stopped or silent,
   // an account failing, or (a client) the server out of reach or silent.
@@ -241,7 +253,18 @@ function tooltip(m, fmt) {
   for (var j = 0; j < m.pulling.length; j++) lines.push(pullLine(m.pulling[j], fmt))
   for (var i = 0; i < m.sick.length; i++) lines.push(accountLine(m.sick[i], m))
   if (m.version === 2 && menu(m, false).some(function (it) { return it.id === "agent" })) lines.push("Right-click: Fix with agent")
+  var nudge = updateLine(m)
+  if (nudge) lines.push(nudge)
   return lines.join("\n")
+}
+
+// updateLine is the version nudge's tooltip line, "" without one.
+function updateLine(m) {
+  if (m.version !== 2) return ""
+  if (m.update === "client-older") return "Update available: " + m.server + " runs a newer pneu · right-click: Update pneu"
+  if (m.update === "server-older") return m.server + " runs an older pneu · right-click: Update " + m.server
+  if (m.update === "different") return "This machine and " + m.server + " run different pneu builds · right-click: Update pneu"
+  return ""
 }
 
 // menu is the click menu's items, in order: [{id, label}]. Fix with
@@ -255,9 +278,15 @@ function menu(m, resetPending) {
   if (m.version === 2) agent = agent || m.linkDown || m.reason === "protocol" || m.stopped || m.stale ||
     (m.link === "up" && m.countsStale)
   if (agent) ids.push("agent")
+  if (m.version === 2 && (m.update === "client-older" || m.update === "different")) ids.push("update")
+  if (m.version === 2 && m.update === "server-older") ids.push("updateServer")
   if (resetPending) ids.push("reopen")
   ids.push("reset")
-  return ids.map(function (id) { return { id: id, label: ITEMS[id].label } })
+  return ids.map(function (id) {
+    // The one label with a name in it: the server's, cleaned, drawn as
+    // plain text. The command is still the item's fixed argv.
+    return { id: id, label: id === "updateServer" ? "Update " + m.server : ITEMS[id].label }
+  })
 }
 
 // argv is an item's command, a fresh copy of its fixed argv; null for an
@@ -271,6 +300,6 @@ if (typeof module === "object" && module && module.exports) {
   module.exports = {
     STALE_AFTER: STALE_AFTER, CONNECT_GRACE: CONNECT_GRACE, REOPEN_FOR: REOPEN_FOR, ITEMS: ITEMS, RESET_CONFIRM: RESET_CONFIRM,
     clean: clean, word: word, parse: parse, model: model, accountSick: accountSick, tooltip: tooltip, menu: menu, argv: argv,
-    pullLine: pullLine, accountLine: accountLine, unreadLine: unreadLine, linkLine: linkLine
+    pullLine: pullLine, accountLine: accountLine, unreadLine: unreadLine, linkLine: linkLine, updateLine: updateLine
   }
 }

@@ -64,6 +64,32 @@
     return typeof r === 'string' && /^[0-9a-f]{40}$/.test(r) ? r.slice(0, 12) : 'unknown';
   }
 
+  // update is the link's version nudge state (the daemon's local enum,
+  // compared), or '' for none.
+  function update(link) {
+    if (!valid(link) || !link.update || typeof link.update !== 'object') return '';
+    var st = link.update.state;
+    return st === 'client-older' || st === 'server-older' || st === 'different' ? st : '';
+  }
+
+  // nudge is the status line's muted tail while a version nudge stands:
+  // 'Update available', or '' (none, or a server).
+  function nudge(link) {
+    return update(link) ? 'Update available' : '';
+  }
+
+  // updateText words the nudge for the details, naming the bar-menu item
+  // that acts on it; null for none.
+  function updateText(link) {
+    var s = serverName(link);
+    switch (update(link)) {
+      case 'client-older': return 'this machine runs an older pneu · Update pneu (bar menu)';
+      case 'server-older': return s + ' runs an older pneu · Update ' + s + ' (bar menu)';
+      case 'different': return 'the builds differ · Update pneu (bar menu)';
+    }
+    return null;
+  }
+
   // details are the details panel's link rows, [label, text] each; none on
   // a server.
   function details(link) {
@@ -74,6 +100,8 @@
     var r = link.revision || {};
     rows.push(['this build', rev(r.client)]);
     rows.push([s + "'s build", rev(r.server)]);
+    var u = updateText(link);
+    if (u) rows.push(['update', u]);
     return rows;
   }
 
@@ -102,7 +130,7 @@
     return typeof name === 'string' && NAME_RE.test(name) ? name : '<account>';
   }
 
-  var api = { accountWord: accountWord, lineState: lineState, outcome: outcome, failText: failText, reachText: reachText, reasonText: reasonText, details: details, workerLine: workerLine };
+  var api = { nudge: nudge, updateText: updateText, accountWord: accountWord, lineState: lineState, outcome: outcome, failText: failText, reachText: reachText, reasonText: reasonText, details: details, workerLine: workerLine };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else (root.Pneu = root.Pneu || {}).link = api;
 })(this);
