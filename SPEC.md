@@ -33,8 +33,8 @@ them here if they're wrong.
   again). `Tab`/`Shift+Tab` switch panes, except inside a mail body, where
   Tab walks its links. `+` maximizes the active pane (the narrow layout)
   until `+` again or the window crosses `140ch`. The one time a thread
-  opens without being asked: archiving or trashing the open thread (`e`,
-  `t`, `#`, from either pane) moves the cursor to the next row and opens it,
+  opens without being asked: archiving, trashing or spamming the open
+  thread (`e`, `t`, `#`, `!`, from either pane) moves the cursor to the next row and opens it,
   keys staying put; an emptied list closes the pane.
   The URL is always the open thread's, or the list's when none is open, so
   a reload or narrow window shows the same thing; a thread URL loaded
@@ -340,12 +340,12 @@ uncached, the page shows the range first and the total follows.
 - **Reply** is an inline box under the last message: `r` opens it with the
   quote prefilled, `Ctrl+Enter` sends, `Esc` discards with confirmation if
   non-empty. Sending pulls, and the sent message appears in the thread.
-- **Spam** is `+spam -inbox` only. Gmail's classifier takes the signal; there
-  is no block. Use `Open in Gmail` for a filter. (Not built yet: the tag
-  endpoint has no spam action or undo inverse.)
-- **Trash from the Spam view** is refused client-side because lieer allows
-  only one of inbox/spam/trash; supporting it needs a trash variant that also
-  drops `spam`, with undo restoring it.
+- **Spam** is `+spam -inbox` only, undone by `-spam +inbox`. Gmail's
+  classifier takes the signal; there is no block (the API has none, and a
+  filter needs a scope lieer doesn't ask for). Use `Open in Gmail` to block.
+- **Trash from the Spam view, and spam from the Trash view,** are refused
+  client-side because lieer allows only one of inbox/spam/trash; supporting
+  them needs variants that also drop the other tag, with undo restoring it.
 
 ## Compose page
 

@@ -29,7 +29,7 @@
     return p.toString();
   }
 
-  // removeArgs is the POST /tag opts for archive or trash of a whole thread:
+  // removeArgs is the POST /tag opts for archive, trash or spam of a whole thread:
   // its ids, or, past the server's id cap, the thread id alone (the one case
   // tag.go resolves thread:X itself).
   function removeArgs(account, ids, thread) {
@@ -81,22 +81,28 @@
   }
 
   // removes says whether action takes a thread out of view: archive leaves
-  // only the inbox; trash is excluded from every other search (exclude_tags),
-  // and the trash view never gets there (skip).
+  // only the inbox; trash and spam are excluded from every other search
+  // (exclude_tags), and their own views never get there (skip).
   function removes(action, view) {
     if (action === 'trash') return view !== 'trash';
+    if (action === 'spam') return view !== 'spam';
     if (action === 'archive') return view === 'inbox';
     return false;
   }
 
   // skip is why action must not be sent from view ('' to send it): trash in
-  // trash changes nothing, and trash in spam would leave spam and trash both
-  // set, which lieer forbids (one of inbox/spam/trash). view is a list's
-  // data-view or a thread's data-in.
+  // trash or spam in spam changes nothing, and either in the other's view
+  // would leave spam and trash both set, which lieer forbids (one of
+  // inbox/spam/trash). view is a list's data-view or a thread's data-in.
   function skip(action, view) {
-    if (action !== 'trash') return '';
-    if (view === 'trash') return 'Already in trash';
-    if (view === 'spam') return 'Spam can\'t be trashed here; Gmail deletes it after 30 days';
+    if (action === 'trash') {
+      if (view === 'trash') return 'Already in trash';
+      if (view === 'spam') return 'Spam can\'t be trashed here; Gmail deletes it after 30 days';
+    }
+    if (action === 'spam') {
+      if (view === 'spam') return 'Already in spam';
+      if (view === 'trash') return 'Trash can\'t be marked spam here';
+    }
     return '';
   }
 
@@ -194,7 +200,7 @@
   }
 
   var LABELS = {
-    archive: 'Archived', trash: 'Moved to trash', star: 'Starred',
+    archive: 'Archived', trash: 'Moved to trash', spam: 'Marked as spam', star: 'Starred',
     unstar: 'Unstarred', unread: 'Marked unread', read: 'Marked read',
   };
 
@@ -211,7 +217,7 @@
   }
 
   var VERBS = {
-    archive: 'Archive', trash: 'Trash', star: 'Star', unstar: 'Unstar', unread: 'Mark unread', read: 'Mark read',
+    archive: 'Archive', trash: 'Trash', spam: 'Mark as spam', star: 'Star', unstar: 'Unstar', unread: 'Mark unread', read: 'Mark read',
   };
 
   function verb(action) { return VERBS[action] || action; }

@@ -44,6 +44,7 @@ type tagOp struct {
 var tagActions = map[string]struct{ do, undo []string }{
 	"archive": {[]string{"-inbox"}, []string{"+inbox"}},
 	"trash":   {[]string{"+trash", "-inbox"}, []string{"-trash", "+inbox"}}, // lieer: one of inbox/spam/trash
+	"spam":    {[]string{"+spam", "-inbox"}, []string{"-spam", "+inbox"}},   // Gmail's Report spam; no block
 	"read":    {[]string{"-unread"}, []string{"+unread"}},
 	"unread":  {[]string{"+unread"}, []string{"-unread"}},
 	"star":    {[]string{"+flagged"}, []string{"-flagged"}},
@@ -71,8 +72,8 @@ type tagError struct {
 
 // tag handles POST /tag. Every write names explicit message ids; the only
 // queries are the lookups star (newest of the given ids) and unstar (every
-// flagged message in the thread) need, and archive/trash of a thread too
-// long to send as ids (thread= with no ids).
+// flagged message in the thread) need, and archive/trash/spam of a thread
+// too long to send as ids (thread= with no ids).
 func (s *Server) tag(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxTagBody)
 	if err := r.ParseForm(); err != nil {
@@ -106,10 +107,10 @@ func (s *Server) tag(w http.ResponseWriter, r *http.Request) {
 	}
 	var ids []string
 	var threads []ThreadRef // known when resolved from thread:X
-	if strings.TrimSpace(f.Get("ids")) == "" && thread != "" && (action == "archive" || action == "trash") {
+	if strings.TrimSpace(f.Get("ids")) == "" && thread != "" && (action == "archive" || action == "trash" || action == "spam") {
 		// A thread past maxTagIDs can't be sent as ids; the page sends
 		// thread= alone and this is the one write that resolves thread:X.
-		// Archive and trash act on the whole thread anyway; the cost is that
+		// Archive, trash and spam act on the whole thread anyway; the cost is that
 		// a reply landing after render is swept up too.
 		var err error
 		ids, err = acct.MessageIDs(r.Context(), "thread:"+thread)

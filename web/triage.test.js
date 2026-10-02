@@ -98,6 +98,8 @@ test('removes: which views lose the row', () => {
   assert.equal(T.removes('archive', 'search'), false);
   for (const v of ['inbox', 'starred', 'search', 'spam', 'all']) assert.equal(T.removes('trash', v), true); // exclude_tags=trash
   assert.equal(T.removes('trash', 'trash'), false);
+  for (const v of ['inbox', 'starred', 'search', 'trash', 'all']) assert.equal(T.removes('spam', v), true); // exclude_tags=spam
+  assert.equal(T.removes('spam', 'spam'), false);
   for (const v of ['spam', 'trash', 'all']) assert.equal(T.removes('archive', v), false); // -inbox: still matches
   assert.equal(T.removes('star', 'inbox'), false);
 });
@@ -113,6 +115,9 @@ test('skip: trash is a no-op in trash and refused in spam', () => {
   assert.ok(T.skip('trash', 'spam'));
   for (const v of ['inbox', 'starred', 'all', 'search', '', undefined]) assert.equal(T.skip('trash', v), '');
   for (const v of ['spam', 'trash']) assert.equal(T.skip('archive', v), '');
+  assert.equal(T.skip('spam', 'spam'), 'Already in spam');
+  assert.ok(T.skip('spam', 'trash'));
+  for (const v of ['inbox', 'starred', 'all', 'search', '', undefined]) assert.equal(T.skip('spam', v), '');
 });
 
 test('pathKind: threads, index views, everything else', () => {

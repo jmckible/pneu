@@ -342,6 +342,37 @@ func TestTagTrashUndo(t *testing.T) {
 	}
 }
 
+func TestTagSpamUndo(t *testing.T) {
+	f := newTagFixture(t)
+	v := f.env.Account(t, "work")
+	sso := find(t, rows(t, f.s, "/"), "[northwind/app] SSO")
+	resp := tagOK(t, f.s, form("account", "work", "ids", esc(sso.MsgIDs...), "action", "spam"))
+	if !slices.Equal(resp.Changes, []string{"+spam", "-inbox"}) || resp.ID == "" {
+		t.Fatalf("changes %v, undo id %q", resp.Changes, resp.ID)
+	}
+	for _, id := range sso.MsgIDs {
+		if tags := tagsOf(t, v, id); !slices.Contains(tags, "spam") || slices.Contains(tags, "inbox") || slices.Contains(tags, "trash") {
+			t.Fatalf("%s tags %v", id, tags)
+		}
+	}
+	if inInbox(t, f.s, "[northwind/app] SSO") {
+		t.Fatal("spammed thread still listed")
+	}
+	find(t, rows(t, f.s, "/spam"), "[northwind/app] SSO")
+	tagOK(t, f.s, form("action", "undo", "id", resp.ID))
+	for _, id := range sso.MsgIDs {
+		if tags := tagsOf(t, v, id); slices.Contains(tags, "spam") || !slices.Contains(tags, "inbox") {
+			t.Fatalf("%s after undo: %v", id, tags)
+		}
+	}
+	if !inInbox(t, f.s, "[northwind/app] SSO") {
+		t.Fatal("undo did not restore the thread")
+	}
+	if f.sync.count("work") != 2 {
+		t.Fatalf("pushes %v", f.sync.pushes)
+	}
+}
+
 func TestTagStar(t *testing.T) {
 	f := newTagFixture(t)
 	p := f.env.Account(t, "personal")
@@ -735,6 +766,11 @@ func TestTagThreadTooLongForIDs(t *testing.T) {
 	if n := p.Notmuch(t, "count", "--", "subject:big and tag:inbox"); strings.TrimSpace(string(n)) != "600" {
 		t.Fatalf("undo restored %s", n)
 	}
+	tagOK(t, f.s, form("account", "personal", "thread", thread, "action", "spam"))
+	if n := p.Notmuch(t, "count", "--exclude=false", "--", "subject:big and tag:spam and not tag:inbox"); strings.TrimSpace(string(n)) != "600" {
+		t.Fatalf("spam reached %s", n)
+	}
+	tagOK(t, f.s, form("action", "undo"))
 	tagOK(t, f.s, form("account", "personal", "thread", thread, "action", "trash"))
 	if n := p.Notmuch(t, "count", "--exclude=false", "--", "subject:big and tag:trash and not tag:inbox"); strings.TrimSpace(string(n)) != "600" {
 		t.Fatalf("trash reached %s", n)

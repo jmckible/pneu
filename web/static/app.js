@@ -1131,7 +1131,7 @@
     return { account: row.dataset.account, ids: row.dataset.msgids, thread: row.dataset.thread };
   }
 
-  // Archive and trash act on the whole thread (data-thread-ids), as on the
+  // Archive, trash and spam act on the whole thread (data-thread-ids), as on the
   // thread page.
   function rowRemoveArgs(row) {
     return tri.removeArgs(row.dataset.account, row.dataset.threadIds || row.dataset.msgids, row.dataset.thread);
@@ -1210,7 +1210,7 @@
     return { account: root.dataset.account, ids: root.dataset.msgids, thread: root.dataset.thread };
   }
 
-  // Past the server's id cap archive/trash send the thread id alone.
+  // Past the server's id cap archive/trash/spam send the thread id alone.
   function threadRemoveArgs(root) {
     return tri.removeArgs(root.dataset.account, root.dataset.msgids, root.dataset.thread);
   }
@@ -1253,7 +1253,7 @@
     else location.href = storedView();
   }
 
-  // threadRemove archives or trashes the open thread. In the split it is the
+  // threadRemove archives, trashes or spams the open thread. In the split it is the
   // list's action on the thread's row, so the row leaves the list and the
   // pane moves to the next one; a thread the list doesn't show just closes.
   function threadRemove(action) {
@@ -1387,6 +1387,7 @@
     ['Act', [
       ['e', 'Archive'],
       ['t, #', 'Trash'],
+      ['!', 'Mark as spam'],
       ['s', 'Star / unstar'],
       ['U', 'Mark unread'],
       ['z', 'Undo'],
@@ -1720,6 +1721,7 @@
       e: whenReady(function () { listRemove('archive'); }),
       '#': whenReady(function () { listRemove('trash'); }),
       t: whenReady(function () { listRemove('trash'); }),
+      '!': whenReady(function () { listRemove('spam'); }),
       s: whenReady(function () { listToggle(function (row) { return row.classList.contains('flagged') ? 'unstar' : 'star'; }); }),
       U: whenReady(function () { listToggle(function () { return 'unread'; }, true); }),
       v: openGmail,
@@ -1735,6 +1737,7 @@
       e: whenReady(function () { threadRemove('archive'); }),
       '#': whenReady(function () { threadRemove('trash'); }),
       t: whenReady(function () { threadRemove('trash'); }),
+      '!': whenReady(function () { threadRemove('spam'); }),
       s: whenReady(threadStar),
       U: whenReady(threadUnread),
       r: reply(false),
