@@ -1655,28 +1655,28 @@
   function goView(e) { location.assign(VIEWS[e.key]); }
 
   // R: POST /sync queues a sync on every account; the status line says
-  // Checking… from the keypress, and the SSE `sync` event re-renders the
-  // list if the pull brought anything.
+  // Checking… from the keypress until those syncs end, and the SSE `sync`
+  // event re-renders the list if the pull brought anything.
   function syncNow() {
-    postSync().catch(function (err) { fail('Sync', err); });
+    postSync(true).catch(function (err) { fail('Sync', err); });
   }
 
-  // postSync asks for a sync and shows Checking… until the server's first
-  // word on it (lineAsked).
-  function postSync() {
-    lineAsk();
+  // postSync asks for a sync; shown (R) puts Checking… on the line until
+  // the syncs it asked for end. Any other request is quiet.
+  function postSync(shown) {
+    if (shown) lineAsk();
     return fetch('/sync', { method: 'POST', credentials: 'same-origin', headers: writeHeaders({ Accept: 'application/json' }) })
       .then(function (res) {
         return res.json().catch(function () { return null; }).then(function (data) {
           if (!res.ok || !data || !data.ok) throw tagError(res, data);
         });
       })
-      .catch(function (err) { lineAsked(); throw err; });
+      .catch(function (err) { if (shown) lineAsked(); throw err; });
   }
 
   // Coming back to the window asks for a sync, so mail the phone just
   // announced shows up a moment later (an idle sync is about a second)
-  // instead of on the next tick; the status line says Checking… meanwhile.
+  // instead of on the next tick; quietly, like the scheduled ones.
   // A blur that only moved focus into a mail frame isn't leaving: the
   // document still has focus. A launch is `pneu open`'s, over the control
   // socket. At most one request per RETURN_SYNC_GAP; the age refreshes
@@ -1697,7 +1697,7 @@
     renderLine();
     if (Date.now() - returnSyncAt < RETURN_SYNC_GAP) return;
     returnSyncAt = Date.now();
-    postSync().catch(function () { /* the next tick, or R, tries again */ });
+    postSync(false).catch(function () { /* the next tick, or R, tries again */ });
   }
 
   window.addEventListener('blur', leftWindow);
@@ -2143,8 +2143,9 @@
   // ---- status line --------------------------------------------------------
   // The header's far right (SPEC "Sync state"): how current the view is,
   // from each account's sync state (data-accounts at load, SSE `account`
-  // after). In order: Checking… while any account's sync is queued or
-  // running, or a request (R, focus) has had no answer yet; an account
+  // after). In order: Checking… while a sync R asked for is queued or
+  // running, or R has had no answer yet (scheduled, launch and focus
+  // syncs are quiet); an account
   // failing; stale; how long ago the stalest account synced. Only ready
   // accounts count: one in its first pull or waiting on setup is the
   // #accounts strip's. Client mode adds link-down and update states here
@@ -2170,7 +2171,8 @@
   var lineLive = document.getElementById('sync-live');
   var syncEvery = (Number(lineEl && lineEl.dataset.every) || 120) * 1000;
   var busySince = {}; // account -> when it last said queued or running
-  var askedAt = 0;    // a POST /sync the server hasn't answered with news
+  var askedAt = 0;    // an R the server hasn't answered with news
+  var asked = {};     // account -> 'sent' (R, no news yet) or 'busy' (R's sync seen queued or running)
   var askTimer = 0;
   var spinTimer = 0;
   var spinFrame = 0;
@@ -2223,7 +2225,7 @@
     var down = lk && lk.lineState(linkInfo);
     if (down) return down;
     var accts = readyAccounts();
-    if (askedAt || accts.some(busy)) return { state: 'checking', text: 'Checking…' };
+    if (askedAt || accts.some(function (a) { return asked[a.name] === 'busy' && busy(a); })) return { state: 'checking', text: 'Checking…' };
     var sick = accts.filter(function (a) { return (a.failures || 0) >= SICK_FAILURES; });
     if (sick.length) return { state: 'error', text: sick[0].name + ': sync failing' + (sick.length > 1 ? ' +' + (sick.length - 1) : '') };
     // The view is only as fresh as its stalest account.
@@ -2234,7 +2236,9 @@
     });
     if (isNaN(oldest)) return { state: '', text: '' };
     var age = Math.max(0, Date.now() - oldest);
-    return { state: age > 3 * syncEvery ? 'stale' : 'fresh', text: 'Updated ' + ago(age) };
+    // Three missed periods, but never under six minutes: a short period
+    // shouldn't call one slow sync stale.
+    return { state: age > Math.max(3 * syncEvery, 360000) ? 'stale' : 'fresh', text: 'Updated ' + ago(age) };
   }
 
   function renderLine() {
@@ -2271,28 +2275,35 @@
     if (inHelp) inHelp.replaceWith(syncDetails());
   }
 
-  // lineAsk: a sync was just asked for; Checking… until lineAsked.
+  // lineAsk: R asked every account for a sync; Checking… until each one's
+  // sync ends, or lineAsked gives up on the ones with no news.
   function lineAsk() {
     askedAt = Date.now();
+    readyAccounts().forEach(function (a) { asked[a.name] = busy(a) ? 'busy' : 'sent'; });
     clearTimeout(askTimer);
     askTimer = setTimeout(lineAsked, ASK_WAIT);
     renderLine();
   }
 
   function lineAsked() {
-    if (!askedAt) return;
     askedAt = 0;
     clearTimeout(askTimer);
+    Object.keys(asked).forEach(function (n) { if (asked[n] === 'sent') delete asked[n]; });
     renderLine();
   }
 
   // lineNews takes an account's new view (SSE `account`) or a sync's start
-  // or end. News of a queued or running sync answers a request.
+  // or end. News of a queued or running sync answers R for that account;
+  // its end after that ends R's Checking… there.
   function lineNews(a) {
     if (a.queued || a.running) {
       busySince[a.name] = Date.now();
-      askedAt = 0;
-      clearTimeout(askTimer);
+      if (asked[a.name]) {
+        asked[a.name] = 'busy';
+        askedAt = 0;
+      }
+    } else if (asked[a.name] === 'busy') {
+      delete asked[a.name];
     }
     renderLine();
   }

@@ -102,7 +102,7 @@
 11. **Theme.** CSS variables generated from the Omarchy theme's `colors.toml` by
     a theme-set hook shipped here; re-rendered on every theme-set. Mail bodies take the theme unless they declare their own colors.
 12. **Sync.** A ticker goroutine in the server runs `gmi sync` per account every
-    ~2 minutes, plus the debounced push after actions, and a sync when the
+    30 seconds, plus the debounced push after actions, and a sync when the
     window opens or regains focus. One process owns every
     write, so locking is an in-process mutex per account and SSE fires when a
     sync lands. Nothing else runs `gmi` unattended.
@@ -120,6 +120,7 @@
   trashed, not reported.
 - **Push notifications.** Polling, plus a sync on open and focus; Gmail's push
   needs a Pub/Sub topic and a second credential, and pneu doesn't talk to Google.
+  Sketched, not built, in docs/push.md.
 - **Multi-user.** One person, one machine at a time.
 - **Emptying trash.** Gmail's 30-day auto-expunge.
 

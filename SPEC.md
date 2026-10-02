@@ -94,9 +94,10 @@ them here if they're wrong.
   the server is down (`<server>` is the SSH target it was paired with;
   the page keeps what it shows, and the line comes back when the link
   does); `Checking…` with an accent
-  braille spinner while any account's sync is queued or running, or an
-  `R`/focus request hasn't been answered yet (the server says queued at
-  once; the line gives up waiting after 10s); `<account>: sync failing`
+  braille spinner while a sync `R` asked for is queued or running, or `R`
+  hasn't been answered yet (the server says queued at once; the line gives
+  up waiting after 10s): scheduled, launch and focus syncs are quiet, or
+  a 30s period would keep the line spinning; `<account>: sync failing`
   (`+N` for more) in `--accent-hot` once an account has failed as many
   times as the bar widget calls sick (one); `Updated 14m ago` in
   `--accent-hot` when idle and older than three sync periods; otherwise
@@ -112,7 +113,7 @@ them here if they're wrong.
   <name>` to run in a terminal there, and Fix with agent, instead of
   Reconnect: the consent waits on the server's lieer), and with
   no ready account synced yet the line is empty. A push (after a
-  keystroke) never shows as checking. The age refreshes every 30s while
+  keystroke) never shows as checking either. The age refreshes every 30s while
   shown and on focus; a screen reader hears changes of state (a live
   region), not the age ticking. Never a progress bar.
   `data-accounts` carries each account's `lastSync`, `queued`, `running`,
@@ -147,8 +148,7 @@ them here if they're wrong.
   one already waiting). Opening the window asks too: `pneu open` sends
   `launch` over the control socket (docs/client.md) before it opens or
   focuses the window, so every path in (a new window, a restored one, a
-  focus) syncs and a page rendered then already says `Checking…`; `/open`
-  itself starts nothing. Coming back to the window (focus or shown again,
+  focus) syncs; `/open` itself starts nothing. Coming back to the window (focus or shown again,
   not a click into a mail frame; at most every 20s) asks the same. The
   phone buzzes on Gmail's push, and an idle sync is about a second, so
   the mail is there by the time you look. *default*

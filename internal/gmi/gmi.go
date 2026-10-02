@@ -41,7 +41,7 @@ type Account struct {
 
 // Options tune the engine. Zero values take the defaults noted.
 type Options struct {
-	Interval     time.Duration // sync period, default 2m
+	Interval     time.Duration // sync period, default 30s
 	PushDebounce time.Duration // push fires this long after the last RequestPush, default 3s
 	GmiPath      string        // default "gmi"
 	SyncTimeout  time.Duration // per invocation, default 10m; then killed
@@ -237,7 +237,7 @@ func New(accounts []Account, opts Options) (*Engine, error) {
 			*d = v
 		}
 	}
-	def(&opts.Interval, 2*time.Minute)
+	def(&opts.Interval, 30*time.Second)
 	def(&opts.PushDebounce, 3*time.Second)
 	def(&opts.SyncTimeout, 10*time.Minute)
 	def(&opts.PushTimeout, 2*time.Minute)

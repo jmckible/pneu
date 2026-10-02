@@ -523,11 +523,11 @@ What the build settled that the design above left open:
   (an fcntl lock, invisible to flock) is held by another process, the
   cleanup is skipped until a later pull.
 - **Retries use the sync backoff.** A failed or stalled first pull is
-  retried on the ordinary schedule: 2 minutes, doubling to 15. The strip's
+  retried on the ordinary schedule: 30 seconds, doubling to 15 minutes. The strip's
   Retry now (`POST /accounts/{name}/pull`) queues one at once. Pushes are
   skipped while an account is unpulled.
 - **Unset accounts are polled every 5 seconds.** An unconfigured or
-  unauthorized account looks again every 5 s instead of every 2 minutes.
+  unauthorized account looks again every 5 s instead of every 30 seconds.
   So for an account the running server already has, the first pull starts
   within seconds of `pneu account auth`.
   - Accounts are fixed when the server starts; hot-add stays deferred
