@@ -33,8 +33,11 @@ import (
 	"github.com/jmckible/pneu/internal/config"
 	"github.com/jmckible/pneu/internal/control"
 	"github.com/jmckible/pneu/internal/gmi"
+	"github.com/jmckible/pneu/internal/google"
 	"github.com/jmckible/pneu/internal/notmuch"
 	"github.com/jmckible/pneu/internal/peer"
+	"github.com/jmckible/pneu/internal/push"
+	"github.com/jmckible/pneu/internal/push/state"
 	"github.com/jmckible/pneu/internal/tailscale"
 	"github.com/jmckible/pneu/internal/wake"
 	"github.com/jmckible/pneu/internal/web"
@@ -228,17 +231,41 @@ func serve(args []string) error {
 	srv.SyncInterval = syncer.Interval()
 	// Theme switches restyle open pages (SSE `theme`).
 	go srv.WatchTheme(ctx, web.ThemePoll)
+	// The engine has its own context: at shutdown it stops only after the
+	// push manager, which nudges it, has stopped (docs/push.md D5).
+	engineCtx, stopEngine := context.WithCancel(context.Background())
+	defer stopEngine()
 	syncDone := make(chan struct{})
-	go func() { syncer.Run(ctx); close(syncDone) }()
+	go func() { syncer.Run(engineCtx); close(syncDone) }()
+	// Push sync (docs/push.md D5): a nudge per message on each pushed
+	// account's subscription. Read by the account view and status file
+	// before either runs; started once the control socket is up.
+	pm := newPushManager(syncer, srv)
+	if pm != nil {
+		srv.Push = pm.State
+	}
 
 	// Before Serve: `pneu open` sends `launch` once HTTP answers. The peer
 	// server exists before the socket, so a `pneu peer add|remove` that
 	// lands while we start is answered, and starts after it: without the
 	// socket no removal could be acknowledged, so no peer listener.
 	ps := newPeerServer(cfg, srv)
-	ctl := listenControl(srv, ps)
+	ctl := listenControl(srv, ps, pm)
 	if ctl != nil {
 		defer ctl.Close() // an early return; Close again is harmless
+	}
+	// After the socket, which takes its reloads: without it the CLI
+	// couldn't hand a change over, so no push manager and no daemon.lock
+	// (the CLI then acts as with no daemon).
+	if pm != nil {
+		if ctl == nil {
+			log.Printf("pneu: no push sync: it needs the control socket, which acknowledges pneu account push")
+			srv.Push = nil
+			pm = nil
+		} else {
+			pm.Start()
+			defer pm.Stop() // every exit path; Stop again is harmless
+		}
 	}
 	if ps != nil {
 		if ctl == nil {
@@ -262,6 +289,9 @@ func serve(args []string) error {
 	go wake.New().Watch(ctx.Done(), wake.Every, func(asleep time.Duration) {
 		log.Printf("pneu: woke after %v asleep", asleep.Round(time.Second))
 		srv.StatusChanged()
+		if pm != nil {
+			pm.Woke() // waits wakeSync itself before pulling again
+		}
 		time.AfterFunc(wakeSync, func() {
 			if ctx.Err() == nil {
 				srv.Launch()
@@ -284,8 +314,12 @@ func serve(args []string) error {
 	case <-ctx.Done():
 	}
 	if ctl != nil {
-		ctl.Close() // a stopping server takes no launches
+		ctl.Close() // a stopping server takes no launches, and no push-reload
 	}
+	if pm != nil {
+		pm.Stop() // pulls and renewals cancelled and joined
+	}
+	stopEngine()
 	if ps != nil {
 		ps.Close() // peer connections go with the listener
 	}
@@ -358,7 +392,7 @@ func newPeerServer(cfg config.Config, srv *web.Server) *peer.Server {
 // listenControl starts the control socket (docs/client.md). Without it the
 // server still runs; `pneu open` then opens the window without its sync
 // and says why.
-func listenControl(srv *web.Server, ps *peer.Server) *control.Server {
+func listenControl(srv *web.Server, ps *peer.Server, pm *push.Manager) *control.Server {
 	path, err := control.SocketPath()
 	if err != nil {
 		log.Printf("pneu: no control socket: %v; pneu open won't sync on launch", err)
@@ -371,12 +405,32 @@ func listenControl(srv *web.Server, ps *peer.Server) *control.Server {
 	if ps != nil {
 		h.PeersReload = ps.Reload
 	}
+	if pm != nil {
+		h.PushReload, h.PushState = pm.Reload, pm.State
+	}
 	ctl, err := control.Listen(path, h)
 	if err != nil {
 		log.Printf("pneu: no control socket: %v; pneu open won't sync on launch", err)
 		return nil
 	}
 	return ctl
+}
+
+// newPushManager is the push manager for a server's daemon, not started;
+// nil when there's no state directory (logged: everything else runs).
+func newPushManager(syncer *gmi.Engine, srv *web.Server) *push.Manager {
+	dir, err := web.StateDir()
+	if err != nil {
+		log.Printf("pneu: no push sync: %v", err)
+		return nil
+	}
+	return push.New(push.Options{
+		Store:    state.Store{Dir: state.Dir(dir)},
+		API:      google.New(google.Options{Now: push.WallNow}),
+		Engine:   syncer,
+		Settle:   wakeSync,
+		OnChange: srv.AccountChanged,
+	})
 }
 
 // wakeSync is how long after a wake the server syncs every account.
