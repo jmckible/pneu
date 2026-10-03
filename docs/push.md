@@ -1,7 +1,10 @@
 # Push sync: Gmail watch over Pub/Sub
 
-Plan after two Codex design rounds (2026-10-03): first round C1–C19,
-second round K1–K12. The 30-second poll (4942804) wasn't enough: the
+Built (2026-10-03), optional per account: INSTALL.md "Instant mail" sets
+it up. Planned after two Codex design rounds, first round C1–C19, second
+round K1–K12; the decisions below are the plan, and the "As built"
+sections say where the code went further. The live measurement (Build,
+step 6) is still to come. The 30-second poll (4942804) wasn't enough: the
 watch buzzes within seconds of Gmail's receipt, pneu hears up to 30s
 later, and opening the window still waits on a sync. Goal: mail lands in
 notmuch, and the bar's count moves, within a few seconds of arrival, with

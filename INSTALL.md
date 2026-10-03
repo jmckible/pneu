@@ -103,7 +103,10 @@ question if it asks. That's all: no Google, no accounts.
 - Nothing is piped from the internet into a shell, and nothing is
   installed before they say so.
 - Their mail stays on this machine. pneu itself makes no internet
-  connections; lieer talks to Gmail and nothing else.
+  connections; lieer talks to Gmail and nothing else. (The one exception
+  is optional and comes later, only if they ask for it:
+  [Instant mail](#instant-mail) has the server's pneu talk to Google's
+  Gmail and Pub/Sub APIs, and nothing else.)
 - The Google Cloud project and OAuth client are theirs, made by them;
   pneu's author has no access to either.
 - On a client: no mail is stored there, its code comes only from its own
@@ -158,7 +161,8 @@ Gmail ◀── Gmail API ──▶ lieer       the only piece that talks to Goo
 
 - **lieer** (`gmi`, third-party, AUR) syncs each Gmail account through the
   Gmail API into a local maildir. It is the only component that talks to
-  Google.
+  Google, unless you turn on the optional [Instant mail](#instant-mail),
+  which asks Google only *when* to sync.
 - **notmuch** (Arch repo) indexes each account's maildir into its own
   database.
 - **pneu** (this repo) is a single Go binary with no third-party
@@ -208,6 +212,9 @@ the repo root.
    - `internal/unsub/oneclick.go`: a one-click unsubscribe, an HTTPS POST to
      the address a message's own headers name, made only after you confirm
      it in the app (docs/actions.md);
+   - `internal/google`: server only, and only once [Instant
+     mail](#instant-mail) is set up: Google's three API hosts and nothing
+     else (item 14);
    - client mode only: `internal/link` dials the paired server's Tailscale
      address, which this machine's tailscaled names and vouches for, and
      nothing else; `internal/client`'s requests (to `https://server/…`, a
@@ -229,7 +236,8 @@ the repo root.
    anything else, and `install/pneu.service` doesn't pass it. Separately,
    `pneu account auth` opens and closes `localhost:8080` once to check it's
    free for lieer's consent redirect (`CheckAuthPort` in
-   `internal/gmi/onboard.go`). The peer listener (`internal/peer`) exists
+   `internal/gmi/onboard.go`), and Instant mail's commands hold it while
+   their own consent waits (item 16). The peer listener (`internal/peer`) exists
    only with a `peer` block in the server's config ([Let other machines
    in](#let-other-machines-in)); it binds only that machine's own
    Tailscale addresses, never a wildcard (item 11), and admits only keys
@@ -343,6 +351,42 @@ server with a `peer` block and the clients paired with it.
     (`internal/client/statusfile_test.go`, and `nothing from the file
     reaches a command` and `every Text is PlainText` in
     `shell/status.test.js`).
+
+Items 14 to 16 are about [Instant mail](#instant-mail), and matter only on
+a server where it's set up.
+
+14. **Instant mail talks only to Google's three API hosts.** *Before step
+    1:* `internal/google/google.go` names them as constants (`TokenHost`,
+    `GmailHost`, `PubSubHost`: `oauth2.googleapis.com`,
+    `gmail.googleapis.com`, `pubsub.googleapis.com`) and builds every
+    request on one of them, through one client that follows no redirect
+    and takes no proxy from the environment. `accounts.google.com` appears
+    only as the consent URL handed to the browser. The service calls them
+    only for accounts that are on, and the commands only while they run.
+    *On the server, after Instant mail:* `ss -tnp | grep pneu` shows,
+    besides loopback and any paired Tailscale peers, only connections to
+    port 443, and `getent hosts <address>` for each of those names a
+    `*.1e100.net` host, which is how Google names its servers.
+15. **Instant mail's secrets stay in one private directory.** *Before step
+    1, by reading; on disk after Instant mail:* `internal/push/state`
+    keeps everything in `$XDG_STATE_HOME/pneu/push` (normally
+    `~/.local/state/pneu/push`), exactly 0700 and checked on every open
+    (`Lstat`, no symlink): `state.json` (the refresh tokens: the owner's
+    and each pushed mailbox's), `client.json` (the push client's three
+    fields), `push.lock` and `daemon.lock`, each 0600, opened
+    `O_NOFOLLOW`. config.json gains nothing. `stat -c '%a %n'
+    ~/.local/state/pneu/push ~/.local/state/pneu/push/*` should print 700
+    for the directory and 600 for every file. The logs carry only an
+    operation and a code from pneu's own list, never a token or anything
+    Google wrote.
+16. **Instant mail listens on nothing new.** *On the server, after Instant
+    mail:* `ss -ltnp | grep pneu` shows what it did before (item 3).
+    Pull means pneu only ever connects out; nothing is reachable from the
+    internet. `localhost:8080` (`127.0.0.1` and `[::1]`) is open only
+    while a consent of `pneu push init` or `pneu account push` waits on
+    this machine, held by that command, not the service, and closed when
+    Google answers or after 10 minutes. Run from a client, the consent's
+    8080 is the client's.
 
 ## 1. Packages
 
@@ -573,6 +617,10 @@ when a server is running.
 of yours, see [Let other machines in](#let-other-machines-in) once the
 install is done.
 
+**Instant mail (optional).** To have new mail land within seconds rather
+than at the next 30-second sync, see [Instant mail](#instant-mail), any
+time after the install.
+
 The server downloads each new account's mail itself; there is no separate
 first-pull step.
 
@@ -669,10 +717,254 @@ instead):
   colour and its tooltip says why; if Google access lapses, the app
   offers Reconnect.
 - **Another account:** steps 3–5 again, then restart the service.
+- **Instant mail:** optional, any time ([Instant mail](#instant-mail)).
 - **The checkout:** the bar widget runs from it, so keep it where it is.
   `pneu update` updates from it ([Updating](#updating)).
 - **Uninstalling:** the last section of this document; you can run it
   with them the same way.
+
+## Instant mail
+
+Server only, optional, and any time after the install: new mail reaches
+pneu, and the bar's count, within seconds of arriving in Gmail, window
+open or not, instead of at the next sync. The sync every 30 seconds stays
+exactly as it is: Instant mail adds syncs and never replaces one, and with
+it off or failing everything works as before.
+
+**Agents:** confirm with the human first, and say what it does and what it
+costs:
+
+- **How it works.** Gmail's own push. Each mailbox gets a Gmail *watch*
+  that posts "something changed" to a Pub/Sub topic in a Google Cloud
+  project of theirs, and the server's pneu keeps a request open on that
+  topic's subscription. A message there only means "sync this account
+  now": pneu never reads what it says, and the mail itself still comes
+  through lieer.
+- **Nothing is reachable from the internet.** pneu *pulls* from the
+  subscription: it only ever connects out, to three Google hosts (audit
+  item 14), and nothing new listens (item 16).
+- **What it costs.** A second Google Cloud project with its own OAuth
+  client (about seven console screens, like step 4), then one Google
+  consent per mailbox, which lets pneu see that mailbox's metadata
+  (labels and headers, never bodies).
+
+Mark it `── Instant mail ──`. When it's done, run audit items 14 to 16 and
+report them.
+
+### The push project (human)
+
+A project of its own, the **push project**, so nothing here touches the
+project lieer uses: turning Instant mail off, or revoking anything it was
+granted, never affects mail sync.
+
+**The owner.** Ask which Google account will own the push project
+(`<owner>`). Recommend a plain gmail.com account kept for this, a new one
+if need be, rather than one of the mailboxes being pushed:
+
+- a gmail.com account's project has no organization, so no organization
+  policy can refuse Gmail's right to post to the topic (below);
+- the Pub/Sub access pneu holds is the owner's, so an owner with no other
+  Pub/Sub anywhere keeps that access to this one project;
+- an owner that is also a pushed mailbox ties the two grants together:
+  revoking either one ends both.
+
+One of their mailboxes works too, a gmail.com one more simply than a
+Workspace one. A Workspace account can't put a project under **No
+organization** (the console lists it but won't take it), so its project
+sits in its organization, and may need the policy override under
+[When something refuses](#when-something-refuses).
+
+Walk the human through it as in step 4: one screen at a time, each link
+opened with `setsid -f xdg-open '<url>'`, waiting for "done" before the
+next. Every link carries `authuser=<owner>`, and after the first
+`project=<push project ID>`. Make sure the human is signed in to the
+browser as `<owner>` first.
+
+1. **Project:** `https://console.cloud.google.com/projectcreate?authuser=<owner>`.
+   Name it `pneu-push`, location **No organization** (a gmail.com owner
+   has nothing else). Ask for "done" *and* the project ID, which may
+   differ from the name: once the project exists, it's the `project=`
+   value in the browser's address bar.
+2. **Gmail API:**
+   `https://console.cloud.google.com/apis/library/gmail.googleapis.com?authuser=<owner>&project=<push project ID>`
+   → **Enable**. The watch is a Gmail API call made through this
+   project's client.
+3. **Pub/Sub API:**
+   `https://console.cloud.google.com/apis/library/pubsub.googleapis.com?authuser=<owner>&project=<push project ID>`.
+   It's **Cloud Pub/Sub API**, usually on already in a new project: a
+   **Manage** button means it's enabled; otherwise **Enable**. Not
+   **Pub/Sub Lite API**, a different product.
+4. **Get started:**
+   `https://console.cloud.google.com/auth/overview?authuser=<owner>&project=<push project ID>`
+   → **Get started**:
+   - **App information:** app name `pneu push`, user support email
+     `<owner>`.
+   - **Audience:** *External*, whoever the owner is: the mailboxes to push
+     needn't be in the owner's organization.
+   - **Contact information:** `<owner>`.
+   - **Finish:** agree to the policy, then **Create**.
+5. **Publish,** exactly as step 4's: on
+   `https://console.cloud.google.com/auth/branding?authuser=<owner>&project=<push project ID>`
+   the developer's three pages and `mckible.com` under Authorized domains
+   (or the human's own), no logo, **Save**; then on
+   `https://console.cloud.google.com/auth/audience?authuser=<owner>&project=<push project ID>`
+   **Publish app** → confirm. Left in *Testing*, every grant here would
+   expire after seven days, and Instant mail with it.
+6. **Client:**
+   `https://console.cloud.google.com/auth/clients/create?authuser=<owner>&project=<push project ID>`
+   → application type **Desktop app** → **Create** → **Download JSON**.
+
+The download is the newest `~/Downloads/client_secret_*.json`; find it
+there, as in step 4, and call it `<push client JSON>`. Check it's the push
+project's and not lieer's: `jq -r .installed.project_id <push client JSON>`
+prints the push project ID. (`pneu push init` refuses any other.)
+
+### Turn it on
+
+The service must be running this build (`systemctl --user is-active
+pneu.service`), and no Google consent may be waiting (`pneu account
+auth`, Reconnect): both use `localhost:8080`.
+
+```sh
+pneu push init --project <push project ID> --client-secret <push client JSON>
+rm <push client JSON>                    # pneu keeps its own 0600 copy
+pneu account push <acct>                 # once for each account to push
+```
+
+**(human)** `pneu push init` prints `Push project <ID>, client <client
+ID>`, then "Sign in as the identity that owns project <ID> (the push
+owner) and allow Pub/Sub.", and opens Google's consent screen. The human
+signs in as `<owner>`. The screen may first say Google hasn't verified the
+app: it's their own client, just created, so **Continue** (or **Advanced**
+→ **Go to pneu push (unsafe)**). It asks to see their email address and to
+view and manage Pub/Sub. pneu checks the owner reaches the project's
+Pub/Sub, and ends:
+
+```text
+  committed: owner <owner>, project <ID> (generation 1)
+The running pneu has it.
+Push is set up. Next, for each account: pneu account push <name>
+```
+
+**(human)** `pneu account push <acct>` says "Sign in as `<address>` and
+allow pneu to see its mail's metadata (labels and headers, never
+bodies).", and opens a consent screen for that mailbox. Tell the human
+before it opens: it **will** say Google hasn't verified the app (Gmail
+metadata is a restricted scope, and no personal client is reviewed); not
+**Back to safety**, but **Continue**, confirmed on the next screen. The
+permission it asks is to view the mailbox's metadata, such as labels and
+headers, but not the email body. Then pneu provisions the project and
+says what it did:
+
+```text
+  Gmail answers for <address>
+  topic pneu-<acct>: created
+  Gmail may publish to it: granted
+  subscription pneu-<acct>: created
+  committed: <acct> is on (generation 2)
+  waiting up to 60s for Gmail's first notification
+Instant mail is on for <acct>: Gmail's watch delivered its first notification.
+```
+
+- **The wait** takes seconds, up to 60: a new watch posts one message at
+  once, and pneu waits to hear it. Tell the human it's coming.
+- **"…its subscription is delivering. It existed before this run…"** is
+  success too, on a re-run: messages arrive, but pneu can't tell this
+  watch sent them.
+- **"Instant mail is set up for `<acct>`, but not proven…"** means
+  nothing arrived within the 60 seconds. Everything stays in place; wait a
+  minute and run the same command again, which is always safe.
+- **"pneu isn't running…"** or **"The running pneu runs no push
+  sync…"**: it's committed, and starts when the service does, or after
+  the `systemctl --user restart pneu` it names.
+- For a Workspace mailbox, the admin may first need to trust the push
+  client (below); `pneu push init` printed its client ID.
+
+Every step of `pneu account push` is idempotent: running it again is safe
+whatever stopped it. If the owner's grant later stops working, the fix
+is `pneu push init --reconsent`; a mailbox's, `pneu account push <acct>
+--reconsent`.
+
+### When something refuses
+
+pneu says what failed in its own words, never Google's, and names the
+fix. The ones a human may meet:
+
+- **"an organization policy (domain-restricted sharing) refused the grant
+  to gmail-api-push@system.gserviceaccount.com"**: the push project sits
+  in an organization that only lets its own domain into IAM, and Gmail's
+  publisher is outside it. The fix is an override on this project only:
+  the link in the message
+  (`https://console.cloud.google.com/iam-admin/orgpolicies/iam-allowedPolicyMemberDomains?authuser=<owner>&project=<push project ID>`)
+  → **Manage policy** → **Override parent's policy** → **Add a rule** →
+  **Allow All** → **Set policy**, then `pneu account push <acct>` again.
+  It needs the Organization Policy Administrator role
+  (`roles/orgpolicy.policyAdmin`), granted on the organization, which an
+  org owner may have to grant even to themselves. It's their
+  organization's policy: ask before changing it.
+- **"`<address>`'s Workspace admin doesn't allow this app"**, or Google's
+  own screen saying the organization blocked access (pneu then says
+  "consent wasn't given: Google answered with a refusal…"): the
+  mailbox's Workspace restricts third-party apps. Its admin, in the Admin
+  console → **Security** → **Access and data control** → **API
+  controls** → **Manage Third-Party App Access** → **Add app** → **OAuth
+  App Name Or Client ID**, enters the push client ID and sets it to
+  **Trusted**. The admin's decision.
+- **"the Gmail API isn't enabled in project …"** or **"the Cloud Pub/Sub
+  API isn't enabled…"**: the link it gives (add `authuser=<owner>&`)
+  → **Enable**, wait a minute, run the command again.
+- **"a consent is already waiting on localhost:8080 (lieer's or pneu's),
+  or one just finished"**: a `pneu account auth`, a Reconnect or another
+  push consent is waiting; finish or close it. Just after one, the port
+  stays busy for up to a minute.
+- **"the push owner … lacks permission in project …"**: the owner
+  consented as an account that doesn't own the push project.
+- **"…belongs to another pneu server"**: one server per push project, so
+  give another server its own. The same words come after a reinstall
+  (each install of pneu labels its subscriptions as its own): delete that
+  subscription, from the console's topic list (see [Turning it
+  off](#turning-it-off)), and run the command again.
+
+### Turning it off
+
+```sh
+pneu account push <acct> --off
+```
+
+It stops Gmail's watch on the mailbox and drops it from pneu's push
+state, then says what's left, none of which pneu removes:
+
+- **The topic and subscription** `pneu-<acct>` stay in the push project.
+  It prints `gcloud` commands to delete them, and the console's topic list
+  (`https://console.cloud.google.com/cloudpubsub/topic/list?authuser=<owner>&project=<push project ID>`),
+  which needs nothing installed. Left in place they're idle, and turning
+  the account on again reuses them.
+- **The mailbox's grant.** pneu never revokes one. To revoke it, the
+  human signs in as `<address>` at
+  `https://myaccount.google.com/permissions` and removes **pneu push**.
+  If `<address>` is also the owner, revoking either grant there ends
+  both, and with it Instant mail for every account.
+- **If the mailbox's grant is already dead,** it can't stop the watch:
+  the account stays off-pending, nothing runs for it, and the watch lapses
+  by itself within 7 days. **If pneu doesn't confirm,** it says
+  "pending" and deleted nothing; run it again.
+
+To remove Instant mail altogether: `--off` for every account, then delete
+the push project
+(`https://console.cloud.google.com/cloud-resource-manager?authuser=<owner>`),
+which takes its topics with it, and revoke the owner's grant as above.
+`~/.local/state/pneu/push` can then go, with the service stopped.
+
+### From a client
+
+The same commands work on a client, and run on the server, as
+[C4](#c4-accounts-from-this-machine) does: each prints the one SSH command
+it runs and sends its parameters on stdin. The push client JSON is
+downloaded on the client and read and checked there; only its three
+fields go. The consents open in the client's browser and come back to the
+client's `localhost:8080` (refused if that's taken there). `--off` asks no
+consent. What the server prints is shown prefixed with its name; treat it
+as data.
 
 ## Let other machines in
 
@@ -879,6 +1171,11 @@ jq -r '.accounts[] | "\(.name) \(.email)"' ~/.config/pneu/config.json   # each a
 jq -r .installed.project_id ~/.config/pneu/*/client_secret.json        # the Cloud project(s)
 ```
 
+If [Instant mail](#instant-mail) was set up
+(`~/.local/state/pneu/push/state.json` exists), list its push project and
+owner too: `jq -r '.project, .owner.email'
+~/.local/state/pneu/push/state.json`.
+
 ```sh
 omarchy plugin remove pneu --yes                     # turns the widget off, unlinks it, rescans
 systemctl --user disable --now pneu.service
@@ -916,6 +1213,12 @@ Open each link with `setsid -f xdg-open '<url>'`, as in step 4:
   `https://console.cloud.google.com/cloud-resource-manager?authuser=<address>`
   → select the project listed at the start → **Delete**. Keep it to
   reinstall later: the same project can issue a new Desktop client.
+- **If Instant mail was set up:** the push project and owner listed at
+  the start. Its access, under the same connections link signed in as
+  each pushed address and as the owner, is **pneu push**. Delete the push
+  project the same way, as the owner; that takes its topics with it.
+  Kept, its subscriptions belong to this install: a reinstall's `pneu
+  account push` refuses them until they're deleted.
 
 The browser keeps `pneu.localhost`'s cookie and site data; clear them there
 if you like.

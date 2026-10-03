@@ -8,8 +8,11 @@ and build order; this file is the working contract. Read PLAN.md before touching
 - Gmail is the backend. lieer (`gmi`) syncs each account into a maildir, one
   notmuch database per account indexes it, a Go server on 127.0.0.1 renders it at
   `pneu.localhost`, and `pneu open` shows it as an `--app` window of the default
-  browser. The app never talks to Google; `gmi` does, and only the server runs
-  `gmi` unattended.
+  browser. Mail moves only through `gmi`, and only the server runs `gmi`
+  unattended. pneu itself talks to Google only for the optional push sync
+  (`internal/google`, docs/push.md): on a server where it's set up, the
+  daemon and the push commands, three fixed API hosts, to learn *when* to
+  sync, never mail.
 - The Omarchy integration lives here, generic: the shell plugin (`manifest.json`
   at the root, because `omarchy plugin add` clones the repo; `shell/BarWidget.qml`),
   and under `install/` the systemd unit, desktop entry, and theme-set hook. A
@@ -40,6 +43,8 @@ and build order; this file is the working contract. Read PLAN.md before touching
   `pneu gmi <account> <args>` is the manual lieer run (below);
   `pneu account add|auth|status` sets an account up (INSTALL.md step 5),
   and on a client runs on the server over SSH (below);
+  `pneu push init` and `pneu account push <name> [--reconsent|--off]` set
+  up push sync (INSTALL.md "Instant mail"; below), the same way;
   `pneu peer add --stdin|list|remove` pairs other machines' clients (below);
   `pneu client pair <ssh-target>|unpair` makes this machine one (below);
   `pneu agent [-print]` and `pneu reset-window` are the bar menu's Fix with
@@ -172,8 +177,9 @@ and build order; this file is the working contract. Read PLAN.md before touching
   and token/stall/kill failures); `testdata/fakegmi` is the internal/gmi
   tests' contract fake. `scripts/rehearse` runs INSTALL.md itself in a
   sandbox (docs/rehearsal.md): its numbered steps, the server's install;
-  unnumbered sections (Let other machines in, the Client path) aren't
-  rehearsed. Keep it passing when INSTALL.md changes.
+  unnumbered sections (Instant mail, Let other machines in, the Client
+  path) aren't rehearsed, but Uninstall is: a command there must succeed
+  on an install without them. Keep it passing when INSTALL.md changes.
   `scripts/screenshot` captures the app on the fixture mail for the README
   and marketing (docs/screenshots.md); never screenshot a real inbox.
   `scripts/ctaeval <account> [N]` is the one tool that reads real mail on
@@ -215,9 +221,10 @@ and build order; this file is the working contract. Read PLAN.md before touching
   line, parsed by token: each key once, nothing after, every field
   bounded), `update-checked` (a client's daemon only: reread skew.json),
   `peers-reload <gen> <hash>`
-  (a client's daemon refuses it), whose
-  only arguments are a decimal generation and 64 hex digits, validated
-  before any handler runs), both ends checking `SO_PEERCRED`
+  (a client's daemon refuses it), `push-reload <gen> <hash>` and
+  `push-state <account>` (push sync, below; a client's daemon answers
+  push off), whose only arguments are a decimal generation and 64 hex
+  digits, or an account name, validated before any handler runs), both ends checking `SO_PEERCRED`
   for our uid, the directory 0700 and ours (`Lstat`, no symlink) or the
   server runs without it. `/open` starts no sync. A throwaway server
   (screenshots, the fixture server) sets its own `XDG_RUNTIME_DIR`, or a
@@ -357,6 +364,56 @@ and build order; this file is the working contract. Read PLAN.md before touching
   connection leaves the registry only when finished). No daemon: "applies at next start". No ack: "pending",
   never "done". The server's key pair is `peer/server.pem` (dir exactly
   0700, file 0600, both checked on every load).
+- Push sync (`internal/google`, `internal/push`, `cmd/pneu/push.go`;
+  docs/push.md, its "As built" sections): server only, optional per
+  account; the 30s poll is untouched and push only adds syncs. A Gmail
+  watch per mailbox posts to topic `pneu-<account>` in the user's **push
+  project**, a GCP project of its own (never lieer's) with its own
+  Desktop client; the daemon keeps two `:pull`s outstanding on
+  subscription `pneu-<account>` with the owner's token (`pubsub`,
+  `openid email`; `sub` pinned at init), and each mailbox's token is only
+  `gmail.metadata` (getProfile, watch, stop). A message is only a nudge:
+  `Engine.Nudge(account)` then ack; its body is never decoded, so a
+  forged one can only cause a sync. One server per push project
+  (subscriptions carry a `pneu-install` label; another's is refused).
+- Push state is `$XDG_STATE_HOME/pneu/push/` (dir exactly 0700, `Lstat`;
+  files 0600, `O_NOFOLLOW`, size-capped, parsed by token): `state.json`
+  (generation, project, install, client, owner, accounts `on` |
+  `off-pending`, refresh tokens) and `client.json`, written only by the
+  CLI under `push.lock` (never replaced; temp + fsync + rename + fsync
+  dir, generation+1, SHA-256 of the bytes), never config.json. The daemon
+  only reads them, holds `daemon.lock` for life, and applies a generation
+  on `push-reload <gen> <hash>` (`ok` | `stale` | `mismatch`; workers
+  cancelled and joined before `ok`, no network in the handler);
+  `push-state` reports instance, generation and health. The CLI decides
+  "no daemon" only by taking `daemon.lock`; no ack is "pending", never
+  "done". Consent and network calls run outside `push.lock`, and every
+  commit re-reads under it and refuses what changed meanwhile. `--off`
+  is off-pending, ack, `users.stop`, removal, holding the lock
+  throughout; topic, subscription and grants stay.
+- The Google boundary is `internal/google` alone: one `http.Client`,
+  three constant hosts (`oauth2`, `gmail`, `pubsub.googleapis.com`; tests
+  swap a base through an unexported hook, never config or env), no
+  redirects, no environment proxy, bodies capped at 64 KiB into fixed
+  structs, every token answer's scope set checked exactly. Failures are
+  `*google.Error{Op, Code}` in a closed vocabulary; nothing Google wrote
+  reaches a log, a terminal, a remote event, a page or status.json.
+  `cmd/pneu/pushwords.go` is the only place a failure becomes words, and
+  the daemon logs only op and code. Push's health (`push:` in the account
+  view and status.json, closed enums) never feeds `sick`.
+- Push consent: pneu builds the URL (PKCE, state, the owner's nonce),
+  which must pass `gmi.ValidConsentURL`. On the server it binds
+  127.0.0.1:8080 and [::1]:8080 lieer's way (no SO_REUSEADDR) and holds
+  them until the callback; from a client the relay forwards the callback
+  line and the server checks `state` against its own consent in constant
+  time and exchanges only the code (remote verbs `push`, `push-off`,
+  `push-init`; the push client JSON travels as its three fields). A
+  working stored grant is reused unless `--reconsent`; a consent as
+  anyone but the pinned owner is refused. pneu never revokes a grant;
+  it points to the permissions page with the owner caveat (an owner that
+  is also a pushed mailbox loses both grants to one revocation).
+  Tests use `internal/google/googletest` (a fake of every call, failure
+  injection, a fake clock), never real Google.
 - `~/.local/state/pneu/status.json` (0600, tmp+rename) is the bar widget's
   only input: unread inbox threads, five sender first names, per-account sync
   health, onboarding `state` and first-pull `progress`, `running`, `updated`. The server rewrites it at startup, after every
