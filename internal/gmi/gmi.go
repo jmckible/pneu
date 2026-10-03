@@ -180,6 +180,7 @@ type account struct {
 	pushTimer *time.Timer
 
 	touchDue chan struct{} // cap 1: a NoteWrite landed just after a sync ended
+	nudge    chan struct{} // cap 1: wakes the loop to look at nudged (Nudge)
 
 	nmu     sync.Mutex
 	syncing bool       // a sync or push holds the slot
@@ -194,6 +195,11 @@ type account struct {
 	pulling    *progressWriter
 	authing    bool
 	authCancel context.CancelFunc
+	// nudged: a Nudge is pending, cleared when any sync starts. runStart
+	// and runEnd: when the last sync (or push, or first pull: each pulls)
+	// started and finished; Nudge's eligibility is measured from them.
+	nudged           bool
+	runStart, runEnd time.Time
 }
 
 // Engine runs lieer for a set of accounts. Accounts are independent.
@@ -265,7 +271,7 @@ func New(accounts []Account, opts Options) (*Engine, error) {
 			a.ClientSecret = filepath.Join(filepath.Dir(a.NotmuchConfig), "client_secret.json")
 		}
 		ac := &account{Account: a, run: make(chan struct{}, 1), syncReq: make(chan struct{}, 1),
-			pushDue: make(chan struct{}, 1), touchDue: make(chan struct{}, 1)}
+			pushDue: make(chan struct{}, 1), touchDue: make(chan struct{}, 1), nudge: make(chan struct{}, 1)}
 		e.accts[a.Name] = ac
 		e.order = append(e.order, ac)
 	}
@@ -481,6 +487,64 @@ func (e *Engine) SyncNow(account string) error {
 	return nil
 }
 
+// NudgeGap is the least time between the start of one sync and a sync a
+// Nudge asks for. A var so tests can shorten it.
+var NudgeGap = 5 * time.Second
+
+// Nudge says the account's mailbox changed (a push notification, D5):
+// sync it soon. It sets the account's nudge flag and returns at once;
+// nudges before that sync collapse into it, whoever sends them. The loop
+// turns a pending nudge into a sync once it's eligible: at least NudgeGap
+// since the last sync started, and outside the failure backoff delay
+// computes. A sync for any reason clears the flag. The periodic poll is
+// untouched: a nudge adds syncs, it never delays or replaces one, and the
+// period counts from the last sync as it does after SyncNow.
+func (e *Engine) Nudge(account string) error {
+	a, ok := e.accts[account]
+	if !ok {
+		return fmt.Errorf("%w %q", ErrUnknownAccount, account)
+	}
+	a.smu.Lock()
+	a.nudged = true
+	a.smu.Unlock()
+	signal(a.nudge)
+	return nil
+}
+
+// nudgeWait reports whether a nudge is pending and how long until it may
+// run: NudgeGap after the last run started, and, after a failure, not
+// before the backoff delay since it ended.
+func (e *Engine) nudgeWait(a *account) (time.Duration, bool) {
+	a.smu.Lock()
+	pending, started, ended, failures := a.nudged, a.runStart, a.runEnd, a.status.Failures
+	a.smu.Unlock()
+	if !pending {
+		return 0, false
+	}
+	at := started.Add(NudgeGap)
+	if failures > 0 {
+		if b := ended.Add(e.delay(a)); b.After(at) {
+			at = b
+		}
+	}
+	return max(time.Until(at), 0), true
+}
+
+// runStarted and runEnded bracket a run that pulls (sync, push, first
+// pull): its start answers every nudge made before it.
+func (a *account) runStarted() {
+	a.smu.Lock()
+	a.nudged = false
+	a.runStart = time.Now()
+	a.smu.Unlock()
+}
+
+func (a *account) runEnded() {
+	a.smu.Lock()
+	a.runEnd = time.Now()
+	a.smu.Unlock()
+}
+
 // Interval is the sync period, for the page's staleness threshold.
 func (e *Engine) Interval() time.Duration { return e.opts.Interval }
 
@@ -502,6 +566,7 @@ func (a *account) startSync(running bool) {
 	a.smu.Lock()
 	a.status.Queued = false
 	a.status.Syncing = running
+	a.nudged = false // nothing to run for it, or this run answers it
 	select {
 	case <-a.syncReq:
 	default:
@@ -584,7 +649,15 @@ func (e *Engine) loop(ctx context.Context, a *account) {
 	e.do(ctx, a, OpSync)
 	timer := time.NewTimer(e.delay(a))
 	defer timer.Stop()
+	nudgeTimer := time.NewTimer(0)
+	nudgeTimer.Stop()
+	defer nudgeTimer.Stop()
 	for {
+		var nudgeDue <-chan time.Time
+		if d, ok := e.nudgeWait(a); ok {
+			nudgeTimer.Reset(d)
+			nudgeDue = nudgeTimer.C
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -594,6 +667,12 @@ func (e *Engine) loop(ctx context.Context, a *account) {
 		case <-a.touchDue:
 			e.touchLate(ctx, a)
 			continue
+		case <-a.nudge:
+			continue // look again at the top
+		case <-nudgeDue:
+			if d, ok := e.nudgeWait(a); !ok || d > 0 {
+				continue
+			}
 		case <-timer.C:
 		case <-a.syncReq:
 		}
@@ -661,6 +740,7 @@ func (e *Engine) do(ctx context.Context, a *account, op Op) {
 	if e.opts.OnStart != nil {
 		e.opts.OnStart(a.Name, op)
 	}
+	a.runStarted()
 	var r Result
 	var ok bool
 	if op == OpPull {
@@ -668,6 +748,7 @@ func (e *Engine) do(ctx context.Context, a *account, op Op) {
 	} else {
 		r, ok = e.invoke(ctx, a, op)
 	}
+	a.runEnded()
 	a.smu.Lock()
 	a.status.Syncing = false
 	if !ok {
