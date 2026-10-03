@@ -440,3 +440,76 @@ PushQuiet|PushFailing|PushReauth`, reasons `ReauthReasons` /
 `ErrPushOff`.
 
 **`internal/gmi`**: `Engine.Nudge(account) error`; `gmi.NudgeGap` (5s).
+
+## As built: task 2
+
+**The manager** (`internal/push`): `push.New(push.Options{Store, API,
+Engine, Clock, Settle, OnChange, Logf})`, then `Start` (background:
+takes `daemon.lock`, retrying each second while someone else holds it,
+then reads `state.json`), `Stop` (cancel and join everything, then
+release the lock; idempotent), `Reload` and `State` (the two control
+handlers), `Woke`. main.go makes it before the control socket, wires
+`srv.Push = pm.State` before the engine runs, starts it only once the
+socket is up (no socket: never started, no `daemon.lock`, every account
+off), and stops it after the socket closes and before the engine,
+whose context is now its own. `push.WallNow` is the clock everywhere
+(no monotonic reading), the API's too.
+
+- `daemon.lock` is taken in server mode even with no `state.json` (it
+  creates `push/`, 0700): a CLI must see the daemon to hand it the first
+  generation. Until it's held, `push-reload` answers an error (pending).
+- `Reload`: older generation `stale`; file not that generation and hash
+  (or none) `mismatch`; the generation already applied with the same
+  hash `ok` again once nothing cancelled is still running (a lost ack
+  retried); a `client.json` that fails `state.CheckClient` is an error
+  and changes nothing. A worker is replaced when its address or refresh
+  token changes; every worker when the project, install, client ID or
+  secret, owner sub or owner refresh changes. Joins are bounded by
+  `JoinWait` (2s); past it the reload errors and the next one waits
+  for the same workers.
+- `State`: `Generation` is the applied one; an account with no worker
+  (off, off-pending, absent, draining) is `off`. Health is per worker: a
+  reload that keeps the worker keeps its `delivering`; a new credential
+  starts again at `starting`.
+- Wake: the epoch is bumped, requests in flight cancelled, tokens
+  dropped; every answer is acted on (health, nudge, ack, a token, a
+  reauth) only under the epoch's read lock with no wake since its
+  request; requests are admitted only past the settle. The watch is
+  renewed after every wake's settle (D5's "before pulling and renewing
+  watches"), not only when due.
+- Tokens: refreshed once less than `min(5 min, half its life)` remains;
+  a refresh's waiters use its token however short. A 401 on pull, ack or
+  watch drops the token and retries once at once.
+
+**Health, beyond D5's letter:** `failing` also when no watch has been had
+within `FailAfter` (3 min) of the worker's start or last wake: with no
+`watchExp` yet, a watch that never came up read as `quiet`. Reasons: a
+pull failure's code as `api-disabled`/`permission` (scope too)/
+`org-policy`/`network` (unavailable too)/`unknown`, `network` when none
+was recorded; a lapsed watch is `watch-expired` unless its last renewal
+failed with an actionable code. `since` resets on a wake, so the 3
+minutes count again from it. Each 24h renewal makes Gmail publish one
+message (C4), so a working watch tends to read `delivering`, not
+`quiet`; the live step should look at whether that matters.
+
+**Logs**: `push <account>: <google op>: <code>` on a failure whose code
+changed, `pulling again` / `watch renewed` on recovery, the reauth lines
+naming `pneu account push <name>` and `pneu push init --reconsent`, and
+the daemon.lock wait. Nothing else.
+
+**For task 4** (client sanitizers, `StatusV2`, sync details):
+
+- `AccountView.push` and `StatusAccount.push` are `web.PushView`:
+  `{"state":…, "reason":…, "lastDelivery":…}`. The whole object is absent
+  when push is off (`off` is never sent). `state` is one of
+  `control.PushStates` minus `off`; `reason` is present only with
+  `reauth` (one of `control.ReauthReasons`) or `failing` (one of
+  `control.FailingReasons`); `lastDelivery` is RFC 3339 UTC to the
+  second, present only once a message came. Hold each to that; anything
+  else drops `push` for the account, never the event.
+- The status file and SSE `account` follow a push state or reason
+  change; a delivery alone doesn't rewrite the file (the sync it brings
+  does).
+- The polling note's "engine's real next delay" isn't exposed by task 2;
+  it needs an accessor on `gmi.Engine` (its `delay`) and a field in the
+  view if the page is to show it.
