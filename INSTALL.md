@@ -622,9 +622,9 @@ when a server is running.
 of yours, see [Let other machines in](#let-other-machines-in) once the
 install is done.
 
-**Instant mail (optional).** To have new inbox mail land, usually within seconds, rather
-than at the next 30-second sync, see [Instant mail](#instant-mail), any
-time after the install.
+**Instant mail (optional).** To have new inbox mail land, usually within
+seconds, rather than at the next 30-second sync, see [Instant
+mail](#instant-mail), any time after the install.
 
 The server downloads each new account's mail itself; there is no separate
 first-pull step.
