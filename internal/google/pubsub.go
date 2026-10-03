@@ -109,6 +109,7 @@ const (
 	FieldPush       = "pushConfig"
 	FieldBigQuery   = "bigqueryConfig"
 	FieldStorage    = "cloudStorageConfig"
+	FieldBigtable   = "bigtableConfig"
 	FieldAck        = "ackDeadlineSeconds"
 	FieldRetention  = "messageRetentionDuration"
 	FieldLabel      = "labels." + InstallLabel
@@ -213,6 +214,8 @@ func compareSubscription(b []byte, project, sub, topic, install string) error {
 			err = emptyObject(dec, FieldBigQuery)
 		case "cloudStorageConfig":
 			err = emptyObject(dec, FieldStorage)
+		case "bigtableConfig":
+			err = emptyObject(dec, FieldBigtable)
 		case "deadLetterPolicy":
 			err = emptyObject(dec, FieldDeadLetter)
 		case "ackDeadlineSeconds":

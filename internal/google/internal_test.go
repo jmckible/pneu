@@ -228,6 +228,7 @@ func TestCompareSubscription(t *testing.T) {
 		{with("pushConfig", map[string]any{"pushEndpoint": "https://example.com"}), FieldPush, false},
 		{with("bigqueryConfig", map[string]any{"table": "t"}), FieldBigQuery, false},
 		{with("cloudStorageConfig", map[string]any{"bucket": "b"}), FieldStorage, false},
+		{with("bigtableConfig", map[string]any{"table": "t"}), FieldBigtable, false},
 		{with("ackDeadlineSeconds", 10), FieldAck, false},
 		{with("ackDeadlineSeconds", nil), FieldAck, false},
 		{with("messageRetentionDuration", "604800s"), FieldRetention, false},

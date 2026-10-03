@@ -572,6 +572,11 @@ func TestSubscriptionMismatch(t *testing.T) {
 	if !errors.As(err, &me) || me.Field != google.FieldFilter {
 		t.Fatalf("filter: %v", err)
 	}
+	plant(`,"labels":{"pneu-install":"` + install + `"},"bigtableConfig":{"table":"projects/p/instances/i/tables/t"}`)
+	_, err = api.EnsureSubscription(ctx, owner.Access, f.Project, res, res, install)
+	if !errors.As(err, &me) || me.Field != google.FieldBigtable {
+		t.Fatalf("bigtable export: %v", err)
+	}
 	plant(`,"labels":{"pneu-install":"` + install + `"}`)
 	if created, err := api.EnsureSubscription(ctx, owner.Access, f.Project, res, res, install); err != nil || created {
 		t.Fatal(created, err)
