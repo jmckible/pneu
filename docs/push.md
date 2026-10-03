@@ -45,7 +45,9 @@ pneu server ── POST :pull ×2 outstanding (owner's pubsub token) ── mess
 ### D1. A dedicated push project
 
 One new GCP project, **the push project**, owned by one identity of the
-user's (the **owner**; INSTALL.md suggests the personal account), with
+user's (the **owner**; INSTALL.md suggests a plain gmail.com account kept
+for this, which can create a project with no organization, holds no other
+Pub/Sub, and isn't itself a pushed mailbox), with
 its own Desktop OAuth client (External, In production, same branding
 route as INSTALL.md step 4) used for nothing but push, the Gmail and
 Pub/Sub APIs enabled (console, once), and every pushed account's topic
@@ -55,7 +57,7 @@ and subscription.
   the whole project. lieer's projects are separate, so nothing push does
   touches lieer. Within the push project the owner's two roles aren't
   separable (K5): if the owner is also a pushed mailbox, revoking either
-  grant ends both. pneu never revokes (D4 `--off`), and says this
+  grant ends both (a dedicated gmail.com owner avoids it). pneu never revokes (D4 `--off`), and says this
   wherever it points to the permissions page.
 - **Project identity** (C2, K6): the project ID is given once to `pneu
   push init`, validated (`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`), and must equal
@@ -71,8 +73,12 @@ and subscription.
   step confirms it for the Workspace mailbox.
 - A project under a Workspace org may inherit domain-restricted sharing,
   which **may** refuse the `gmail-api-push@system.gserviceaccount.com`
-  publisher binding (C19). Prefer no organization; the error names the
-  policy. A Workspace mailbox's admin may need to trust the push client
+  publisher binding (C19). A Workspace identity can't create a project
+  without an organization (the console lists "No organization" but won't
+  take it), so the push project usually sits in the owner's own org; the
+  setup error names the policy, and INSTALL.md gives the project-level
+  override (`iam.allowedPolicyMemberDomains` → Allow All on this project
+  only). A Workspace mailbox's admin may need to trust the push client
   for `gmail.metadata` (Admin → Security → API controls).
 
 ### D2. Credentials and the state file
@@ -349,3 +355,85 @@ renewal or refresh, setup and `--off` interrupted at each step, lost
 reload ack, stale and mismatched reloads, daemon restart with
 `off-pending`, two accounts with one address, first pull with nudges
 arriving, lieer's consent waiting on 8080 during push consent.
+
+## Interfaces (frozen by task 1)
+
+What tasks 2 and 3 build on. Change one only with the other tasks told.
+
+**`internal/google`** (one `*API` per process; safe for concurrent use;
+every call takes a context and returns `*google.Error{Op, Code}` or the
+context's own error; `google.CodeOf(err)`):
+
+```go
+api := google.New(google.Options{Now, Timeout, PullTimeout}) // 30s / 90s defaults
+api.CloseIdle()                                                  // after a wake
+
+c, _ := google.NewConsent(creds google.Credentials, google.Owner|google.Mailbox, loginHint)
+c.URL()                       // passes gmi.ValidConsentURL; c.State() for the client relay
+code, err := c.Callback(q)    // q from remote.ParseCallback; ErrState | ErrDenied | ErrCallback
+tok, err := api.Exchange(ctx, c, code)          // Token{Access, Expiry, Refresh, Identity *{Sub, Email}}
+tok, err := api.Refresh(ctx, creds, kind, refresh, pinnedSub) // sub "" for a mailbox; Refresh always ""
+
+addr, err := api.Profile(ctx, mailboxAccess)
+exp, err := api.Watch(ctx, mailboxAccess, project, topic)     // time.Time from bounded decimal ms
+err = api.Stop(ctx, mailboxAccess)
+
+res, ok := google.Resource(account)                           // "pneu-<account>": topic and subscription ID
+err = api.ProbeTopics(ctx, ownerAccess, project)
+created, err := api.EnsureTopic(ctx, ownerAccess, project, res)
+changed, err := api.GrantPublisher(ctx, ownerAccess, project, res)  // IAM v3 RMW, ≤ PolicyAttempts
+created, err := api.EnsureSubscription(ctx, ownerAccess, project, res, res, install) // *MismatchError{Field, OtherInstall}
+err = api.CheckSubscription(ctx, ownerAccess, project, res, res, install)
+ackIDs, err := api.Pull(ctx, ownerAccess, project, res)       // ≤ 10 IDs, bodies never decoded
+err = api.Ack(ctx, ownerAccess, project, res, ackIDs)
+```
+
+Validators: `ValidProject`, `ValidClientID`, `ValidSecret`, `ValidAddress`,
+`SameAddress`, `ValidSub`, `ValidInstall`, `ValidRefresh`. Codes:
+`google.Codes`; ops: `google.Ops`.
+
+**`internal/google/googletest`**: `f := googletest.New(t)`; `f.API()` /
+`f.NewAPI(opts)` (on `f.Clock`); `f.Credentials()`, `f.Project`;
+`f.AddUser(email)`, `f.Approve(consentURL, email)` / `f.Deny(url)` (the
+callback query), `f.Revoke(email)`, `f.MutateNextToken`,
+`f.MutateNextClaims`; failures: `f.Fail(op, Failure{Status, Body, Drop,
+Stall, Times})`, `f.FailCode(op, code, times)`, `googletest.Answer(op,
+code)`, `f.ClearFailures()`; the log: `f.Calls(op)`, `f.Requests()`;
+Gmail: `f.Watch(email)`, `f.Stops(email)`, `f.Notify(email)` (new mail);
+Pub/Sub: `f.AddTopic`, `f.HasTopic`, `f.SetPolicy`, `f.Policy`,
+`f.PolicyWrites`, `f.RacePolicy(topic, n)`, `f.SetSubscription`,
+`f.Subscription`, `f.Publish(sub, n)`, `f.Redeliver(sub)`, `f.Queued`,
+`f.Outstanding`, `f.Acked`, `f.PullHold`; clock: `f.Clock.Now/Advance/Set/After/Waiters`.
+
+**`internal/push/state`**:
+
+```go
+s := state.Store{Dir: state.Dir(web.StateDir())}
+snap, err := s.Load()                 // Snapshot{File, Hash}; ErrNoState; no lock (the daemon's read)
+l, err := s.Lock(ctx)                 // push.lock; l.Unlock()
+snap, err := l.Update(func(f *state.File) error { … }) // generation+1, validated, atomic; Generation 0 = new
+snap, err := l.Current()
+c, err := l.WriteClient(clientJSONBytes) // Client{ID, Secret, Project}; c.Credentials()
+c, err := s.LoadClient()
+err = state.CheckClient(snap.File, c)  // same project and recorded client
+d, err := s.TryDaemonLock()            // ErrDaemonRunning; d.Unlock()
+running, err := s.DaemonRunning()      // probe only
+id := state.NewInstall()
+```
+
+`File{Generation, Project, Install, Client, Owner{Sub, Email, Refresh,
+Granted}, Accounts map[string]Account{State On|OffPending, Address,
+Refresh, Granted}}`.
+
+**`internal/control`**: `Handler.PushReload func(gen uint64, hash string)
+(control.Reload, error)` returning `ReloadApplied | ReloadStale |
+ReloadMismatch`; `Handler.PushState func(account string)
+control.PushState` (`{Instance (filled in if empty), Generation, State,
+Reason, LastDelivery}`; states `PushOff|PushStarting|PushDelivering|
+PushQuiet|PushFailing|PushReauth`, reasons `ReauthReasons` /
+`FailingReasons`). CLI side: `control.ReloadPush(path, gen, hash)
+(Reload, error)` and `control.AskPushState(path, account)`, with
+`ErrNotRunning` (never proof of no daemon: take daemon.lock) and
+`ErrPushOff`.
+
+**`internal/gmi`**: `Engine.Nudge(account) error`; `gmi.NudgeGap` (5s).
