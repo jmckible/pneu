@@ -151,7 +151,7 @@ func TestReloadNewCredential(t *testing.T) {
 	if cur == old || cur == nil {
 		t.Fatal("no new worker")
 	}
-	e.until("pulled", func() bool { return e.state("personal").State == control.PushQuiet })
+	e.until("pulled", func() bool { return e.state("personal").State == control.PushListening })
 }
 
 // A new owner credential restarts every worker; an unchanged reload

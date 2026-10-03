@@ -18,7 +18,8 @@ test('line: each state in words; absent or anything unknown is off', () => {
   assert.equal(P.line({ state: 'delivering', lastDelivery: '2026-10-03T12:00:30Z' }, server).text, 'Instant: delivering · last message just now');
   assert.equal(P.line({ state: 'delivering' }, server).text, 'Instant: delivering');
   assert.equal(P.line({ state: 'delivering', lastDelivery: 'yesterday' }, server).text, 'Instant: delivering');
-  assert.deepEqual(P.line({ state: 'quiet' }, server), { text: 'Instant: quiet', fix: null });
+  assert.deepEqual(P.line({ state: 'quiet' }, server), { text: 'Instant: quiet · nothing in 24h', fix: null });
+  assert.deepEqual(P.line({ state: 'listening' }, server), { text: 'Instant: listening · no message since pneu started', fix: null });
   assert.deepEqual(P.line({ state: 'starting' }, server), { text: 'Instant: starting', fix: null });
   for (const p of [undefined, null, {}, 'delivering', { state: 'off' }, { state: 'constructor' }, { state: 'toString' },
     { state: '__proto__' }, { state: '<b>x</b>' }, { state: ['quiet'] }]) {

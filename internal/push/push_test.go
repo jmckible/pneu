@@ -65,7 +65,6 @@ func TestTwoPullsAndTheEmptyFloor(t *testing.T) {
 		t.Fatalf("%d pulls with one message and Google holding: want %d outstanding plus the one that delivered", n, Pulls)
 	}
 
-
 	// Every empty pull answered at once: with no fake time passing, no
 	// pull loop re-pulls.
 	e2 := newEnv(t, "personal")
@@ -148,7 +147,7 @@ func TestStalledPullsFail(t *testing.T) {
 	e.f.Fail(google.OpPull, googletest.Failure{Stall: true, Times: -1})
 	e.start()
 	e.eventually("watched", func() bool { return e.watchCalls("personal") == 1 })
-	e.until("quiet: watched, nothing pulled", e.is("personal", control.PushQuiet, ""))
+	e.until("quiet: watched, nothing pulled", e.is("personal", control.PushListening, ""))
 	e.pump("failing", 5*time.Second, FailAfter+HealthTick*2, e.is("personal", control.PushFailing, control.ReasonNetwork))
 	if n := e.subCalls(google.OpPull, "personal"); n < Pulls*2 {
 		t.Fatalf("stalled pulls weren't cut and retried: %d", n)
@@ -565,7 +564,7 @@ func TestWatchNeverUp(t *testing.T) {
 	e.f.PullHold = 0
 	e.f.FailCode(google.OpWatch, google.CodePermission, -1)
 	e.start()
-	e.until("quiet: pulls answer", e.is("personal", control.PushQuiet, ""))
+	e.until("quiet: pulls answer", e.is("personal", control.PushListening, ""))
 	e.pump("failing", 5*time.Second, FailAfter+HealthTick*2, e.is("personal", control.PushFailing, control.ReasonPermission))
 }
 
@@ -643,4 +642,31 @@ func TestWakeRenewsWatch(t *testing.T) {
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
+}
+
+// A worker with watch and pulls fine but no message yet is listening
+// until it has run DeliveringFor (a restart forgets lastDelivery, and
+// renewing a live watch publishes nothing); quiet only after that. A
+// wake doesn't restart the clock.
+func TestHealthListening(t *testing.T) {
+	t0 := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	f := facts{since: t0, started: t0, lastPullOK: t0, watched: true, watchExp: t0.Add(7 * 24 * time.Hour)}
+	at := func(d time.Duration) time.Time { return t0.Add(d) }
+	ok := func(f facts, now time.Time, want string) {
+		t.Helper()
+		f.lastPullOK = now
+		if st, r := f.health(now); st != want || r != "" {
+			t.Fatalf("at %v: %s %q, want %s", now.Sub(t0), st, r, want)
+		}
+	}
+	ok(f, at(time.Minute), control.PushListening)
+	ok(f, at(DeliveringFor-time.Minute), control.PushListening)
+	ok(f, at(DeliveringFor), control.PushQuiet)
+	woke := f
+	woke.since = at(DeliveringFor - time.Minute)
+	ok(woke, at(DeliveringFor+time.Minute), control.PushQuiet)
+	got := f
+	got.lastDelivery = at(time.Hour)
+	ok(got, at(2*time.Hour), control.PushDelivering)
+	ok(got, at(time.Hour+DeliveringFor), control.PushQuiet)
 }

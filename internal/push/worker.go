@@ -38,6 +38,7 @@ type worker struct {
 // facts are what health is computed from (D5, K12), all wall-clock.
 type facts struct {
 	since        time.Time // the worker's start, or the last wake
+	started      time.Time // the worker's start; a wake leaves it
 	lastPullOK   time.Time // last 2xx pull, empty or not
 	watched      bool      // a watch renewed since the worker started
 	watchExp     time.Time
@@ -50,7 +51,10 @@ type facts struct {
 // health is the state, first match wins: reauth, then failing (no 2xx
 // pull for FailAfter since the worker started or woke, the watch has
 // lapsed, or none was ever had in FailAfter), then starting (neither a 2xx pull nor a watch yet), then
-// delivering (a message within DeliveringFor), then quiet.
+// delivering (a message within DeliveringFor), then listening (no
+// message yet, the worker younger than DeliveringFor: lastDelivery lives
+// in memory, so a restart starts here), then quiet (nothing for
+// DeliveringFor).
 func (f facts) health(now time.Time) (string, string) {
 	ref := f.since
 	if f.lastPullOK.After(ref) {
@@ -76,6 +80,8 @@ func (f facts) health(now time.Time) (string, string) {
 		return control.PushStarting, ""
 	case !f.lastDelivery.IsZero() && now.Sub(f.lastDelivery) < DeliveringFor:
 		return control.PushDelivering, ""
+	case f.lastDelivery.IsZero() && now.Sub(f.started) < DeliveringFor:
+		return control.PushListening, ""
 	}
 	return control.PushQuiet, ""
 }
@@ -104,6 +110,7 @@ func (m *Manager) newWorker(name, res, project string, a state.Account, creds go
 	w := &worker{m: m, name: name, res: res, project: project, key: mailboxKey(a), owner: m.owner,
 		mbx: mailboxSource{creds: creds, refresh: a.Refresh}, ctx: ctx, cancel: cancel}
 	w.f.since = m.clock.Now()
+	w.f.started = w.f.since
 	return w
 }
 

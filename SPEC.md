@@ -131,7 +131,8 @@ them here if they're wrong.
   `?` overlay leads with the same: per account, the last sync as a time
   and an age, whether it's checking now or queued, failures and the last
   error, and its instant mail (docs/push.md D7): `Instant: delivering ·
-  last message 2m ago`, `Instant: quiet`, `Instant: starting`, `Instant:
+  last message 2m ago`, `Instant: listening · no message since pneu
+  started`, `Instant: quiet · nothing in 24h`, `Instant: starting`, `Instant:
   off`, or `Instant: failing — <reason in words>` with the command that
   fixes it (`pneu account push <name>`; `pneu push init --reconsent` for
   the push owner's grant; for an API, permission or org policy,

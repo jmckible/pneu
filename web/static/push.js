@@ -13,7 +13,7 @@
   // reason lists); absent is off. A reason's fix: run (the account's
   // `pneu account push`), init (`pneu push init --reconsent`), explain
   // (`pneu account push` prints the fix in full), or none.
-  var PLAIN = { starting: 'starting', quiet: 'quiet' };
+  var PLAIN = { starting: 'starting', listening: 'listening · no message since pneu started', quiet: 'quiet · nothing in 24h' };
   var REAUTH = {
     'owner-reauth': { words: "the push owner's Google grant expired or was revoked", fix: 'init' },
     'mailbox-reauth': { words: "this mailbox's grant for instant mail expired or was revoked", fix: 'run' },

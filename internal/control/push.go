@@ -65,13 +65,14 @@ const (
 	PushOff        = "off"
 	PushStarting   = "starting"
 	PushDelivering = "delivering"
+	PushListening  = "listening"
 	PushQuiet      = "quiet"
 	PushFailing    = "failing"
 	PushReauth     = "reauth"
 )
 
 // PushStates are every state, the only values PushState.State may take.
-var PushStates = []string{PushOff, PushStarting, PushDelivering, PushQuiet, PushFailing, PushReauth}
+var PushStates = []string{PushOff, PushStarting, PushDelivering, PushListening, PushQuiet, PushFailing, PushReauth}
 
 // The closed reasons (D5): the reauth ones only with PushReauth, the
 // rest only with PushFailing.

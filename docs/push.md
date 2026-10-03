@@ -275,7 +275,10 @@ worker per `on` account.
   - state, first match wins: `reauth` (owner or mailbox `invalid_grant`)
     → `failing` (no 2xx pull for 3 min, or now ≥ `watchExp`) → `starting`
     (no 2xx pull and no watch since this worker started) → `delivering`
-    (a message within 24h) → `quiet`.
+    (a message within 24h) → `listening` (no message yet, the worker
+    younger than 24h; added live: `lastDelivery` lives in memory and
+    renewing a live watch publishes nothing, so every restart read
+    `quiet` until the next mail) → `quiet` (nothing for 24h).
   - `reason`, closed: `owner-reauth`, `mailbox-reauth`, `api-disabled`,
     `permission`, `org-policy`, `network`, `watch-expired`, `unknown`.
 
@@ -495,9 +498,11 @@ pull failure's code as `api-disabled`/`permission` (scope too)/
 `org-policy`/`network` (unavailable too)/`unknown`, `network` when none
 was recorded; a lapsed watch is `watch-expired` unless its last renewal
 failed with an actionable code. `since` resets on a wake, so the 3
-minutes count again from it. Each 24h renewal makes Gmail publish one
-message (C4), so a working watch tends to read `delivering`, not
-`quiet`; the live step should look at whether that matters.
+minutes count again from it. Live (2026-10-03), renewing a watch that
+was still alive published nothing (C4's message is a new watch's), so a
+restarted daemon heard nothing until real mail: `listening` (above)
+covers the first 24h of a worker with no message, and `quiet` keeps its
+meaning. googletest's fake still publishes on every watch.
 
 **Logs**: `push <account>: <google op>: <code>` on a failure whose code
 changed, `pulling again` / `watch renewed` on recovery, the reauth lines
@@ -687,7 +692,8 @@ output (pushwords.go is the only place failures become words).
   carries `push` as cleaned.
 - **Page** (`web/static/push.js`, `web/push.test.js`; app.js builds text
   nodes and `<code>` only): per account `Instant: delivering · last
-  message 2m ago` / `quiet` / `starting` / `off` / `failing — <words>`
+  message 2m ago` / `listening · no message since pneu started` /
+  `quiet · nothing in 24h` / `starting` / `off` / `failing — <words>`
   (reauth reads as failing too). Fixes: mailbox-reauth, watch-expired,
   unknown → `Run pneu account push <name>.`; owner-reauth → `Run pneu
   push init --reconsent.`; api-disabled, permission, org-policy →
