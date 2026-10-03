@@ -724,7 +724,11 @@ func (e *pushEnv) awaitDelivery(name string, gen uint64, instance string, since 
 					o.say("Instant mail is on for %s: its subscription is delivering. It existed before this run, so that shows messages arrive, not that this watch sent them.", name)
 				case restarted:
 					o.say("Instant mail is on for %s: its subscription is delivering. the pneu answering couldn't be confirmed as the one that took this generation, so that shows messages arrive, not that this watch sent them.", name)
-				case p.LastDelivery.Before(since.Truncate(time.Second)): // the wire's to the second
+				case p.LastDelivery.Before(since.Truncate(time.Second)):
+					// The wire's to the second, so a message in the hand-over's
+					// own second counts: an older one in that second would
+					// need the subscription deleted, made again and committed
+					// within it.
 					o.say("Instant mail is on for %s: pneu kept the worker it already ran for it, which is delivering, its last message from before this run. That shows messages arrive, not that this watch sent them.", name)
 				default:
 					o.say("Instant mail is on for %s: Gmail's watch delivered its first notification.", name)

@@ -11,6 +11,7 @@ package main
 // delivering is the one measured.
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -34,8 +35,22 @@ import (
 // expiry and watch expiration read it too), real waits.
 type seamClock struct{ wall *googletest.Clock }
 
-// runWall moves c along with real time until the test ends.
-func runWall(t *testing.T, c *googletest.Clock) {
+// wallMover moves the fake's clock along with real time until the test
+// ends; jump moves it on by more. One mutex for both: Advance reads and
+// sets in two steps, so two writers could undo each other.
+type wallMover struct {
+	mu sync.Mutex
+	c  *googletest.Clock
+}
+
+func (w *wallMover) advance(d time.Duration) {
+	w.mu.Lock()
+	w.c.Advance(d)
+	w.mu.Unlock()
+}
+
+func runWall(t *testing.T, c *googletest.Clock) *wallMover {
+	w := &wallMover{c: c}
 	done := make(chan struct{})
 	stopped := make(chan struct{})
 	go func() {
@@ -48,44 +63,59 @@ func runWall(t *testing.T, c *googletest.Clock) {
 			case <-time.After(5 * time.Millisecond):
 			}
 			now := time.Now()
-			c.Advance(now.Sub(last))
+			w.advance(now.Sub(last))
 			last = now
 		}
 	}()
 	t.Cleanup(func() { close(done); <-stopped })
+	return w
 }
 
 func (c seamClock) Now() time.Time                         { return c.wall.Now() }
 func (c seamClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
 
 // seamEngine is the sync engine as push sees it: it records each nudge.
-// With slow set, a nudge takes that long (the real one returns at once):
-// a worker caught in one can't finish until it returns, which widens the
-// window a reload's join has to cover.
+// With a gate set, a nudge waits for it to close (the real one returns at
+// once): a worker caught in one can't finish until it's let go, which
+// holds a reload's join open for as long as a test needs.
 type seamEngine struct {
 	mu   sync.Mutex
 	n    map[string]int
-	slow time.Duration
+	gate chan struct{}
 	busy int // nudges under way
 }
 
 func (g *seamEngine) Nudge(account string) error {
 	g.mu.Lock()
 	g.n[account]++
-	slow := g.slow
+	gate := g.gate
 	g.busy++
 	g.mu.Unlock()
-	time.Sleep(slow)
+	if gate != nil {
+		<-gate
+	}
 	g.mu.Lock()
 	g.busy--
 	g.mu.Unlock()
 	return nil
 }
 
-func (g *seamEngine) setSlow(d time.Duration) {
+// hold makes nudges wait from now on; the func lets them (and later ones)
+// go.
+func (g *seamEngine) hold() (release func()) {
+	gate := make(chan struct{})
 	g.mu.Lock()
-	g.slow = d
+	g.gate = gate
 	g.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			g.mu.Lock()
+			g.gate = nil
+			g.mu.Unlock()
+			close(gate)
+		})
+	}
 }
 
 func (g *seamEngine) nudging() bool {
@@ -109,6 +139,7 @@ type ackRec struct {
 	err     error
 	reqs    int
 	workers int
+	lost    bool // applied, but the answer sent was an error (a lost ack)
 }
 
 // seamDaemon is the server daemon's push half, wired as serve does: the
@@ -121,7 +152,12 @@ type seamDaemon struct {
 
 	mu   sync.Mutex
 	acks []ackRec
-	once sync.Once
+	// entered, when set, is told each push-reload as it arrives; loseAck,
+	// when it says so, turns that generation's answer into an error after
+	// the manager has answered (the ack lost on its way back).
+	entered func(gen uint64)
+	loseAck func(gen uint64) bool
+	once    sync.Once
 }
 
 // seam is one machine: a config, the CLI's env from newPushEnv (Google
@@ -130,6 +166,7 @@ type seamDaemon struct {
 type seam struct {
 	t      *testing.T
 	f      *googletest.Fake
+	wall   *wallMover
 	e      *pushEnv
 	out    *lockedBuf
 	engine *seamEngine
@@ -149,7 +186,7 @@ func newSeam(t *testing.T, accounts ...string) *seam {
 	t.Helper()
 	f := googletest.New(t)
 	f.PullHold = 2 * time.Second // a pull waits for the watch's message
-	runWall(t, f.Clock)
+	wall := runWall(t, f.Clock)
 	f.AddUser(ownerAddr)
 	var accts []string
 	for i := 0; i+1 < len(accounts); i += 2 {
@@ -173,7 +210,7 @@ func newSeam(t *testing.T, accounts ...string) *seam {
 	t.Setenv("XDG_RUNTIME_DIR", run)
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
 
-	s := &seam{t: t, f: f, out: &lockedBuf{}, engine: &seamEngine{n: map[string]int{}}, errs: make(chan error, 16)}
+	s := &seam{t: t, f: f, wall: wall, out: &lockedBuf{}, engine: &seamEngine{n: map[string]int{}}, errs: make(chan error, 16)}
 	var port int
 	out := termPush{w: s.out,
 		listen: func() ([]net.Listener, error) {
@@ -295,11 +332,23 @@ func (s *seam) listenDaemon() *seamDaemon {
 	})
 	srv, err := control.Listen(s.e.socket, control.Handler{
 		PushReload: func(gen uint64, hash string) (control.Reload, error) {
+			d.mu.Lock()
+			entered, loseAck := d.entered, d.loseAck
+			d.mu.Unlock()
+			if entered != nil {
+				entered(gen)
+			}
 			r, err := d.m.Reload(gen, hash)
 			rec := ackRec{gen: gen, r: r, err: err, reqs: len(s.f.Requests()), workers: workerGoroutines()}
+			if err == nil && loseAck != nil && loseAck(gen) {
+				rec.lost = true
+			}
 			d.mu.Lock()
 			d.acks = append(d.acks, rec)
 			d.mu.Unlock()
+			if rec.lost {
+				return 0, errors.New("the ack was lost")
+			}
 			return r, err
 		},
 		PushState: d.m.State,
@@ -345,6 +394,19 @@ func (d *seamDaemon) ack(gen uint64) (ackRec, bool) {
 		}
 	}
 	return ackRec{}, false
+}
+
+// acksFor is every answer to generation gen's push-reloads, in order.
+func (d *seamDaemon) acksFor(gen uint64) []ackRec {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var out []ackRec
+	for _, a := range d.acks {
+		if a.gen == gen {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 func (d *seamDaemon) ackCount() int {
@@ -586,9 +648,24 @@ func TestPushSeamOff(t *testing.T) {
 		t.Fatalf("on: %v\n%s", err, s.out.String())
 	}
 	s.waitNudges("personal", 1)
-	s.engine.setSlow(700 * time.Millisecond) // inside JoinWait
+	release := s.engine.hold()
+	defer release()
 	s.f.Notify(mailAddr)
 	s.eventually("a nudge under way", s.engine.nudging)
+	// Let the nudge go a moment after off-pending's reload arrives, well
+	// inside JoinWait: the ack has to wait for it.
+	var heldAtReload bool
+	d.mu.Lock()
+	d.entered = func(gen uint64) {
+		if gen == 3 {
+			held := s.engine.nudging()
+			d.mu.Lock()
+			heldAtReload = held
+			d.mu.Unlock()
+			time.AfterFunc(300*time.Millisecond, release)
+		}
+	}
+	d.mu.Unlock()
 
 	s.out.Reset()
 	if err := s.e.off("personal"); err != nil {
@@ -599,6 +676,12 @@ func TestPushSeamOff(t *testing.T) {
 	pending, ok := d.ack(3)
 	if !ok || pending.r != control.ReloadApplied || pending.err != nil {
 		t.Fatalf("off-pending's reload: %+v %v", pending, ok)
+	}
+	d.mu.Lock()
+	held := heldAtReload
+	d.mu.Unlock()
+	if !held {
+		t.Fatal("the worker wasn't caught in its nudge when the reload came")
 	}
 	if pending.workers != 0 || s.engine.nudging() {
 		t.Fatalf("off-pending acknowledged with %d worker goroutines running (nudging %v)", pending.workers, s.engine.nudging())
@@ -846,7 +929,7 @@ func TestPushSeamRecreatedSubscription(t *testing.T) {
 	s.waitNudges("personal", 1)
 	// A minute on, the subscription is deleted and made again: Google's
 	// create answers with the new resource.
-	s.f.Clock.Advance(time.Minute)
+	s.wall.advance(time.Minute)
 	raw := s.f.Subscription("pneu-personal")
 	s.f.SetSubscription("pneu-personal", "pneu-personal", raw)
 	s.f.Fail(google.OpSubMake, googletest.Failure{Status: http.StatusOK, Body: raw})
@@ -878,7 +961,8 @@ func TestPushSeamOffJoinTimeout(t *testing.T) {
 		t.Fatalf("on: %v\n%s", err, s.out.String())
 	}
 	s.waitNudges("personal", 1)
-	s.engine.setSlow(push.JoinWait + time.Second)
+	release := s.engine.hold()
+	defer release()
 	s.f.Notify(mailAddr)
 	s.eventually("a nudge under way", s.engine.nudging)
 
@@ -899,8 +983,8 @@ func TestPushSeamOffJoinTimeout(t *testing.T) {
 		t.Fatalf("draining worker reported as %+v", p)
 	}
 
+	release()
 	s.eventually("the nudge done", func() bool { return !s.engine.nudging() })
-	s.engine.setSlow(0)
 	s.out.Reset()
 	if err := s.e.off("personal"); err != nil {
 		t.Fatalf("off again: %v\n%s", err, s.out.String())
@@ -938,9 +1022,11 @@ func TestPushSeamDaemonStopping(t *testing.T) {
 	s.waitNudges("personal", 1)
 }
 
-// The owner's grant revoked: every worker reports reauth (owner), which
-// the CLI's wait would stop on; plain push init notices the dead grant,
-// consents, and its hand-over brings every worker back.
+// The owner's grant revoked while account push runs, after its own
+// checks: the generation is acknowledged, the new worker's first refresh
+// is invalid_grant, and the CLI's wait stops on the daemon's reauth
+// (owner) with the fix. Every worker is stopped. Plain push init notices
+// the dead grant, consents, and its hand-over brings every worker back.
 func TestPushSeamOwnerReauth(t *testing.T) {
 	const workAddr = "work@example.com"
 	s := newSeam(t, "personal", mailAddr, "work", workAddr)
@@ -949,38 +1035,91 @@ func TestPushSeamOwnerReauth(t *testing.T) {
 	if err := s.firstInit(); err != nil {
 		t.Fatal(err)
 	}
-	for name, addr := range map[string]string{"personal": mailAddr, "work": workAddr} {
-		if err := s.on(name, addr); err != nil {
-			t.Fatalf("on %s: %v\n%s", name, err, s.out.String())
-		}
+	if err := s.on("personal", mailAddr); err != nil {
+		t.Fatalf("on personal: %v\n%s", err, s.out.String())
 	}
-	s.f.Revoke(ownerAddr)
+	tp := s.e.out.(termPush)
+	s.e.out = sayHook{termPush: tp, hook: func(line string) {
+		if strings.HasPrefix(line, "  committed: work is on") {
+			s.f.Revoke(ownerAddr)
+		}
+	}}
+	s.out.Reset()
+	err := s.on("work", workAddr)
+	s.e.out = tp
+	if err == nil || !strings.Contains(err.Error(), "work is on, but pneu reports") || !strings.Contains(err.Error(), "pneu push init --reconsent") {
+		t.Fatalf("on work: %v\n%s", err, s.out.String())
+	}
+	s.neverSays("Instant mail is on", "not proven")
+	gen := s.load().Generation
+	if a, ok := d.ack(gen); !ok || a.r != control.ReloadApplied {
+		t.Fatalf("work's reload: %+v %v", a, ok)
+	}
 	for _, name := range []string{"personal", "work"} {
 		s.eventually(name+" reauth", func() bool {
 			p := s.pushState(name)
-			return p.State == control.PushReauth && p.Reason == control.ReasonOwnerReauth
+			return p.State == control.PushReauth && p.Reason == control.ReasonOwnerReauth && p.Generation == gen
 		})
 	}
-	if n := workerGoroutines(); n != 0 {
-		t.Fatalf("%d worker goroutines after the owner's reauth", n)
-	}
-	// account push says so instead of claiming anything.
-	s.out.Reset()
-	if err := s.on("personal", mailAddr); err == nil {
-		t.Fatalf("on with the owner revoked:\n%s", s.out.String())
-	}
-	s.neverSays("Instant mail is on")
+	s.eventually("every worker stopped", func() bool { return workerGoroutines() == 0 })
 
 	s.out.Reset()
 	if err := s.init(initParams{}); err != nil {
 		t.Fatalf("init: %v\n%s", err, s.out.String())
 	}
 	s.says("the owner's stored grant ("+ownerAddr+") no longer works; asking again", "The running pneu has it.")
-	gen := s.load().Generation
+	gen = s.load().Generation
 	for _, name := range []string{"personal", "work"} {
 		s.delivering(name, gen)
-		if s.watches(name) != 2 {
-			t.Fatalf("%s watched %d times", name, s.watches(name))
+	}
+	if s.watches("personal") != 2 {
+		t.Fatalf("personal watched %d times", s.watches("personal"))
+	}
+}
+
+// --off whose ack is lost after the daemon applied off-pending: pending,
+// nothing deleted. Run again, the same generation goes over, and the
+// daemon, having applied it, acknowledges it as it is.
+func TestPushSeamOffLostAck(t *testing.T) {
+	s := newSeam(t, "personal", mailAddr)
+	d := s.startDaemon()
+	d.ready()
+	if err := s.firstInit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.on("personal", mailAddr); err != nil {
+		t.Fatalf("on: %v\n%s", err, s.out.String())
+	}
+	lost := false
+	d.mu.Lock()
+	d.loseAck = func(gen uint64) bool {
+		if gen == 3 && !lost {
+			lost = true
+			return true
 		}
+		return false
+	}
+	d.mu.Unlock()
+	err := s.e.off("personal")
+	if err == nil || !strings.Contains(err.Error(), "hasn't confirmed its worker is gone") || !strings.Contains(err.Error(), "Nothing was deleted") {
+		t.Fatalf("off: %v\n%s", err, s.out.String())
+	}
+	if p := s.pushState("personal"); p.State != control.PushOff || p.Generation != 3 {
+		t.Fatalf("the daemon didn't apply off-pending: %+v", p)
+	}
+	if s.f.Calls(google.OpStop) != 0 {
+		t.Fatal("users.stop without the ack")
+	}
+	s.out.Reset()
+	if err := s.e.off("personal"); err != nil {
+		t.Fatalf("off again: %v\n%s", err, s.out.String())
+	}
+	s.says("off-pending already", "committed: personal removed (generation 4)")
+	acks := d.acksFor(3)
+	if len(acks) != 2 || !acks[0].lost || acks[1].lost || acks[1].r != control.ReloadApplied || acks[1].workers != 0 {
+		t.Fatalf("off-pending's reloads: %+v", acks)
+	}
+	if s.f.Stops(mailAddr) != 1 {
+		t.Fatalf("%d stops", s.f.Stops(mailAddr))
 	}
 }
