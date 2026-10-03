@@ -115,10 +115,11 @@ func TestNudgeRespectsBackoff(t *testing.T) {
 	if gap := f.runs()[1].start.Sub(first.end); gap < 750*time.Millisecond {
 		t.Fatalf("nudge ran %v after a failure, inside the %v backoff", gap, 800*time.Millisecond)
 	}
-	st, _ := e.Status("personal")
-	if st.Failures != 2 {
-		t.Fatalf("failures %d", st.Failures)
-	}
+	// The second sync fails too, once it has ended.
+	waitFor(t, 3*time.Second, "two failures", func() bool {
+		st, _ := e.Status("personal")
+		return st.Failures == 2
+	})
 }
 
 // The poll goes on as before around nudges.
