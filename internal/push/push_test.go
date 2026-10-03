@@ -632,5 +632,15 @@ func TestWakeRenewsWatch(t *testing.T) {
 		t.Fatalf("renewed during the settle: %d", n)
 	}
 	e.advance(time.Second, time.Second)
-	e.eventually("renewed after the settle", func() bool { return e.watchCalls("personal") == 2 })
+	deadline := time.Now().Add(5 * time.Second)
+	for e.watchCalls("personal") != 2 {
+		if time.Now().After(deadline) {
+			e.m.mu.Lock()
+			su := e.m.settleUntil
+			e.m.mu.Unlock()
+			t.Fatalf("not renewed after the settle: %d calls, state %+v, settleUntil %v now %v mono %v waiters %d logs %q",
+				e.watchCalls("personal"), e.state("personal"), su, e.clock.Now(), e.clock.mono.Now(), e.clock.mono.Waiters(), e.logged())
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 }

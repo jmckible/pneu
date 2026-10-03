@@ -107,22 +107,29 @@ func (o *ownerSource) run(fl *flight, ep uint64, ectx context.Context) {
 	tok, err := o.m.api.Refresh(ctx, o.creds, google.Owner, o.refresh, o.sub)
 	o.m.after(google.OpRefresh)
 	done()
-	o.mu.Lock()
-	switch {
-	case o.m.epochNow() != ep:
+	// Stored, or the grant marked dead, only with no wake since the
+	// refresh began.
+	dead := false
+	if !o.m.inEpoch(ep, func() {
+		o.mu.Lock()
+		defer o.mu.Unlock()
+		switch {
+		case err == nil:
+			o.access, o.renew, o.epoch = tok.Access, renewAt(o.m.clock.Now(), tok.Expiry), ep
+			fl.access = tok.Access
+		case google.CodeOf(err) == google.CodeInvalidGrant:
+			o.dead, dead = true, true
+			err = errReauth
+		}
+	}) {
 		err = errStale
-	case err == nil:
-		o.access, o.renew, o.epoch = tok.Access, renewAt(o.m.clock.Now(), tok.Expiry), ep
-		fl.access = tok.Access
-	case google.CodeOf(err) == google.CodeInvalidGrant:
-		o.dead = true
-		err = errReauth
 	}
+	o.mu.Lock()
 	fl.err = err
 	o.flight = nil
 	o.mu.Unlock()
 	close(fl.done)
-	if err == errReauth {
+	if dead {
 		o.m.ownerReauth(o)
 	}
 }

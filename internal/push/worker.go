@@ -240,7 +240,7 @@ func (w *worker) pullLoop() {
 	lastEp := m.epochNow()
 	empty, retried := false, false
 	for {
-		if empty {
+		if empty && m.epochNow() == lastEp { // a wake since: straight to admit's settle
 			// Capped, so a wall clock stepped back can't stretch it.
 			if d := min(lastStart.Add(PullFloor).Sub(m.clock.Now()), PullFloor); d > 0 {
 				if !m.sleep(w.ctx, d, lastEp) {
@@ -375,8 +375,12 @@ func (w *worker) watchLoop() {
 		case w.ctx.Err() != nil:
 			return
 		case errors.Is(err, errReauth):
-			m.logf("push %s: mailbox: %s: a new consent is needed (pneu account push %s)", w.name, google.CodeInvalidGrant, w.name)
-			w.stopReauth(control.ReasonMailboxReauth)
+			if !m.inEpoch(ep, func() {
+				m.logf("push %s: mailbox: %s: a new consent is needed (pneu account push %s)", w.name, google.CodeInvalidGrant, w.name)
+				w.stopReauth(control.ReasonMailboxReauth)
+			}) {
+				continue // asked again after the settle
+			}
 			return
 		case errors.Is(err, errStale):
 			continue
