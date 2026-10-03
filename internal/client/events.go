@@ -22,6 +22,7 @@ import (
 	"mime"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,6 +31,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jmckible/pneu/internal/config"
+	"github.com/jmckible/pneu/internal/control"
 	"github.com/jmckible/pneu/internal/gmi"
 	"github.com/jmckible/pneu/internal/link"
 	"github.com/jmckible/pneu/internal/web"
@@ -372,10 +374,30 @@ func (s *sseReader) line() ([]byte, bool, error) {
 
 // upstreamHello is the server's hello as this end reads it.
 type upstreamHello struct {
-	Epoch    string            `json:"epoch"`
-	Gen      uint64            `json:"gen"`
-	Accounts []web.AccountView `json:"accounts"`
-	Status   *web.StatusDoc    `json:"status"`
+	Epoch    string       `json:"epoch"`
+	Gen      uint64       `json:"gen"`
+	Accounts []upAccount  `json:"accounts"`
+	Status   *upStatusDoc `json:"status"`
+}
+
+// upAccount, upStatusDoc and upStatusAccount are the account view and the
+// status doc as this end decodes them: push (D7) and pollEvery are kept
+// raw (the outer field shadows the embedded one), so a bad value there,
+// of any type, drops that field for the account, never the event.
+type upAccount struct {
+	web.AccountView
+	Push      json.RawMessage `json:"push"`
+	PollEvery json.RawMessage `json:"pollEvery"`
+}
+
+type upStatusDoc struct {
+	web.StatusDoc
+	Accounts []upStatusAccount `json:"accounts"`
+}
+
+type upStatusAccount struct {
+	web.StatusAccount
+	Push json.RawMessage `json:"push"`
 }
 
 var epochRE = regexp.MustCompile(`^[0-9a-f]{1,64}$`)
@@ -459,12 +481,12 @@ func (d *Daemon) take(u *upstream, ev sseEvent) {
 		ok = decode(ev.data, &e) && u.set[e.Account]
 		payload = web.AuthEvent{Account: e.Account, OK: e.OK, Error: plain(e.Error, maxEventText)}
 	case "account":
-		var e web.AccountView
+		var e upAccount
 		if decode(ev.data, &e) {
 			payload, ok = cleanAccount(e, u.set)
 		}
 	case "status":
-		var e web.StatusDoc
+		var e upStatusDoc
 		if decode(ev.data, &e) {
 			payload, ok = cleanStatus(e, u.set)
 		}
@@ -581,13 +603,16 @@ var (
 )
 
 // cleanAccount holds an account view to shape: a name in the set, enum
-// states, counts not below zero, times re-formatted, its error plain.
-func cleanAccount(a web.AccountView, set map[string]bool) (web.AccountView, bool) {
+// states, counts not below zero, times re-formatted, its error plain, its
+// push health and poll delay each held to shape or dropped.
+func cleanAccount(u upAccount, set map[string]bool) (web.AccountView, bool) {
+	a := u.AccountView
 	if !set[a.Name] || !validState(a.State) {
 		return web.AccountView{}, false
 	}
 	v := web.AccountView{Name: a.Name, State: a.State, Pulled: a.Pulled, Failures: max(a.Failures, 0),
-		Authing: a.Authing, Queued: a.Queued, Running: a.Running, LastSync: cleanTime(a.LastSync)}
+		Authing: a.Authing, Queued: a.Queued, Running: a.Running, LastSync: cleanTime(a.LastSync),
+		Push: cleanPush(u.Push, time.Now()), PollEvery: cleanPoll(u.PollEvery)}
 	if a.Error != nil {
 		e := plain(*a.Error, maxEventText)
 		v.Error = &e
@@ -613,7 +638,7 @@ func cleanProgress(p *web.ProgressView) *web.ProgressView {
 // cleanStatus holds a status doc to status.json's limits (N14): at most
 // maxAccounts accounts, all in the set, maxSenders senders, every string
 // plain and at most maxText runes.
-func cleanStatus(s web.StatusDoc, set map[string]bool) (web.StatusDoc, bool) {
+func cleanStatus(s upStatusDoc, set map[string]bool) (web.StatusDoc, bool) {
 	if len(s.Accounts) > maxAccounts || len(s.Senders) > maxSenders {
 		return web.StatusDoc{}, false
 	}
@@ -624,12 +649,14 @@ func cleanStatus(s web.StatusDoc, set map[string]bool) (web.StatusDoc, bool) {
 			out.Senders = append(out.Senders, n)
 		}
 	}
-	for _, a := range s.Accounts {
+	now := time.Now()
+	for _, u := range s.Accounts {
+		a := u.StatusAccount
 		if !set[a.Name] || !validState(a.State) {
 			return web.StatusDoc{}, false
 		}
 		sa := web.StatusAccount{Name: a.Name, Unread: max(a.Unread, 0), Pulled: a.Pulled, LastSync: cleanTime(a.LastSync),
-			Failures: max(a.Failures, 0), State: a.State}
+			Failures: max(a.Failures, 0), State: a.State, Push: cleanPush(u.Push, now)}
 		if a.Error != nil {
 			e := plain(*a.Error, maxText)
 			sa.Error = &e
@@ -643,6 +670,67 @@ func cleanStatus(s web.StatusDoc, set map[string]bool) (web.StatusDoc, bool) {
 		out.Accounts = append(out.Accounts, sa)
 	}
 	return out, true
+}
+
+// MaxPollEvery bounds an account's poll delay in seconds: the engine's
+// backoff caps at 15 minutes; a day is past anything it says.
+const MaxPollEvery = 24 * 60 * 60
+
+// cleanPoll is an account's pollEvery: whole seconds in [1, MaxPollEvery],
+// else 0 (absent).
+func cleanPoll(raw json.RawMessage) int {
+	var n int
+	if len(raw) == 0 || json.Unmarshal(raw, &n) != nil || n < 1 || n > MaxPollEvery {
+		return 0
+	}
+	return n
+}
+
+// deliveryRE is task 2's lastDelivery exactly: RFC 3339, UTC, to the second.
+var deliveryRE = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$`)
+
+// DeliverySkew is how far ahead of this machine's clock a push's last
+// delivery may be: the server's clock may run ahead, not by a day.
+const DeliverySkew = 24 * time.Hour
+
+// cleanPush holds an account's push health to D7's shape, field by field:
+// absent or null is off (nil); state one of control.PushStates but off
+// (absent is off); reason exactly when the state takes one, from that
+// state's closed list; lastDelivery RFC 3339 UTC to the second, from 2000
+// to a day past now. Anything else, of any type, is nil: push dropped for
+// the account, the rest of its view kept.
+func cleanPush(raw json.RawMessage, now time.Time) *web.PushView {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var p web.PushView
+	if json.Unmarshal(raw, &p) != nil || p.State == control.PushOff || !slices.Contains(control.PushStates, p.State) {
+		return nil
+	}
+	switch p.State {
+	case control.PushReauth:
+		if !slices.Contains(control.ReauthReasons, p.Reason) {
+			return nil
+		}
+	case control.PushFailing:
+		if !slices.Contains(control.FailingReasons, p.Reason) {
+			return nil
+		}
+	default:
+		if p.Reason != "" {
+			return nil
+		}
+	}
+	v := &web.PushView{State: p.State, Reason: p.Reason}
+	if p.LastDelivery != nil {
+		t, err := time.Parse(time.RFC3339, *p.LastDelivery)
+		if !deliveryRE.MatchString(*p.LastDelivery) || err != nil || t.Year() < 2000 || t.After(now.Add(DeliverySkew)) {
+			return nil
+		}
+		at := t.UTC().Format(time.RFC3339)
+		v.LastDelivery = &at
+	}
+	return v
 }
 
 // cleanView holds a view to shape: from a window id or nothing, threads
