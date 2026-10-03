@@ -1166,6 +1166,8 @@ type sayHook struct {
 	hook func(string)
 }
 
+func (t termPush) base() termPush { return t }
+
 func (s sayHook) say(format string, a ...any) {
 	s.hook(fmt.Sprintf(format, a...))
 	s.termPush.say(format, a...)
@@ -1265,5 +1267,76 @@ func TestPushOffDaemonGoesBetweenReloads(t *testing.T) {
 	}
 	if running, _ := pt.e.store.DaemonRunning(); running {
 		t.Fatal("daemon.lock still held after --off")
+	}
+}
+
+// cancelOut is a terminal whose context a hook can end mid-command, as a
+// remote client's stdin closing does.
+type cancelOut struct {
+	termPush
+	c    context.Context
+	hook func(string)
+}
+
+func (o cancelOut) ctx() context.Context { return o.c }
+func (o cancelOut) say(format string, a ...any) {
+	o.hook(fmt.Sprintf(format, a...))
+	o.termPush.say(format, a...)
+}
+
+// A command whose context ends after its last Google call (a remote
+// client gone, with no consent to cancel) commits nothing.
+func TestPushCancelledCommitsNothing(t *testing.T) {
+	pt := newPushTest(t)
+	pt.firstInit()
+	if err := pt.e.on("personal", false); err != nil {
+		t.Fatal(err)
+	}
+	gen := pt.load().Generation
+	for _, tc := range []struct {
+		after string
+		run   func() error
+	}{
+		{"subscription pneu-personal:", func() error { return pt.e.on("personal", false) }},
+		{"reaches project", func() error { return pt.init(initParams{}) }},
+	} {
+		ctx, cancel := context.WithCancel(context.Background())
+		pt.e.out = cancelOut{termPush: pt.e.out.(interface{ base() termPush }).base(), c: ctx, hook: func(line string) {
+			if strings.Contains(line, tc.after) {
+				cancel()
+			}
+		}}
+		if err := tc.run(); err == nil || !strings.Contains(err.Error(), "nothing was committed") {
+			t.Errorf("after %q: %v", tc.after, err)
+		}
+		cancel()
+		if pt.load().Generation != gen {
+			t.Fatalf("after %q: committed", tc.after)
+		}
+	}
+}
+
+// A restart during the wait weakens the proof: delivering then is worded
+// as messages arriving, not as this watch's.
+func TestPushAwaitDeliveryRestart(t *testing.T) {
+	pt := newPushTest(t)
+	d := startStubDaemon(t, pt.e)
+	pt.firstInit()
+	calls := 0
+	d.mu.Lock()
+	d.state = func(account string, gen uint64) control.PushState {
+		calls++
+		if calls == 1 {
+			return control.PushState{Instance: stubInstance, Generation: gen, State: control.PushStarting}
+		}
+		return control.PushState{Instance: "fedcba9876543210", Generation: gen, State: control.PushDelivering}
+	}
+	d.mu.Unlock()
+	if err := pt.e.on("personal", false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pt.out.String(), "pneu restarted during the wait, so that shows messages arrive, not that this watch sent them.") ||
+		strings.Contains(pt.out.String(), "Gmail's watch delivered its first notification") {
+		t.Fatalf("output:\n%s", pt.out.String())
 	}
 }

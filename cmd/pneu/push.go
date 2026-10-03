@@ -247,11 +247,21 @@ func cleanPushClient(c state.Client) []byte {
 	return b
 }
 
-// lock takes push.lock, waiting up to pushLockWait.
+// lock takes push.lock, waiting up to pushLockWait. A command whose
+// context has ended (a remote client gone) gets no lock, so it commits
+// nothing: Lock itself takes a free lock whatever the context says.
 func (e *pushEnv) lock() (*state.Locked, error) {
 	ctx, cancel := context.WithTimeout(e.out.ctx(), pushLockWait)
 	defer cancel()
-	return e.store.Lock(ctx)
+	l, err := e.store.Lock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if e.out.ctx().Err() != nil {
+		l.Unlock()
+		return nil, errors.New("stopped (the client went away); nothing was committed")
+	}
+	return l, nil
 }
 
 // consent runs one consent for kind and trades its code for tokens. The
@@ -672,6 +682,7 @@ func (e *pushEnv) awaitDelivery(name string, gen uint64, reused bool) error {
 	o.say("  waiting up to %v for Gmail's first notification", e.deliverWait)
 	deadline := time.Now().Add(e.deliverWait)
 	instance := ""
+	restarted := false
 	var last control.PushState
 	for {
 		p, err := control.AskPushState(e.socket, name)
@@ -688,13 +699,17 @@ func (e *pushEnv) awaitDelivery(name string, gen uint64, reused bool) error {
 		case p.Generation == gen:
 			if instance != "" && p.Instance != instance {
 				o.say("  (pneu restarted meanwhile)")
+				restarted = true
 			}
 			instance, last = p.Instance, p
 			switch p.State {
 			case control.PushDelivering:
-				if reused {
+				switch {
+				case reused:
 					o.say("Instant mail is on for %s: its subscription is delivering. It existed before this run, so that shows messages arrive, not that this watch sent them.", name)
-				} else {
+				case restarted:
+					o.say("Instant mail is on for %s: its subscription is delivering. pneu restarted during the wait, so that shows messages arrive, not that this watch sent them.", name)
+				default:
 					o.say("Instant mail is on for %s: Gmail's watch delivered its first notification.", name)
 				}
 				return nil
