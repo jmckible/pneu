@@ -502,7 +502,7 @@ pneu account push <name> --off
     shows messages arrive, not that this watch sent them." (reused
     subscription; similar wording if the daemon process changed);
   - "Instant mail is set up for N, but not proven: no notification reached
-    pneu within 1m0s (it reports S[: reason]). Everything stays in place,
+    pneu within 60s (it reports S[: reason]). Everything stays in place,
     and running pneu account push N again is safe." (exit 0);
   - reauth: an error naming the fix.
   Re-running is always safe; every provisioning step is idempotent.

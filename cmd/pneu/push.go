@@ -689,7 +689,7 @@ func pick(b bool, yes, no string) string {
 // timeout leaves everything in place and says what's unproven.
 func (e *pushEnv) awaitDelivery(name string, gen uint64, instance string, reused bool) error {
 	o := e.out
-	o.say("  waiting up to %v for Gmail's first notification", e.deliverWait)
+	o.say("  waiting up to %ds for Gmail's first notification", int(e.deliverWait.Seconds()))
 	deadline := time.Now().Add(e.deliverWait)
 	restarted := instance == ""
 	var last control.PushState
@@ -742,7 +742,7 @@ func (e *pushEnv) awaitDelivery(name string, gen uint64, instance string, reused
 			seen += ": " + reasonWords(last.Reason, name)
 		}
 	}
-	o.say("Instant mail is set up for %s, but not proven: no notification reached pneu within %v (%s). Everything stays in place, and running pneu account push %s again is safe.", name, e.deliverWait, seen, name)
+	o.say("Instant mail is set up for %s, but not proven: no notification reached pneu within %ds (%s). Everything stays in place, and running pneu account push %s again is safe.", name, int(e.deliverWait.Seconds()), seen, name)
 	return nil
 }
 
