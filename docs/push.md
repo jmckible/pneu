@@ -284,7 +284,9 @@ worker per `on` account.
   policies round-trip their unknown fields untouched but are never shown.
 - Scopes don't grant IAM (C1): each failure is classified separately into
   a closed local vocabulary: `scope`, `permission`, `api-disabled`,
-  `org-policy`, `not-found`, `conflict`, `invalid-grant`, `quota`,
+  `org-policy`, `not-found`, `conflict`, `invalid-grant`, `unauthenticated`
+  (an API call's access token refused, HTTP 401: drop it, refresh,
+  retry; only the refresh's `invalid-grant` means reauth), `quota`,
   `unavailable`, `network`, `unknown`, from the HTTP status, OAuth `error`
   codes and `error.details[].reason`, matched against fixed strings.
   Nothing Google wrote is logged, printed or sent in a remote event; this
@@ -362,7 +364,8 @@ What tasks 2 and 3 build on. Change one only with the other tasks told.
 
 **`internal/google`** (one `*API` per process; safe for concurrent use;
 every call takes a context and returns `*google.Error{Op, Code}` or the
-context's own error; `google.CodeOf(err)`):
+context's own error; `google.CodeOf(err)`; `CodeUnauthenticated` on an API
+call means drop the access token and refresh):
 
 ```go
 api := google.New(google.Options{Now, Timeout, PullTimeout}) // 30s / 90s defaults

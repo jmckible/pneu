@@ -775,3 +775,26 @@ func TestPullTimeout(t *testing.T) {
 		t.Fatalf("pull gave up after %v", d)
 	}
 }
+
+// A refused access token is unauthenticated (drop it, refresh); only the
+// refresh's invalid-grant means a consent is needed.
+func TestUnauthenticated(t *testing.T) {
+	f, api, owner, mbox := setup(t)
+	ctx := context.Background()
+	f.Clock.Advance(googletest.TokenLife + time.Second)
+	_, err := api.Profile(ctx, mbox.Access)
+	code(t, err, google.CodeUnauthenticated)
+	code(t, api.ProbeTopics(ctx, owner.Access, f.Project), google.CodeUnauthenticated)
+	r, err := api.Refresh(ctx, f.Credentials(), google.Mailbox, mbox.Refresh, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.Profile(ctx, r.Access); err != nil {
+		t.Fatal("refreshed token:", err)
+	}
+	f.Revoke("j@example.com")
+	_, err = api.Profile(ctx, r.Access)
+	code(t, err, google.CodeUnauthenticated)
+	_, err = api.Refresh(ctx, f.Credentials(), google.Mailbox, mbox.Refresh, "")
+	code(t, err, google.CodeInvalidGrant)
+}

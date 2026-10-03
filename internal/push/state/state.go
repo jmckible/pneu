@@ -460,7 +460,9 @@ func (c Client) String() string   { return "state.Client{" + c.ID + "}" }
 func (c Client) GoString() string { return c.String() }
 
 // Credentials is the client as google takes it.
-func (c Client) Credentials() google.Credentials { return google.Credentials{ID: c.ID, Secret: c.Secret} }
+func (c Client) Credentials() google.Credentials {
+	return google.Credentials{ID: c.ID, Secret: c.Secret}
+}
 
 // ErrNotDesktop: the client JSON isn't a Desktop client's.
 var ErrNotDesktop = errors.New("push: the client JSON isn't a Desktop app client's (its top level must be \"installed\")")

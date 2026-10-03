@@ -373,6 +373,8 @@ func Answer(op google.Op, code google.Code) Failure {
 		return apiErr(409, "ALREADY_EXISTS", "")
 	case google.CodeInvalidGrant:
 		return Failure{Status: 400, Body: `{"error":"invalid_grant"}`}
+	case google.CodeUnauthenticated:
+		return apiErr(401, "UNAUTHENTICATED", "")
 	case google.CodeQuota:
 		return apiErr(429, "RESOURCE_EXHAUSTED", "RATE_LIMIT_EXCEEDED")
 	case google.CodeUnavailable:

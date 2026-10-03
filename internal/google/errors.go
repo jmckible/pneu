@@ -22,15 +22,19 @@ const (
 	CodeNotFound     Code = "not-found"     // no such resource
 	CodeConflict     Code = "conflict"      // it already exists, or a concurrent change (an IAM etag) won
 	CodeInvalidGrant Code = "invalid-grant" // the refresh token or code is dead: a consent is needed
-	CodeQuota        Code = "quota"         // rate or quota limit
-	CodeUnavailable  Code = "unavailable"   // Google's side failed (5xx)
-	CodeNetwork      Code = "network"       // no answer: dial, TLS, timeout, a cut connection
-	CodeUnknown      Code = "unknown"       // anything else, including an answer pneu couldn't read or wouldn't accept
+	// CodeUnauthenticated: an API call's access token was refused (HTTP
+	// 401): expired, or its grant revoked. Drop it and refresh; a refresh
+	// that fails with invalid-grant is what calls for a consent.
+	CodeUnauthenticated Code = "unauthenticated"
+	CodeQuota           Code = "quota"       // rate or quota limit
+	CodeUnavailable     Code = "unavailable" // Google's side failed (5xx)
+	CodeNetwork         Code = "network"     // no answer: dial, TLS, timeout, a cut connection
+	CodeUnknown         Code = "unknown"     // anything else, including an answer pneu couldn't read or wouldn't accept
 )
 
 // Codes are every Code, for tests and checks on the other side of a wire.
 var Codes = []Code{CodeScope, CodePermission, CodeAPIDisabled, CodeOrgPolicy, CodeNotFound,
-	CodeConflict, CodeInvalidGrant, CodeQuota, CodeUnavailable, CodeNetwork, CodeUnknown}
+	CodeConflict, CodeInvalidGrant, CodeUnauthenticated, CodeQuota, CodeUnavailable, CodeNetwork, CodeUnknown}
 
 // Op names the call that failed, a constant per Google method.
 type Op string
@@ -165,6 +169,8 @@ func classify(status int, body []byte, oauth bool) Code {
 		return CodeScope
 	case status == http.StatusTooManyRequests || has(quotaReasons) || e.Error.Status == "RESOURCE_EXHAUSTED":
 		return CodeQuota
+	case status == http.StatusUnauthorized && !oauth:
+		return CodeUnauthenticated
 	case status == http.StatusForbidden:
 		return CodePermission
 	case status == http.StatusNotFound:
