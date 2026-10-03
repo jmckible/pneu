@@ -35,6 +35,7 @@ const accountUsage = `usage:
   pneu account add <name> <address> [--name "Full Name"] [--client-secret FILE]
   pneu account auth <name> [--force]
   pneu account status [<name>]
+  pneu account push <name> [--reconsent | --off]
 On a client each runs on its server over SSH (docs/client.md).`
 
 func account(args []string) error {
@@ -44,6 +45,9 @@ func account(args []string) error {
 	// The server's half of a client's command: the verb, then --stdin and
 	// nothing else; parameters come as JSON on stdin, events go to stdout.
 	if len(args) == 2 && args[1] == "--stdin" {
+		if remote.Verb(args[0]) == remote.PushInit {
+			return usageError{"pneu push init --stdin is push-init's server side"}
+		}
 		return accountStdin(remote.Verb(args[0]), os.Stdin, os.Stdout)
 	}
 	switch args[0] {
@@ -53,6 +57,8 @@ func account(args []string) error {
 		return accountAuth(args[1:])
 	case "status":
 		return accountStatus(args[1:])
+	case "push":
+		return accountPush(args[1:])
 	}
 	return usageError{fmt.Sprintf("unknown command %q\n%s", args[0], accountUsage)}
 }

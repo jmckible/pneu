@@ -5,6 +5,8 @@ package main
 // stdin and answers with line-delimited events on stdout (internal/remote).
 // For auth, stdin stays open for at most one more line: the consent
 // callback the client took from Google's redirect, replayed here to lieer.
+// push and push-init (push.go, `pneu push init --stdin`) take the same
+// line, checked here against push's own consent and never replayed.
 
 import (
 	"bufio"
@@ -27,6 +29,7 @@ import (
 
 	"github.com/jmckible/pneu/internal/config"
 	"github.com/jmckible/pneu/internal/gmi"
+	"github.com/jmckible/pneu/internal/google"
 	"github.com/jmckible/pneu/internal/remote"
 )
 
@@ -343,13 +346,87 @@ func runStdin(verb remote.Verb, in *bufio.Reader, o *eventOut) error {
 			names = []string{q.Name}
 		}
 		return doStatus(cfgPath, names, o)
+	case remote.Push:
+		q, err := remote.ParsePush(line)
+		if err != nil {
+			return err
+		}
+		go o.readCallback(in)
+		e, err := newPushEnv(cfgPath, o)
+		if err != nil {
+			return err
+		}
+		return e.on(q.Name, q.Reconsent)
+	case remote.PushOff:
+		q, err := remote.ParsePushOff(line)
+		if err == nil {
+			err = end()
+		}
+		if err != nil {
+			return err
+		}
+		e, err := newPushEnv(cfgPath, o)
+		if err != nil {
+			return err
+		}
+		return e.off(q.Name)
+	case remote.PushInit:
+		q, err := remote.ParsePushInit(line)
+		if err != nil {
+			return err
+		}
+		go o.readCallback(in)
+		e, err := newPushEnv(cfgPath, o)
+		if err != nil {
+			return err
+		}
+		p := initParams{project: q.Project, replace: q.Replace, reconsent: q.Reconsent}
+		if q.ClientSecret != "" {
+			p.client = []byte(q.ClientSecret)
+		}
+		return e.init(p)
 	}
 	return errors.New("unreachable")
 }
 
-// readCallback reads auth's one more line. The client keeps stdin open
-// until it has sent it, so an end before then means it's gone; a line
-// that isn't a callback (remote.ParseCallbackLine) ends the command.
+// pushConsent is push's consent from a client (docs/push.md D3, K8): the
+// consent URL goes out as an event, the client's relay answers Google's
+// redirect, and its query comes back as one line on stdin (readCallback).
+// That line is only a candidate: the caller checks its state against the
+// consent's own, here, and exchanges only its code. Nothing listens on
+// this machine's callback port. stdin's end before the line cancels the
+// command (readCallback); its end after the line is the client's normal
+// close.
+func (o *eventOut) pushConsent(c *google.Consent) (url.Values, error) {
+	u := c.URL()
+	if !gmi.ValidConsentURL(u) {
+		return nil, errors.New("the consent URL isn't Google's; not sending it")
+	}
+	if err := o.emit(remote.Event{Kind: remote.Consent, URL: u}); err != nil {
+		return nil, errors.New("the client went away")
+	}
+	t := time.NewTimer(consentWait)
+	defer t.Stop()
+	select {
+	case q := <-o.callback:
+		return q, nil
+	case <-o.c.Done():
+		o.mu.Lock()
+		cbErr := o.cbErr
+		o.mu.Unlock()
+		if cbErr != nil {
+			return nil, cbErr
+		}
+		return nil, errors.New("the client went away before Google's answer; nothing changed")
+	case <-t.C:
+		return nil, fmt.Errorf("consent wasn't given within %v; nothing changed", consentWait)
+	}
+}
+
+// readCallback reads a consent's one more line (auth's, push's). The
+// client keeps stdin open until it has sent it, so an end before then
+// means it's gone; a line that isn't a callback (remote.ParseCallbackLine)
+// ends the command.
 func (o *eventOut) readCallback(in *bufio.Reader) {
 	line, err := remote.ReadLine(in, remote.MaxCallback+64)
 	if err == nil {

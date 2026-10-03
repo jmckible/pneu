@@ -4,7 +4,8 @@
 //	pneu [serve] [-config path] [-listen addr]
 //	pneu open [-config path]
 //	pneu gmi [-config path] <account> <gmi args...>
-//	pneu account add|auth|status ...
+//	pneu account add|auth|status|push ...
+//	pneu push init ...
 //	pneu peer add --stdin | list | remove <name>
 //	pneu client pair [-name <name>] <ssh-target> | unpair
 //	pneu agent [-print]
@@ -62,6 +63,8 @@ func main() {
 		err = runGmi(args)
 	case "account":
 		err = account(args)
+	case "push":
+		err = pushCmd(args)
 	case "peer":
 		err = peerCmd(args)
 	case "client":
@@ -77,7 +80,7 @@ func main() {
 	case "version":
 		err = versionCmd(args)
 	default:
-		err = usageError{fmt.Sprintf("unknown command %q; usage: pneu [serve|open|gmi|account|peer|client|agent|reset-window|update|source|version] ...", cmd)}
+		err = usageError{fmt.Sprintf("unknown command %q; usage: pneu [serve|open|gmi|account|push|peer|client|agent|reset-window|update|source|version] ...", cmd)}
 	}
 	if errors.As(err, new(reported)) {
 		os.Exit(1) // already said, as an event
