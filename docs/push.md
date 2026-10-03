@@ -440,3 +440,145 @@ PushQuiet|PushFailing|PushReauth`, reasons `ReauthReasons` /
 `ErrPushOff`.
 
 **`internal/gmi`**: `Engine.Nudge(account) error`; `gmi.NudgeGap` (5s).
+
+## As built: task 3 (the CLI)
+
+What task 5 (INSTALL.md "Instant mail", AGENTS.md lines) needs. Code:
+`cmd/pneu/push.go` (commands, transactions, hand-over), `pushwords.go`
+(every Google failure in pneu's words), `callback.go` (the callback
+listener, shared with the client relay), `accountstdin.go` (the remote
+server half), `internal/remote` (verbs and schemas).
+
+**Prerequisites** (D1): the push project with the **Gmail API** and the
+**Cloud Pub/Sub API** enabled; its own **Desktop app** OAuth client
+(External, In production), its JSON downloaded; the owner is an identity
+that owns the project (Owner, or Pub/Sub Admin there). The CLI calls
+`oauth2.googleapis.com`, `gmail.googleapis.com` and
+`pubsub.googleapis.com`, and opens `accounts.google.com` in the browser.
+Consent comes back to `localhost:8080`, like lieer's: not while a lieer
+consent (`pneu account auth`, Reconnect) is waiting.
+
+**Commands** (on a client each runs on the server over SSH, the consent
+opening in the client's browser, exactly like `pneu account auth`):
+
+```
+pneu push init --project <id> --client-secret <file> [--replace] [--reconsent]
+pneu push init [--reconsent]                 # again: project and client already set up
+pneu account push <name> [--reconsent]
+pneu account push <name> --off
+```
+
+- `push init`, first time: both flags required; the JSON must be a
+  Desktop client (`"installed"`) whose `project_id` is `--project`. Owner
+  consent ("Sign in as the identity that owns project P (the push owner)
+  and allow Pub/Sub."), the ID token's sub pinned, a `topics.list` probe,
+  then `push/client.json` (the three fields only) and `push/state.json`
+  (generation 1, a fresh install id). Ends "Push is set up. Next, for each
+  account: pneu account push <name>".
+- `push init` again: the stored owner grant is reused when it still
+  works ("the owner's stored grant (E) works; --reconsent asks again"),
+  else a consent; a consent as anyone but the pinned owner is refused
+  ("consent was given as a different Google account than the push owner,
+  E, so nothing changed: …"). A different client or project needs
+  `--replace`, and `--replace` needs every account off first ("--replace
+  needs every account's push off first: pneu account push <name> --off for
+  a, b"); `--replace` also accepts a new owner. A rotated secret for the
+  same client is just `--client-secret <new file>`. Fix for an owner
+  `reauth`: `pneu push init --reconsent` (or plain `push init`, which
+  consents by itself when the grant is dead).
+- `account push <name>`: the configured address must be a plain ASCII
+  address held by no other pushed account. Order: owner refresh, mailbox
+  grant (stored and working, else consent: "Sign in as A and allow pneu to
+  see its mail's metadata (labels and headers, never bodies)."),
+  getProfile must be the configured address ("the mailbox chosen at
+  Google's consent isn't A, so nothing was set up: run this again and
+  sign in as A"), then "topic pneu-<name>: created | already there",
+  "Gmail may publish to it: granted | already granted", "subscription
+  pneu-<name>: created | already there, as pneu makes it", "committed:
+  <name> is on (generation N)", the hand-over, and up to 60s waiting:
+  - "Instant mail is on for N: Gmail's watch delivered its first
+    notification." (new subscription, same daemon process throughout);
+  - "…its subscription is delivering. It existed before this run, so that
+    shows messages arrive, not that this watch sent them." (reused
+    subscription; similar wording if the daemon process changed);
+  - "Instant mail is set up for N, but not proven: no notification reached
+    pneu within 1m0s (it reports S[: reason]). Everything stays in place,
+    and running pneu account push N again is safe." (exit 0);
+  - reauth: an error naming the fix.
+  Re-running is always safe; every provisioning step is idempotent.
+- `account push <name> --off`: commits off-pending, waits for the
+  daemon's ack, `users.stop`, removes the account, and prints:
+  "Instant mail is off for N.", the `gcloud pubsub subscriptions delete
+  pneu-N --project=P` and `gcloud pubsub topics delete pneu-N --project=P`
+  commands (and the console's topic list), "pneu never revokes a grant. To
+  revoke the push app's access to A, sign in as A at
+  https://myaccount.google.com/permissions.", and, when A is the owner,
+  "A is also the push owner: revoking either grant there ends both, and
+  with it instant mail for every account."
+
+**Hand-over words** (every command): ack → "The running pneu has it."
+(init) or the wait; nothing answering and daemon.lock free → "pneu isn't
+running; … when it starts."; a pneu answering without push → "The running
+pneu runs no push sync; restart it …: systemctl --user restart pneu"; no
+ack → an error ending "pending. Running … again is safe." (exit 1).
+
+**Failure words** (`pushwords.go`, by code; never Google's text):
+api-disabled → "the Cloud Pub/Sub API | Gmail API isn't enabled in project
+P. Enable it at https://console.cloud.google.com/apis/library/<api
+host>?project=P, then run this again"; org-policy on the IAM step → "an
+organization policy (domain-restricted sharing) refused the grant to
+gmail-api-push@system.gserviceaccount.com. Override
+iam.allowedPolicyMemberDomains to Allow All on project P only
+(https://console.cloud.google.com/iam-admin/orgpolicies/iam-allowedPolicyMemberDomains?project=P),
+then run this again"; org-policy on a mailbox's consent → "A's Workspace
+admin doesn't allow this app: in the Admin console, Security → Access and
+data control → API controls, trust the push project's OAuth client for
+Gmail metadata, then run this again"; permission on Pub/Sub → "the push
+owner (E) lacks permission in project P: the owner must own the project (or
+hold Pub/Sub Admin there)"; permission at the token endpoint → the client
+was deleted or its secret changed (`push init --client-secret`); a
+subscription not as pneu makes it → "…its <field> isn't what pneu makes:
+delete it (gcloud pubsub subscriptions delete pneu-N --project=P) and run
+this again"; another server's → "belongs to another pneu server (its
+pneu-install label): one server per push project"; port 8080 taken → "a
+consent is already waiting on localhost:8080 (lieer's or pneu's), or one
+just finished; try again in a minute".
+
+**Remote verbs** (fixed commands, stdin first-line schemas, all keys
+required): `push` → `pneu account push --stdin` `{"name","reconsent"}`;
+`push-off` → `pneu account push-off --stdin` `{"name"}` (no consent, no
+relay); `push-init` → `pneu push init --stdin` `{"project","clientSecret",
+"replace","reconsent"}`, the client JSON read and checked on the client
+and sent as its three fields. The server checks the callback's state
+against its own consent in constant time and exchanges only the code;
+nothing listens on the server's 8080 for a remote consent. stdin's end
+before the callback cancels the command (nothing is committed after it:
+an ended context gets no push.lock); its end after is normal. The
+client's relay gives up after 3 minutes without a consent URL, so a
+remote run that needs no consent must finish within that (normally ~65s).
+
+**Deviations from D2–D4**, all deliberate:
+- `--off` holds push.lock from the off-pending commit to the removal,
+  `users.stop` included (one refresh and one call, bounded by the API
+  timeouts; the lock wait is 2 minutes): released around the stop, a
+  concurrent `account push` could commit and start a watch the older stop
+  ends.
+- A dead mailbox grant at `--off`: stays off-pending (D4), with "The watch
+  lapses by itself within 7 days, and nothing runs for N meanwhile; it
+  stays off-pending until then. To clean up now: pneu account push N, then
+  pneu account push N --off".
+- `push init` is supported from a client (the JSON travels in the request,
+  well inside the 16 KiB cap), and runs again without flags.
+- Every commit re-reads under push.lock and refuses if what it read
+  changed (setup, client.json, the owner's grant, the account's entry):
+  "… changed while this ran; nothing was committed: run this again".
+- An access token refused (401) is refreshed and the call made once more.
+- The delivering proof counts only from the daemon instance `status`
+  names before the hand-over.
+
+**AGENTS.md lines task 5 might add**: push's files and locks
+(`$XDG_STATE_HOME/pneu/push/`: state.json and client.json written only by
+the CLI under push.lock; daemon.lock the daemon's for life, taken by the
+CLI only to decide "no daemon"); consent on the server binds 8080 lieer's
+way and holds it; the remote verbs above; no Google text reaches any
+output (pushwords.go is the only place failures become words).

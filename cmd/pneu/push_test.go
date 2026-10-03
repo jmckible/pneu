@@ -1336,7 +1336,7 @@ func TestPushAwaitDeliveryRestart(t *testing.T) {
 	if err := pt.e.on("personal", false); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(pt.out.String(), "pneu restarted around the hand-over, so that shows messages arrive, not that this watch sent them.") ||
+	if !strings.Contains(pt.out.String(), "the pneu answering couldn't be confirmed as the one that took this generation, so that shows messages arrive, not that this watch sent them.") ||
 		strings.Contains(pt.out.String(), "Gmail's watch delivered its first notification") {
 		t.Fatalf("output:\n%s", pt.out.String())
 	}

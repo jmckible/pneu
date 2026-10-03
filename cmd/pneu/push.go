@@ -717,7 +717,7 @@ func (e *pushEnv) awaitDelivery(name string, gen uint64, instance string, reused
 				case reused:
 					o.say("Instant mail is on for %s: its subscription is delivering. It existed before this run, so that shows messages arrive, not that this watch sent them.", name)
 				case restarted:
-					o.say("Instant mail is on for %s: its subscription is delivering. pneu restarted around the hand-over, so that shows messages arrive, not that this watch sent them.", name)
+					o.say("Instant mail is on for %s: its subscription is delivering. the pneu answering couldn't be confirmed as the one that took this generation, so that shows messages arrive, not that this watch sent them.", name)
 				default:
 					o.say("Instant mail is on for %s: Gmail's watch delivered its first notification.", name)
 				}
