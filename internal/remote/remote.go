@@ -23,6 +23,8 @@ import (
 
 	"github.com/jmckible/pneu/internal/config"
 	"github.com/jmckible/pneu/internal/gmi"
+	"github.com/jmckible/pneu/internal/google"
+	"github.com/jmckible/pneu/internal/push/state"
 )
 
 // Verb is one of the account commands a client forwards.
@@ -32,6 +34,11 @@ const (
 	Add    Verb = "add"
 	Auth   Verb = "auth"
 	Status Verb = "status"
+	// Push sync's (docs/push.md D4): `pneu account push <name>`, `pneu
+	// account push <name> --off` and `pneu push init`.
+	Push     Verb = "push"
+	PushOff  Verb = "push-off"
+	PushInit Verb = "push-init"
 )
 
 // commands are the remote commands, one fixed string per verb, never built
@@ -39,9 +46,12 @@ const (
 // remote shell parses. The PATH prefix is pairing's (a non-interactive
 // session reads no login profile).
 var commands = map[Verb]string{
-	Add:    `PATH="$HOME/.local/bin:$PATH" exec pneu account add --stdin`,
-	Auth:   `PATH="$HOME/.local/bin:$PATH" exec pneu account auth --stdin`,
-	Status: `PATH="$HOME/.local/bin:$PATH" exec pneu account status --stdin`,
+	Add:      `PATH="$HOME/.local/bin:$PATH" exec pneu account add --stdin`,
+	Auth:     `PATH="$HOME/.local/bin:$PATH" exec pneu account auth --stdin`,
+	Status:   `PATH="$HOME/.local/bin:$PATH" exec pneu account status --stdin`,
+	Push:     `PATH="$HOME/.local/bin:$PATH" exec pneu account push --stdin`,
+	PushOff:  `PATH="$HOME/.local/bin:$PATH" exec pneu account push-off --stdin`,
+	PushInit: `PATH="$HOME/.local/bin:$PATH" exec pneu push init --stdin`,
 }
 
 // Command is v's remote command; ok is false for anything but a Verb above.
@@ -51,9 +61,10 @@ func Command(v Verb) (string, bool) {
 }
 
 // Consent reports whether v may run Google's consent, and so needs the
-// forward of lieer's callback port: auth, whose credential check can turn
-// into a consent only the server knows it needs.
-func (v Verb) Consent() bool { return v == Auth }
+// client to answer the callback port: auth, whose credential check can
+// turn into a consent only the server knows it needs, and push and
+// push-init, which consent unless a stored credential still works.
+func (v Verb) Consent() bool { return v == Auth || v == Push || v == PushInit }
 
 // MaxRequest bounds the parameters on stdin.
 const MaxRequest = 16 << 10
@@ -83,6 +94,28 @@ const ConsentPrint = "print"
 // StatusRequest is `pneu account status`'s; Name "" is every account.
 type StatusRequest struct {
 	Name string `json:"name"`
+}
+
+// PushRequest is `pneu account push <name> [--reconsent]`'s.
+type PushRequest struct {
+	Name      string `json:"name"`
+	Reconsent bool   `json:"reconsent"`
+}
+
+// PushOffRequest is `pneu account push <name> --off`'s.
+type PushOffRequest struct {
+	Name string `json:"name"`
+}
+
+// PushInitRequest is `pneu push init`'s. Project "" keeps the push
+// project already set up; ClientSecret is the push client JSON in the
+// minimal form `pneu push init` stores (its three fields), read and
+// checked on the client, or "" to keep the one the server has.
+type PushInitRequest struct {
+	Project      string `json:"project"`
+	ClientSecret string `json:"clientSecret"`
+	Replace      bool   `json:"replace"`
+	Reconsent    bool   `json:"reconsent"`
 }
 
 // MaxFullName bounds a From name; it goes into notmuch's config as a line.
@@ -178,6 +211,66 @@ func ParseStatus(b []byte) (StatusRequest, error) {
 		return q, fmt.Errorf("request: %w", err)
 	case q.Name != "" && !config.ValidName(q.Name):
 		return q, fmt.Errorf("request: bad account name: %s", config.NameRule)
+	}
+	return q, nil
+}
+
+// ParsePush reads push's request: name and reconsent (a boolean).
+func ParsePush(b []byte) (PushRequest, error) {
+	var q PushRequest
+	err := check(b)
+	if err == nil {
+		err = decodeObject(b, map[string]any{"name": &q.Name, "reconsent": &q.Reconsent})
+	}
+	switch {
+	case err != nil:
+		return q, fmt.Errorf("request: %w", err)
+	case !config.ValidName(q.Name):
+		return q, fmt.Errorf("request: bad account name: %s", config.NameRule)
+	}
+	return q, nil
+}
+
+// ParsePushOff reads push-off's request: name.
+func ParsePushOff(b []byte) (PushOffRequest, error) {
+	var q PushOffRequest
+	err := check(b)
+	if err == nil {
+		err = decodeObject(b, map[string]any{"name": &q.Name})
+	}
+	switch {
+	case err != nil:
+		return q, fmt.Errorf("request: %w", err)
+	case !config.ValidName(q.Name):
+		return q, fmt.Errorf("request: bad account name: %s", config.NameRule)
+	}
+	return q, nil
+}
+
+// ParsePushInit reads push-init's request: project ("" or a GCP project
+// ID), clientSecret ("" or a Desktop client JSON whose project_id is the
+// project given), replace and reconsent (booleans).
+func ParsePushInit(b []byte) (PushInitRequest, error) {
+	var q PushInitRequest
+	err := check(b)
+	if err == nil {
+		err = decodeObject(b, map[string]any{"project": &q.Project, "clientSecret": &q.ClientSecret,
+			"replace": &q.Replace, "reconsent": &q.Reconsent})
+	}
+	if err != nil {
+		return q, fmt.Errorf("request: %w", err)
+	}
+	if q.Project != "" && !google.ValidProject(q.Project) {
+		return q, errors.New("request: bad project ID")
+	}
+	if q.ClientSecret != "" {
+		c, err := state.ParseClient([]byte(q.ClientSecret))
+		if err != nil {
+			return q, errors.New("request: the push client JSON isn't a Desktop client's with a valid client_id, client_secret and project_id")
+		}
+		if q.Project != "" && c.Project != q.Project {
+			return q, errors.New("request: the push client JSON's project_id isn't the project given")
+		}
 	}
 	return q, nil
 }

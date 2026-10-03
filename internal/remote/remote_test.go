@@ -17,9 +17,12 @@ const googleURL = "https://accounts.google.com/o/oauth2/auth?access_type=offline
 // The remote commands are fixed text, one per verb; nothing else has one.
 func TestCommands(t *testing.T) {
 	for v, want := range map[Verb]string{
-		Add:    `PATH="$HOME/.local/bin:$PATH" exec pneu account add --stdin`,
-		Auth:   `PATH="$HOME/.local/bin:$PATH" exec pneu account auth --stdin`,
-		Status: `PATH="$HOME/.local/bin:$PATH" exec pneu account status --stdin`,
+		Add:      `PATH="$HOME/.local/bin:$PATH" exec pneu account add --stdin`,
+		Auth:     `PATH="$HOME/.local/bin:$PATH" exec pneu account auth --stdin`,
+		Status:   `PATH="$HOME/.local/bin:$PATH" exec pneu account status --stdin`,
+		Push:     `PATH="$HOME/.local/bin:$PATH" exec pneu account push --stdin`,
+		PushOff:  `PATH="$HOME/.local/bin:$PATH" exec pneu account push-off --stdin`,
+		PushInit: `PATH="$HOME/.local/bin:$PATH" exec pneu push init --stdin`,
 	} {
 		if got, ok := Command(v); !ok || got != want {
 			t.Errorf("%s: %q %v", v, got, ok)
@@ -30,8 +33,8 @@ func TestCommands(t *testing.T) {
 			t.Errorf("%q has a remote command", v)
 		}
 	}
-	if !Auth.Consent() || Add.Consent() || Status.Consent() {
-		t.Error("only auth runs consent")
+	if !Auth.Consent() || !Push.Consent() || !PushInit.Consent() || Add.Consent() || Status.Consent() || PushOff.Consent() {
+		t.Error("only auth, push and push-init run consent")
 	}
 }
 
@@ -285,5 +288,60 @@ func TestReadLine(t *testing.T) {
 	}
 	if _, err := ReadLine(br, 10); err != ErrLongLine {
 		t.Errorf("long: %v", err)
+	}
+}
+
+// push, push-off and push-init: exact keys, each once, the right types,
+// within the size cap; names, project IDs and the client JSON checked.
+func TestParsePushRequests(t *testing.T) {
+	if q, err := ParsePush([]byte(`{"reconsent":true,"name":"work"}`)); err != nil || q != (PushRequest{Name: "work", Reconsent: true}) {
+		t.Errorf("push: %+v %v", q, err)
+	}
+	for _, s := range []string{
+		``, `{}`, `null`, `[]`,
+		`{"name":"work"}`,
+		`{"name":"work","reconsent":false,"off":true}`,
+		`{"name":"work","name":"home","reconsent":false}`,
+		`{"name":"work","reconsent":"false"}`,
+		`{"Name":"work","reconsent":false}`,
+		`{"name":"a;b","reconsent":false}`,
+		`{"name":"work","reconsent":false}{}`,
+		`{"name":"work","reconsent":false,"pad":"` + strings.Repeat("a", MaxRequest) + `"}`,
+	} {
+		if _, err := ParsePush([]byte(s)); err == nil {
+			t.Errorf("push accepted %q", s)
+		}
+	}
+	if q, err := ParsePushOff([]byte(`{"name":"work"}`)); err != nil || q.Name != "work" {
+		t.Errorf("push-off: %+v %v", q, err)
+	}
+	for _, s := range []string{`{"name":"work","reconsent":false}`, `{"name":""}`, `{"name":"work","name":"work"}`, `{"name":1}`} {
+		if _, err := ParsePushOff([]byte(s)); err == nil {
+			t.Errorf("push-off accepted %q", s)
+		}
+	}
+	client := strconv.Quote(`{"installed":{"client_id":"123-abc.apps.googleusercontent.com","client_secret":"GOCSPX-x","project_id":"pneu-push-9"}}`)
+	for _, s := range []string{
+		`{"project":"","clientSecret":"","replace":false,"reconsent":true}`,
+		`{"project":"pneu-push-9","clientSecret":` + client + `,"replace":true,"reconsent":false}`,
+		`{"project":"","clientSecret":` + client + `,"replace":false,"reconsent":false}`,
+	} {
+		if _, err := ParsePushInit([]byte(s)); err != nil {
+			t.Errorf("push-init %s: %v", s, err)
+		}
+	}
+	for _, s := range []string{
+		`{"project":"","clientSecret":"","replace":false}`,
+		`{"project":"","clientSecret":"","replace":false,"reconsent":false,"x":1}`,
+		`{"project":"","project":"","clientSecret":"","replace":false,"reconsent":false}`,
+		`{"project":"Bad_ID","clientSecret":"","replace":false,"reconsent":false}`,
+		`{"project":"pneu-push-8","clientSecret":` + client + `,"replace":false,"reconsent":false}`,
+		`{"project":"","clientSecret":"{\"web\":{}}","replace":false,"reconsent":false}`,
+		`{"project":"","clientSecret":"","replace":0,"reconsent":false}`,
+		`{"project":"","clientSecret":"` + strings.Repeat("a", MaxRequest) + `","replace":false,"reconsent":false}`,
+	} {
+		if _, err := ParsePushInit([]byte(s)); err == nil {
+			t.Errorf("push-init accepted %q", s)
+		}
 	}
 }
