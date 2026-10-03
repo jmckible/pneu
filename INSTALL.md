@@ -942,10 +942,9 @@ fix. The ones a human may meet:
 - **"the Gmail API isn't enabled in project …"** or **"the Cloud Pub/Sub
   API isn't enabled…"**: the link it gives (add `authuser=<owner>&`)
   → **Enable**, wait a minute, run the command again.
-- **"a consent is already waiting on localhost:8080 (lieer's or pneu's),
-  or one just finished"**: a `pneu account auth`, a Reconnect or another
-  push consent is waiting; finish or close it. Just after one, the port
-  stays busy for up to a minute.
+- **"a consent is already waiting on localhost:8080 (lieer's or
+  pneu's)"**: a `pneu account auth`, a Reconnect or another push consent
+  is waiting; finish or close it.
 - **"the push owner … lacks permission in project …"**: the owner
   consented as an account that doesn't own the push project.
 - **"…belongs to another pneu server"**: one server per push project, so

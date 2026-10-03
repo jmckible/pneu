@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -106,7 +107,7 @@ func newPushTest(t *testing.T, accounts ...string) *pushTest {
 	pt.e.out = termPush{w: pt.out,
 		listen: func() ([]net.Listener, error) {
 			pt.port = freeBothPort(t)
-			return listenLoopback(pt.port, bindExclusive)
+			return listenLoopback(pt.port)
 		},
 		open: func(u string) error {
 			pt.mu.Lock()
@@ -707,7 +708,7 @@ func TestPushConsentPortBusy(t *testing.T) {
 	}
 	defer lieer.Close()
 	tp := pt.e.out.(termPush)
-	tp.listen = func() ([]net.Listener, error) { return listenLoopback(port, bindExclusive) }
+	tp.listen = func() ([]net.Listener, error) { return listenLoopback(port) }
 	pt.e.out = tp
 	pt.out.Reset()
 	err = pt.e.on("personal", false)
@@ -719,11 +720,12 @@ func TestPushConsentPortBusy(t *testing.T) {
 	}
 }
 
-// bindExclusive fails on a TIME_WAIT left by a consent's redirect, as
-// lieer's bind does; bindReuse (the client relay's) doesn't.
-func TestBindPolicyTimeWait(t *testing.T) {
+// The consent listener binds over a TIME_WAIT left by the last consent's
+// redirect, but never over a socket listening there: neither one bound
+// Go's way (pneu's own) nor one bound lieer's way (no SO_REUSEADDR).
+func TestListenLoopbackTimeWaitAndLive(t *testing.T) {
 	port := freeBothPort(t)
-	lns, err := listenLoopback(port, bindReuse)
+	lns, err := listenLoopback(port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -741,18 +743,38 @@ func TestBindPolicyTimeWait(t *testing.T) {
 	server.Close() // the server closes first, as an HTTP server does
 	client.Close()
 	time.Sleep(50 * time.Millisecond)
-	if lns, err := listenLoopback(port, bindExclusive); !errors.Is(err, errPortBusy) {
-		for _, l := range lns {
+	lns, err = listenLoopback(port)
+	if err != nil {
+		t.Fatalf("bind over TIME_WAIT: %v", err)
+	}
+	if again, err := listenLoopback(port); !errors.Is(err, errPortBusy) {
+		for _, l := range again {
 			l.Close()
 		}
-		t.Fatalf("exclusive bind over TIME_WAIT: %v", err)
-	}
-	lns, err = listenLoopback(port, bindReuse)
-	if err != nil {
-		t.Fatalf("reuse bind over TIME_WAIT: %v", err)
+		t.Fatalf("bind over our own live listener: %v", err)
 	}
 	for _, l := range lns {
 		l.Close()
+	}
+	lc := net.ListenConfig{Control: func(_, _ string, c syscall.RawConn) error {
+		var serr error
+		if err := c.Control(func(fd uintptr) {
+			serr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 0)
+		}); err != nil {
+			return err
+		}
+		return serr
+	}}
+	lieer, err := lc.Listen(context.Background(), "tcp", net.JoinHostPort("::1", strconv.Itoa(port)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lieer.Close()
+	if again, err := listenLoopback(port); !errors.Is(err, errPortBusy) {
+		for _, l := range again {
+			l.Close()
+		}
+		t.Fatalf("bind over a lieer-style live listener: %v", err)
 	}
 }
 

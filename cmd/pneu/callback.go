@@ -30,43 +30,18 @@ import (
 	"github.com/jmckible/pneu/internal/remote"
 )
 
-// bindPolicy is how a callback listener binds its port.
-type bindPolicy int
-
-const (
-	// bindReuse is Go's default, SO_REUSEADDR: a TIME_WAIT from a recent
-	// consent doesn't refuse. The client relay's: nothing else on the
-	// client binds the port the way lieer does.
-	bindReuse bindPolicy = iota
-	// bindExclusive is lieer's bind, no SO_REUSEADDR (gmi.CheckAuthPort's
-	// rule), so it fails exactly when lieer's would: a consent waiting on
-	// the port, or a connection to it still closing. The server's push
-	// consent binds this way and holds the port until the callback, so it
-	// and a lieer consent can't both think they own Google's redirect.
-	bindExclusive
-)
-
-// errPortBusy: the port is taken on one of the loopbacks (or, with
-// bindExclusive, a connection to it is still closing).
+// errPortBusy: something listens on the port on one of the loopbacks.
 var errPortBusy = errors.New("the consent port is in use or still closing")
 
 // listenLoopback binds port on both loopbacks, both required: the browser
-// resolves localhost to either. A port in use is errPortBusy, wrapped
-// with the address that refused; any other failure (no IPv6 loopback)
-// is that failure.
-func listenLoopback(port int, policy bindPolicy) ([]net.Listener, error) {
+// resolves localhost to either. Go's default bind (SO_REUSEADDR) lets a
+// TIME_WAIT from the last consent's redirect pass, but on Linux never a
+// socket listening there, so a waiting consent (lieer's or pneu's) still
+// refuses it, and lieer's bind refuses ours while we hold the port. A
+// port in use is errPortBusy, wrapped with the address that refused; any
+// other failure (no IPv6 loopback) is that failure.
+func listenLoopback(port int) ([]net.Listener, error) {
 	lc := net.ListenConfig{}
-	if policy == bindExclusive {
-		lc.Control = func(_, _ string, c syscall.RawConn) error {
-			var serr error
-			if err := c.Control(func(fd uintptr) {
-				serr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 0)
-			}); err != nil {
-				return err
-			}
-			return serr
-		}
-	}
 	var lns []net.Listener
 	for _, host := range []string{"127.0.0.1", "::1"} {
 		addr := net.JoinHostPort(host, strconv.Itoa(port))

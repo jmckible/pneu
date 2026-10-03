@@ -96,15 +96,14 @@ type termPush struct {
 
 func newTermPush() termPush {
 	return termPush{w: os.Stdout, open: openURL,
-		listen: func() ([]net.Listener, error) { return listenLoopback(gmi.AuthPort, bindExclusive) }}
+		listen: func() ([]net.Listener, error) { return listenLoopback(gmi.AuthPort) }}
 }
 
 func (t termPush) say(format string, a ...any) { fmt.Fprintf(t.w, format+"\n", a...) }
 func (t termPush) ctx() context.Context        { return context.Background() }
 
-// errConsentWaiting: the callback port is taken, or a connection to it is
-// still closing.
-var errConsentWaiting = fmt.Errorf("a consent is already waiting on localhost:%d (lieer's or pneu's), or one just finished; try again in a minute", gmi.AuthPort)
+// errConsentWaiting: something listens on the callback port.
+var errConsentWaiting = fmt.Errorf("a consent is already waiting on localhost:%d (lieer's or pneu's): finish or close it, then run this again", gmi.AuthPort)
 
 // pushDone is the local listener's answer to the callback it takes.
 const pushDone = "pneu: Google answered. You can close this tab; the terminal shows the result.\n"

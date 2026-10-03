@@ -16,7 +16,7 @@ import (
 // listenRelay binds port on both loopbacks with Go's SO_REUSEADDR, so a
 // TIME_WAIT from a recent consent doesn't refuse.
 func listenRelay(port int) ([]net.Listener, error) {
-	lns, err := listenLoopback(port, bindReuse)
+	lns, err := listenLoopback(port)
 	if err != nil {
 		return nil, fmt.Errorf("%w here (or can't be bound): Google's consent comes back to it, so this command needs it free. `ss -ltnp 'sport = :%d'` shows what holds it", err, port)
 	}

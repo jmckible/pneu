@@ -215,7 +215,7 @@ func newSeam(t *testing.T, accounts ...string) *seam {
 	out := termPush{w: s.out,
 		listen: func() ([]net.Listener, error) {
 			port = freeBothPort(t)
-			return listenLoopback(port, bindExclusive)
+			return listenLoopback(port)
 		},
 		open: func(u string) error {
 			s.mu.Lock()

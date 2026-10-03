@@ -406,8 +406,8 @@ and build order; this file is the working contract. Read PLAN.md before touching
   view and status.json, closed enums) never feeds `sick`.
 - Push consent: pneu builds the URL (PKCE, state, the owner's nonce),
   which must pass `gmi.ValidConsentURL`. On the server it binds
-  127.0.0.1:8080 and [::1]:8080 lieer's way (no SO_REUSEADDR) and holds
-  them until the callback; from a client the relay forwards the callback
+  127.0.0.1:8080 and [::1]:8080 (Go's default bind: a TIME_WAIT passes,
+  a listener never does) and holds them until the callback; from a client the relay forwards the callback
   line and the server checks `state` against its own consent in constant
   time and exchanges only the code (remote verbs `push`, `push-off`,
   `push-init`; the push client JSON travels as its three fields). A

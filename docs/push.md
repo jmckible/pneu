@@ -136,12 +136,16 @@ PKCE S256, 128-bit `state`, (owner) a `nonce`, `login_hint`, redirect
 `http://localhost:8080/`. It passes `gmi.ValidConsentURL`. One consent
 session object holds state, verifier, nonce, redirect and client.
 
-- **On the server:** pneu binds 127.0.0.1:8080 and [::1]:8080 with
-  `CheckAuthPort`'s bind rule (no SO_REUSEADDR) and **holds** them until
-  the callback (C9), with the relay's Host, method, path, size, time and
-  one-shot checks, factored out of `relay.go` with the bind policy as a
-  parameter (the client relay keeps its own). A bind failure is "a
-  consent is already waiting (lieer's or pneu's); try again in a minute".
+- **On the server:** pneu binds 127.0.0.1:8080 and [::1]:8080 and
+  **holds** them until the callback (C9), with the relay's Host, method,
+  path, size, time and one-shot checks, factored out of `relay.go`. The
+  bind is Go's default (SO_REUSEADDR), like the client relay's: built
+  first with lieer's rule (none), it refused for a minute after every
+  consent's redirect left a TIME_WAIT, so back-to-back setups stalled
+  (found live, 2026-10-03). On Linux SO_REUSEADDR still never binds over
+  a listening socket, so a waiting consent, lieer's or pneu's, refuses
+  it, and lieer's bind refuses ours while we hold the port. A bind
+  failure is "a consent is already waiting (lieer's or pneu's)".
 - **From a client** (K8): the relay forwards the callback line as today.
   The server, not the relay, is authoritative: it checks `state` against
   its own session in constant time and exchanges only `code` with its own
@@ -617,8 +621,8 @@ subscription not as pneu makes it → "…its <field> isn't what pneu makes:
 delete it (gcloud pubsub subscriptions delete pneu-N --project=P) and run
 this again"; another server's → "belongs to another pneu server (its
 pneu-install label): one server per push project"; port 8080 taken → "a
-consent is already waiting on localhost:8080 (lieer's or pneu's), or one
-just finished; try again in a minute".
+consent is already waiting on localhost:8080 (lieer's or pneu's): finish
+or close it, then run this again".
 
 **Remote verbs** (fixed commands, stdin first-line schemas, all keys
 required): `push` → `pneu account push --stdin` `{"name","reconsent"}`;
