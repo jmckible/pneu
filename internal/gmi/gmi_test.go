@@ -398,6 +398,12 @@ func TestFailureBacksOffAndRecovers(t *testing.T) {
 	if st.Failures < 4 || st.LastErr == nil || !strings.Contains(st.LastErr.Error(), "exit 1: fakegmi: failing with 1") {
 		t.Fatalf("status %+v", st)
 	}
+	if d, err := e.PollDelay("personal"); err != nil || d != 400*time.Millisecond {
+		t.Errorf("poll delay while failing = %v, %v; want the cap", d, err)
+	}
+	if _, err := e.PollDelay("nobody"); !errors.Is(err, ErrUnknownAccount) {
+		t.Errorf("poll delay of an unknown account: %v", err)
+	}
 	mu.Lock()
 	if len(synced) == 0 {
 		t.Errorf("OnSynced not called on failure")
@@ -415,6 +421,9 @@ func TestFailureBacksOffAndRecovers(t *testing.T) {
 	st, _ = e.Status("personal")
 	if st.LastErr != nil || st.LastSync.IsZero() {
 		t.Errorf("status after recovery %+v", st)
+	}
+	if d, _ := e.PollDelay("personal"); d != 80*time.Millisecond {
+		t.Errorf("poll delay after recovery = %v, want the interval", d)
 	}
 	waitFor(t, 2*time.Second, "OnSynced after recovery", func() bool {
 		mu.Lock()

@@ -550,6 +550,17 @@ func (a *account) runEnded() {
 // Interval is the sync period, for the page's staleness threshold.
 func (e *Engine) Interval() time.Duration { return e.opts.Interval }
 
+// PollDelay is the account's poll delay as of now, what the loop waits
+// after a sync ends (delay): Interval, doubled per consecutive failure up
+// to MaxBackoff, or the setup poll. For the sync details' polling note.
+func (e *Engine) PollDelay(account string) (time.Duration, error) {
+	a, ok := e.accts[account]
+	if !ok {
+		return 0, fmt.Errorf("%w %q", ErrUnknownAccount, account)
+	}
+	return e.delay(a), nil
+}
+
 // queueSync asks the loop for a sync. Queued and the signal change together
 // under smu, and startSync clears both together, so Queued is true exactly
 // while a request waits: in the channel, or taken by the loop but not yet

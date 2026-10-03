@@ -139,6 +139,12 @@ func (f *fakeSyncer) SyncNow(account string) error {
 	return nil
 }
 
+// PollDelay is a 30s period doubled per failure, as the engine's.
+func (f *fakeSyncer) PollDelay(account string) (time.Duration, error) {
+	st, _ := f.Status(account)
+	return 30 * time.Second << min(st.Failures, 5), nil
+}
+
 func (f *fakeSyncer) Status(account string) (gmi.Status, error) {
 	f.mu.Lock()
 	st, ok := f.states[account]
