@@ -162,8 +162,8 @@ func TestStatusPushDropped(t *testing.T) {
 	}
 }
 
-// Two accounts, one push off-shape in each of hello's accounts, hello's
-// status, `account` and `status`: the bad one loses push alone, its
+// Two accounts, one push off-shape in each of hello's accounts, `status`
+// and `account` (hello's own status goes through the same cleanStatus): the bad one loses push alone, its
 // sibling's reaches the page and status.json, and nothing is dropped.
 func TestPushPerAccount(t *testing.T) {
 	good := `{"state":"delivering","lastDelivery":"2026-10-03T11:58:00Z"}`

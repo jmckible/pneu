@@ -655,3 +655,46 @@ the CLI under push.lock; daemon.lock the daemon's for life, taken by the
 CLI only to decide "no daemon"); consent on the server binds 8080 lieer's
 way and holds it; the remote verbs above; no Google text reaches any
 output (pushwords.go is the only place failures become words).
+
+## As built: task 4 (client and page)
+
+- **Poll delay.** `gmi.Engine.PollDelay(account)` is `delay` as of now
+  (the period, doubled per failure up to MaxBackoff, or the setup poll);
+  `web.Syncer` gained it. The account view carries it as `pollEvery`
+  (whole seconds, rounded up, absent when unknown); status.json doesn't.
+- **Client** (`internal/client/events.go`): hello's accounts, `account`
+  and `status` (hello's and the event's) decode `push` and `pollEvery`
+  raw (an outer field shadowing the embedded `web` one), so a bad value
+  of any type drops that field for that account, never the event.
+  `cleanPush`: a string state from `control.PushStates` but `off`; a
+  `reason` field present exactly with `reauth`/`failing` (present even
+  as null or "" otherwise drops push), a string from that state's list;
+  `lastDelivery`, when present, a string matching
+  `YYYY-MM-DDTHH:MM:SSZ`, from 2000 to `DeliverySkew` (24h) past this
+  machine's clock. `cleanPoll`: an integer in [1, 86400]. status.json v2
+  carries `push` as cleaned.
+- **Page** (`web/static/push.js`, `web/push.test.js`; app.js builds text
+  nodes and `<code>` only): per account `Instant: delivering · last
+  message 2m ago` / `quiet` / `starting` / `off` / `failing — <words>`
+  (reauth reads as failing too). Fixes: mailbox-reauth, watch-expired,
+  unknown → `Run pneu account push <name>.`; owner-reauth → `Run pneu
+  push init --reconsent.`; api-disabled, permission, org-policy →
+  `pneu account push <name> prints the fix.`; network → none (it
+  retries). On a client: "in a terminal on this machine (it runs on S
+  over SSH and opens Google here if it needs to)", as task 3's remote
+  verbs and `pneu account auth` work; not "on the server's terminal".
+  The footer is the ready accounts' shortest `pollEvery` (else
+  `data-every`); a ready account polling slower adds `checks every 4m
+  while failing`. The status line never reads push.
+- **Found on the way:** app.js keyed `accounts`, `busySince` and
+  `asked` by name on plain objects, so an account named `constructor`
+  (valid by `config.ValidName`) never joined the order; they have no
+  prototype now. `TestNudgeRespectsBackoff` (task 1) read the failure
+  count while the second run was still going; it waits for it now.
+- **Tests:** `internal/client/push_test.go` (field rules with hostile
+  values, two accounts through hello/status/account),
+  `internal/web/push_test.go` `TestPollEvery`, `web/push.test.js`,
+  `shell/status.test.js` (push in both versions, ignored by the widget;
+  no QML change), and the hostile harness's `page-push-details`, which
+  drives the shipping app.js's details with push states and hostile
+  values.
