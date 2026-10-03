@@ -997,6 +997,7 @@ body { margin: 0; font: 13px monospace; }
 
     const plain = { '/body/personal/h2@hostile.test': { html, cids: {} } };
     for (const layout of ['narrow', 'split']) results.push(await viewChecks(pageHTML, plain, layout));
+    results.push(await pushChecks(pageHTML, plain));
     return results;
   }
 
@@ -1080,6 +1081,71 @@ body { margin: 0; font: 13px monospace; }
       await sleep(1500);
       if (refetches() !== 3) fails.push('no refetch once the dialog closed: ' + refetches());
       if ('changed' in D.querySelector('main.thread').dataset) fails.push('still marked after the refetch');
+      if (W.__errors.length) fails.push('page errors: ' + W.__errors.join(' | '));
+    } catch (e) { fails.push('harness error: ' + (e && e.stack || e)); }
+    P.frame.remove();
+    return { id, pass: fails.length === 0, fails };
+  }
+
+  // pushChecks: the sync details' instant mail lines and polling note
+  // (docs/push.md D7) on the shipping app.js. Push health, hostile values
+  // included, arrives by hello and `account`; the details draw it as text
+  // (only the details' own elements, no attributes but their classes) and
+  // the status line never moves with it.
+  async function pushChecks(pageHTML, bodies) {
+    const fails = [];
+    const id = 'page-push-details';
+    out.textContent = 'pending: ' + id;
+    const P = await threadPage(pageHTML, 'narrow', bodies, { noChip: true });
+    try {
+      if (P.error) throw new Error(P.error);
+      const { W, D } = P;
+      const send = (name, data) => W.__es.listeners[name]({ data: JSON.stringify(data) });
+      const evil = '<img src=x onerror="top.__pwned=\'push\'">';
+      const synced = new Date(Date.now() - 60000).toISOString();
+      const delivered = new Date(Date.now() - 125000).toISOString().replace(/\.\d+Z$/, 'Z');
+      const acct = (name, push, pollEvery) => Object.assign({ name, state: 'ready', pulled: true, failures: 0, error: null, authing: false,
+        progress: null, lastSync: synced, queued: false, running: false, pollEvery }, push === undefined ? {} : { push });
+      const sync = D.getElementById('sync');
+      const line = () => sync.dataset.state + '|' + sync.textContent + '|' + sync.className + '|' + sync.getAttribute('aria-label');
+      // Account names Object.prototype has are valid names (config.ValidName).
+      send('hello', { epoch: '00000000000000e1', gen: 1, accounts: [acct('personal', undefined, 30), acct('constructor', { state: 'delivering', lastDelivery: delivered }, 30)] });
+      const base = line();
+      if (!/^fresh\|Updated 1m ago/.test(base)) fails.push('status line before push: ' + base);
+      const pushes = [{ state: 'reauth', reason: 'owner-reauth' }, { state: 'failing', reason: 'permission' }, { state: evil, reason: evil, lastDelivery: evil },
+        { state: 'failing', reason: evil }];
+      for (const push of pushes) {
+        send('account', acct('personal', push, 240));
+        if (line() !== base) fails.push('push ' + JSON.stringify(push) + ' moved the status line: ' + line());
+      }
+      sync.click();
+      const dlg = D.getElementById('syncinfo');
+      const check = (want, code) => {
+        if (!dlg || !dlg.open) { fails.push('no details dialog'); return; }
+        const allowed = { DIV: 1, H2: 1, DL: 1, DT: 1, DD: 1, BR: 1, SPAN: 1, CODE: 1, P: 1, KBD: 1 };
+        for (const n of dlg.querySelectorAll('*')) {
+          if (!allowed[n.tagName]) fails.push('element ' + n.tagName + ' in the details');
+          for (const at of n.attributes) if (at.name !== 'class') fails.push('attribute ' + at.name + ' in the details');
+        }
+        const text = dlg.textContent;
+        for (const w of want) if (!text.includes(w)) fails.push('details lack ' + JSON.stringify(w) + ': ' + text);
+        for (const w of ['<img', 'onerror', 'function', 'native code']) if (text.includes(w)) fails.push('details show ' + JSON.stringify(w) + ': ' + text);
+        const codes = [...dlg.querySelectorAll('code')].map((c) => c.textContent);
+        if (JSON.stringify(codes) !== JSON.stringify(code)) fails.push('commands ' + JSON.stringify(codes));
+        if (dlg.querySelector('.bad')) fails.push('push drew something red');
+      };
+      check(['Instant: failing — something went wrong. Run pneu account push personal.', 'Instant: delivering · last message 2m ago',
+        'checks every 4m while failing', 'Checks every 30s'], ['pneu account push personal']);
+      // Open details follow an `account` event.
+      send('account', acct('personal', { state: 'failing', reason: 'network' }, 240));
+      check(["Instant: failing — can't reach Google; it keeps trying"], []);
+      send('account', acct('personal', { state: 'reauth', reason: 'owner-reauth' }, 30));
+      check(["the push owner's Google grant expired or was revoked. Run pneu push init --reconsent."], ['pneu push init --reconsent']);
+      send('account', acct('personal', undefined, 30));
+      check(['Instant: off'], []);
+      if (line() !== base) fails.push('status line after: ' + line());
+      if (dlg) dlg.close();
+      if (W.top.__pwned !== undefined) fails.push('pwned: ' + W.top.__pwned);
       if (W.__errors.length) fails.push('page errors: ' + W.__errors.join(' | '));
     } catch (e) { fails.push('harness error: ' + (e && e.stack || e)); }
     P.frame.remove();

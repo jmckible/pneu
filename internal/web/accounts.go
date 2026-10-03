@@ -36,6 +36,10 @@ type AccountView struct {
 	Queued   bool          `json:"queued"`         // a sync was asked for and hasn't started
 	Running  bool          `json:"running"`        // a sync or first pull runs (never a push)
 	Push     *PushView     `json:"push,omitempty"` // absent: push sync off for the account
+	// PollEvery is the engine's poll delay for the account as of now, in
+	// whole seconds (gmi.Engine.PollDelay: the period, longer while
+	// failing); absent when unknown. The sync details' polling note.
+	PollEvery int `json:"pollEvery,omitempty"`
 }
 
 // PushView is an account's push sync health (docs/push.md D5, D7), in the
@@ -103,6 +107,16 @@ func viewOf(name string, st gmi.Status) AccountView {
 	return v
 }
 
+// pollEvery is the account's PollEvery: its poll delay in seconds,
+// rounded up; 0 when the engine doesn't say.
+func (s *Server) pollEvery(account string) int {
+	d, err := s.Syncer.PollDelay(account)
+	if err != nil || d <= 0 {
+		return 0
+	}
+	return int((d + time.Second - 1) / time.Second)
+}
+
 // accountViews is every account's view; nil without a sync engine.
 func (s *Server) accountViews() []AccountView {
 	if s.Syncer == nil {
@@ -116,7 +130,7 @@ func (s *Server) accountViews() []AccountView {
 			continue
 		}
 		v := viewOf(a.Name, st)
-		v.Push = s.pushView(a.Name)
+		v.Push, v.PollEvery = s.pushView(a.Name), s.pollEvery(a.Name)
 		out = append(out, v)
 	}
 	return out
@@ -188,7 +202,7 @@ func (s *Server) AccountChanged(account string) {
 		return
 	}
 	v := viewOf(account, st)
-	v.Push = s.pushView(account)
+	v.Push, v.PollEvery = s.pushView(account), s.pollEvery(account)
 	s.Hub.Broadcast("account", v)
 	mark := progressMark{state: v.State}
 	if v.Push != nil {

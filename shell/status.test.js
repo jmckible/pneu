@@ -166,7 +166,7 @@ test('nothing from the file reaches a command', () => {
   const evil = '"; rm -rf ~; echo "<b>$(id)</b>\u202e\n`reboot`';
   const doc = v2({ name: evil, reason: evil, link: 'down', update: { state: 'server-older', client: evil, server: evil } }, {
     senders: [evil, '<img src=x onerror=alert(1)>'],
-    accounts: [{ name: evil, state: 'reauth', error: evil, failures: 9 }],
+    accounts: [{ name: evil, state: 'reauth', error: evil, failures: 9, push: { state: evil, reason: evil, lastDelivery: evil } }],
   });
   const mm = m(doc);
   const strings = [];
@@ -235,6 +235,44 @@ test('menu: the update items by server.update', () => {
   assert.match(S.tooltip(up('client-older'), fmt), /Update available: server runs a newer pneu · right-click: Update pneu$/);
   assert.match(S.tooltip(up('server-older'), fmt), /server runs an older pneu · right-click: Update server$/);
   assert.ok(!S.tooltip(up('different'), fmt).includes('a'.repeat(40)));
+});
+
+// Push health (docs/push.md D7) rides each account in both versions; the
+// widget ignores it: push never turns the bar red, adds a line, or
+// changes the menu, whatever its value.
+test('push: carried in the file, ignored by the widget', () => {
+  const pushes = [
+    { state: 'delivering', lastDelivery: ago(2) },
+    { state: 'quiet' },
+    { state: 'starting' },
+    { state: 'failing', reason: 'network' },
+    { state: 'failing', reason: 'api-disabled' },
+    { state: 'reauth', reason: 'owner-reauth' },
+    { state: 'reauth', reason: 'mailbox-reauth' },
+    { state: '<b>evil</b>\u202e', reason: '$(id)', lastDelivery: 'nonsense' },
+    { state: '__proto__' }, 'failing', 7, null, [],
+  ];
+  const accts = [
+    { name: 'work', state: 'ready', pulled: true, lastSync: ago(1), failures: 0, error: null, unread: 2 },
+    { name: 'home', state: 'ready', pulled: true, lastSync: ago(1), failures: 2, error: 'x', unread: 0 },
+    { name: 'new', state: 'pulling', progress: { phase: 'content', done: 1, total: 4, percent: 25 } },
+  ];
+  for (const make of [(o) => v1(o), (o) => v2({}, o), (o) => v2({ link: 'down', reason: 'refused' }, o)]) {
+    const plain = m(make({ unread: 2, senders: ['Ann'], accounts: accts }));
+    for (const push of pushes) {
+      const withPush = m(make({ unread: 2, senders: ['Ann'], accounts: accts.map((a) => Object.assign({}, a, { push })) }));
+      const what = JSON.stringify(push);
+      assert.equal(withPush.warning, plain.warning, what);
+      assert.equal(S.tooltip(withPush, fmt), S.tooltip(plain, fmt), what);
+      assert.deepEqual(ids(withPush), ids(plain), what);
+      assert.deepEqual(withPush.sick.map((a) => a.name), plain.sick.map((a) => a.name), what);
+      assert.equal(withPush.pullPercent, plain.pullPercent, what);
+    }
+  }
+  // A healthy file with push failing everywhere stays quiet.
+  const failing = m(v2({}, { accounts: [{ name: 'work', state: 'ready', failures: 0, push: { state: 'reauth', reason: 'owner-reauth' } }] }));
+  assert.equal(failing.warning, false);
+  assert.deepEqual(ids(failing), ['open', 'reset']);
 });
 
 test('word: a name in a suggested command, or <account>', () => {

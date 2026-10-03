@@ -1981,7 +1981,8 @@
   // first), and the account is read-only: the server refuses its writes.
 
   var acctEl = document.getElementById('accounts');
-  var accounts = {};  // name -> the server's account view
+  // Keyed by account name, so with no prototype: constructor is a valid name.
+  var accounts = Object.create(null);  // name -> the server's account view
   var acctOrder = [];
   var pullRefreshAt = 0;
   var PULL_REFRESH = 20000;
@@ -2170,9 +2171,9 @@
   var lineNudge = lineEl && lineEl.querySelector('.nudge');
   var lineLive = document.getElementById('sync-live');
   var syncEvery = (Number(lineEl && lineEl.dataset.every) || 120) * 1000;
-  var busySince = {}; // account -> when it last said queued or running
+  var busySince = Object.create(null); // account -> when it last said queued or running
   var askedAt = 0;    // an R the server hasn't answered with news
-  var asked = {};     // account -> 'sent' (R, no news yet) or 'busy' (R's sync seen queued or running)
+  var asked = Object.create(null);     // account -> 'sent' (R, no news yet) or 'busy' (R's sync seen queued or running)
   var askTimer = 0;
   var spinTimer = 0;
   var spinFrame = 0;
@@ -2328,6 +2329,9 @@
   // syncDetails is the details: each account's last sync, what it's doing,
   // and its failures, for dialog#syncinfo and the top of the ? overlay.
   function syncDetails() {
+    var pu = Pneu.push || null;
+    var polls = pu ? pu.poll(acctOrder.map(function (n) { return accounts[n]; }), syncEvery / 1000)
+      : { foot: 'Checks every ' + Math.round(syncEvery / 1000) + 's', per: Object.create(null) };
     var box = el('div', 'syncinfo');
     box.appendChild(el('h2', null, 'Sync'));
     var dl = el('dl');
@@ -2341,10 +2345,22 @@
         unconfigured: 'not set up', unauthorized: 'not connected' })[a.state] || a.state
         : busy(a) ? (a.running ? 'checking now' : 'check queued') : '';
       if (doing) dd.appendChild(document.createTextNode(' · ' + doing));
+      if (polls.per[n]) dd.appendChild(document.createTextNode(' · ' + polls.per[n]));
       if (a.failures > 0 || a.error) {
         dd.appendChild(el('br'));
         dd.appendChild(el('span', 'bad', (a.failures > 0 ? a.failures + ' failed sync' + (a.failures === 1 ? '' : 's') : 'error') +
           (a.error ? ': ' + a.error : '')));
+      }
+      // Instant mail (docs/push.md D7): never red, never on the line.
+      if (pu) {
+        var inst = pu.line(a.push, { word: word(n), server: lk ? lk.remoteName(linkInfo) : null, now: Date.now(), ago: ago });
+        dd.appendChild(el('br'));
+        dd.appendChild(document.createTextNode(inst.text));
+        if (inst.fix) {
+          dd.appendChild(document.createTextNode('. ' + inst.fix.lead));
+          dd.appendChild(el('code', null, inst.fix.command));
+          dd.appendChild(document.createTextNode(inst.fix.tail));
+        }
       }
       dl.appendChild(el('dt', null, n));
       dl.appendChild(dd);
@@ -2362,8 +2378,7 @@
       });
       box.appendChild(ldl);
     }
-    var every = syncEvery < 60000 ? Math.round(syncEvery / 1000) + 's' : Math.round(syncEvery / 60000) + 'm';
-    var foot = el('p', 'foot', 'Checks every ' + every + ' · ');
+    var foot = el('p', 'foot', polls.foot + ' · ');
     foot.appendChild(el('kbd', null, 'R'));
     foot.appendChild(document.createTextNode(' checks now'));
     box.appendChild(foot);

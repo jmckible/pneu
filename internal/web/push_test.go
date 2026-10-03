@@ -120,3 +120,35 @@ func TestPushSurfaces(t *testing.T) {
 		t.Fatal("push without a manager")
 	}
 }
+
+// The account view carries the engine's poll delay (PollEvery, seconds),
+// so the sync details' polling note reads the real one: the period,
+// longer while an account fails. status.json doesn't carry it.
+func TestPollEvery(t *testing.T) {
+	f := newTagFixture(t)
+	_, body := get(t, f.s, "/")
+	m := regexp.MustCompile(`<div id="accounts" data-accounts="([^"]*)"`).FindStringSubmatch(body)
+	if m == nil {
+		t.Fatal("no data-accounts")
+	}
+	var views []AccountView
+	if err := json.Unmarshal([]byte(html.UnescapeString(m[1])), &views); err != nil {
+		t.Fatal(err)
+	}
+	if views[0].PollEvery != 30 || views[1].PollEvery != 120 {
+		t.Fatalf("poll delays %d, %d; want 30 and 120 (two failures)", views[0].PollEvery, views[1].PollEvery)
+	}
+	c := f.s.Hub.Subscribe()
+	defer f.s.Hub.unsubscribe(c)
+	f.s.AccountChanged("work")
+	if ev := nextEvent(t, c, "account"); !strings.Contains(string(ev), `"pollEvery":120`) {
+		t.Fatalf("account event: %s", ev)
+	}
+	if _, h := f.s.subscribe(); h.Accounts[0].PollEvery != 30 {
+		t.Fatalf("hello: %+v", h.Accounts[0])
+	}
+	b, _ := json.Marshal(f.s.statusSnapshot(true))
+	if strings.Contains(string(b), "pollEvery") {
+		t.Fatalf("status.json carries the poll delay: %s", b)
+	}
+}

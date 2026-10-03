@@ -30,6 +30,7 @@ type Syncer interface {
 	NoteWrite(account string, changes, ids []string)
 	SyncNow(account string) error
 	Status(account string) (gmi.Status, error)
+	PollDelay(account string) (time.Duration, error)
 	Send(ctx context.Context, account string, rfc822 io.Reader) (gmi.Result, error)
 }
 

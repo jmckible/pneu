@@ -550,6 +550,11 @@ line:
 - Clicking it, or `?`, opens the details: each account's last sync,
   failures, link state, both revisions, and which bar-menu action fixes
   what.
+- The details add each account's instant mail (`Instant: delivering ·
+  last message 2m ago` … `Instant: failing — <reason>`, docs/push.md D7)
+  and the polling note from the engine's real delay (`pollEvery`). On a
+  client a push fix is a command to run in a terminal there, over SSH on
+  the server, like `pneu account auth`. Push never changes the line.
 - The age updates every 30s, and on focus.
 
 ### Changes from other windows (R11)
@@ -1382,7 +1387,15 @@ daemon half.
   but at most one per second, reading the state at write time (so the
   latest wins and nothing else is held pending), every 5 minutes, and
   `running: false` when the daemon stops. Markup in a sender name is kept
-  as text (QML renders PlainText; JSON isn't HTML-escaped). The bar
+  as text (QML renders PlainText; JSON isn't HTML-escaped). Each
+  account's `push` (docs/push.md D7) passes field by field: `state` one
+  of the push states but never `off` (absent is off), `reason` only with
+  `reauth` or `failing` and from that state's list, `lastDelivery` RFC
+  3339 UTC to the second, from 2000 to a day past this machine's clock;
+  anything else, of any type, drops `push` for that account, never the
+  status. The widget ignores it. Hello's and `account`'s views carry
+  `push` the same way, and `pollEvery` (whole seconds, 1 to a day, else
+  dropped). The bar
   widget accepted only version 1 until step 6 (below); the server keeps
   writing version 1.
 - **Error page** (`errorpage.go`, `page/`). A GET navigation
