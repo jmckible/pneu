@@ -655,6 +655,9 @@ func (e *pushEnv) on(name string, reconsent bool) error {
 			before = info.Instance
 		}
 	}
+	// And the time: a worker the reload keeps (an unchanged credential)
+	// keeps its health, delivering on a message from before this run.
+	since := e.now()
 	h, dl, next, why := e.handOver(l, next)
 	l.Unlock()
 	if dl != nil {
@@ -671,7 +674,7 @@ func (e *pushEnv) on(name string, reconsent bool) error {
 		return fmt.Errorf("%s is on in state.json, but the running pneu hasn't confirmed it (%s): pending. Running pneu account push %s again is safe", name, why, name)
 	}
 	// 5. The proof.
-	return e.awaitDelivery(name, next.Generation, before, !subCreated)
+	return e.awaitDelivery(name, next.Generation, before, since, !subCreated)
 }
 
 func pick(b bool, yes, no string) string {
@@ -684,10 +687,13 @@ func pick(b bool, yes, no string) string {
 // awaitDelivery waits up to deliverWait for the daemon to report the
 // account delivering at generation gen: it renewed the watch and then
 // received a message (a watch publishes one at once). It's proof of this
-// watch only from instance, the process asked before the hand-over; any
-// other (a restart, or none known) is worded as messages arriving. A
-// timeout leaves everything in place and says what's unproven.
-func (e *pushEnv) awaitDelivery(name string, gen uint64, instance string, reused bool) error {
+// watch only from instance, the process asked before the hand-over, and
+// only with its last message no older than since, the hand-over's time:
+// the daemon keeps a worker whose credential didn't change, and its
+// health with it. Anything else (a restart, none known, an earlier
+// message) is worded as messages arriving. A timeout leaves everything in
+// place and says what's unproven.
+func (e *pushEnv) awaitDelivery(name string, gen uint64, instance string, since time.Time, reused bool) error {
 	o := e.out
 	o.say("  waiting up to %ds for Gmail's first notification", int(e.deliverWait.Seconds()))
 	deadline := time.Now().Add(e.deliverWait)
@@ -718,6 +724,12 @@ func (e *pushEnv) awaitDelivery(name string, gen uint64, instance string, reused
 					o.say("Instant mail is on for %s: its subscription is delivering. It existed before this run, so that shows messages arrive, not that this watch sent them.", name)
 				case restarted:
 					o.say("Instant mail is on for %s: its subscription is delivering. the pneu answering couldn't be confirmed as the one that took this generation, so that shows messages arrive, not that this watch sent them.", name)
+				case p.LastDelivery.Before(since.Truncate(time.Second)):
+					// The wire's to the second, so a message in the hand-over's
+					// own second counts: an older one in that second would
+					// need the subscription deleted, made again and committed
+					// within it.
+					o.say("Instant mail is on for %s: pneu kept the worker it already ran for it, which is delivering, its last message from before this run. That shows messages arrive, not that this watch sent them.", name)
 				default:
 					o.say("Instant mail is on for %s: Gmail's watch delivered its first notification.", name)
 				}

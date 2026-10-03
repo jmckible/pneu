@@ -249,7 +249,7 @@ func startStubDaemon(t *testing.T, e *pushEnv) *stubDaemon {
 			if err != nil || snap.Generation != d.applied || snap.Accounts[account].State != state.On {
 				return control.PushState{Instance: stubInstance, Generation: d.applied, State: control.PushOff}
 			}
-			return control.PushState{Instance: stubInstance, Generation: d.applied, State: control.PushDelivering, LastDelivery: time.Now()}
+			return control.PushState{Instance: stubInstance, Generation: d.applied, State: control.PushDelivering, LastDelivery: e.now()}
 		},
 	})
 	if err != nil {
