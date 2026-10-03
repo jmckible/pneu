@@ -67,6 +67,9 @@ type StatusAccount struct {
 	// first pull's, while State is "pulling".
 	State    gmi.State     `json:"state"`
 	Progress *ProgressView `json:"progress"`
+	// Push is the account's push sync health; absent when off. Never
+	// part of Sick.
+	Push *PushView `json:"push,omitempty"`
 }
 
 // Sick is the bar widget's "failing" for an account (shell/status.js
@@ -238,6 +241,7 @@ func (s *Server) statusSnapshot(running bool) StatusDoc {
 				}
 			}
 		}
+		sa.Push = s.pushView(a.Name)
 		doc.Unread += sa.Unread
 		doc.Accounts = append(doc.Accounts, sa)
 	}
