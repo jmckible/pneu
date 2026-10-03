@@ -10,6 +10,8 @@ const now = Date.parse('2026-10-03T12:00:00Z');
 const ago = (ms) => (ms < 60000 ? 'just now' : Math.floor(ms / 60000) + 'm ago');
 const server = { word: 'personal', server: null, now, ago };
 const client = { ...server, server: 'dell' };
+// poll's per has no prototype; compare it as a plain object.
+const poll = (a, f) => { const r = P.poll(a, f); return { foot: r.foot, per: { ...r.per } }; };
 
 test('line: each state in words; absent or anything unknown is off', () => {
   assert.deepEqual(P.line({ state: 'delivering', lastDelivery: '2026-10-03T11:58:00Z' }, server), { text: 'Instant: delivering · last message 2m ago', fix: null });
@@ -62,19 +64,24 @@ test('line: on a client the command runs in a terminal here, on the server over 
 });
 
 test('poll: the footer from the ready accounts, a slower one noted', () => {
-  assert.deepEqual(P.poll([{ name: 'a', state: 'ready', pollEvery: 30 }, { name: 'b', state: 'ready', pollEvery: 30 }], 120),
+  assert.deepEqual(poll([{ name: 'a', state: 'ready', pollEvery: 30 }, { name: 'b', state: 'ready', pollEvery: 30 }], 120),
     { foot: 'Checks every 30s', per: {} });
-  assert.deepEqual(P.poll([{ name: 'a', state: 'ready', pollEvery: 30 }, { name: 'b', state: 'ready', pollEvery: 240 }], 30),
+  assert.deepEqual(poll([{ name: 'a', state: 'ready', pollEvery: 30 }, { name: 'b', state: 'ready', pollEvery: 240 }], 30),
     { foot: 'Checks every 30s', per: { b: 'checks every 4m while failing' } });
   // One waiting on setup looks again sooner; it doesn't set the footer.
-  assert.deepEqual(P.poll([{ name: 'a', state: 'unconfigured', pollEvery: 5 }, { name: 'b', state: 'ready', pollEvery: 30 }], 30),
+  assert.deepEqual(poll([{ name: 'a', state: 'unconfigured', pollEvery: 5 }, { name: 'b', state: 'ready', pollEvery: 30 }], 30),
     { foot: 'Checks every 30s', per: {} });
   // No pollEvery (an older server), or one out of shape: the page's period.
-  assert.deepEqual(P.poll([{ name: 'a', state: 'ready' }], 30), { foot: 'Checks every 30s', per: {} });
+  assert.deepEqual(poll([{ name: 'a', state: 'ready' }], 30), { foot: 'Checks every 30s', per: {} });
   for (const bad of [0, -1, 1.5, '30', 86401, NaN, Infinity, null]) {
-    assert.deepEqual(P.poll([{ name: 'a', state: 'ready', pollEvery: bad }], 60), { foot: 'Checks every 1m', per: {} }, String(bad));
+    assert.deepEqual(poll([{ name: 'a', state: 'ready', pollEvery: bad }], 60), { foot: 'Checks every 1m', per: {} }, String(bad));
   }
-  assert.deepEqual(P.poll([], 120), { foot: 'Checks every 2m', per: {} });
+  assert.deepEqual(poll([], 120), { foot: 'Checks every 2m', per: {} });
+  // Valid account names that are Object.prototype's: nothing inherited.
+  const names = P.poll(['constructor', 'toString', '__proto__', 'hasOwnProperty'].map((name) => ({ name, state: 'ready', pollEvery: 30 })), 30);
+  for (const n of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) assert.equal(names.per[n], undefined, n);
+  const slow = P.poll([{ name: 'a', state: 'ready', pollEvery: 30 }, { name: 'constructor', state: 'ready', pollEvery: 120 }], 30);
+  assert.equal(slow.per.constructor, 'checks every 2m while failing');
   assert.equal(P.every(900), '15m');
   assert.equal(P.every(7200), '2h');
 });

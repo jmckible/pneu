@@ -77,11 +77,12 @@
   // the shortest delay among the ready accounts (others are waiting on
   // setup and look again sooner), else fallback (the page's data-every,
   // in seconds); per maps each ready account polling slower than that
-  // (backing off after failures) to its own note.
+  // (backing off after failures) to its own note, with no prototype: an
+  // account may be called constructor.
   function poll(accounts, fallback) {
     var ready = (accounts || []).filter(function (a) { return a && a.state === 'ready' && seconds(a); });
     var base = ready.length ? Math.min.apply(null, ready.map(seconds)) : fallback;
-    var per = {};
+    var per = Object.create(null);
     ready.forEach(function (a) {
       if (seconds(a) > base) per[a.name] = 'checks every ' + every(seconds(a)) + ' while failing';
     });

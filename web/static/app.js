@@ -1981,7 +1981,8 @@
   // first), and the account is read-only: the server refuses its writes.
 
   var acctEl = document.getElementById('accounts');
-  var accounts = {};  // name -> the server's account view
+  // Keyed by account name, so with no prototype: constructor is a valid name.
+  var accounts = Object.create(null);  // name -> the server's account view
   var acctOrder = [];
   var pullRefreshAt = 0;
   var PULL_REFRESH = 20000;
@@ -2170,9 +2171,9 @@
   var lineNudge = lineEl && lineEl.querySelector('.nudge');
   var lineLive = document.getElementById('sync-live');
   var syncEvery = (Number(lineEl && lineEl.dataset.every) || 120) * 1000;
-  var busySince = {}; // account -> when it last said queued or running
+  var busySince = Object.create(null); // account -> when it last said queued or running
   var askedAt = 0;    // an R the server hasn't answered with news
-  var asked = {};     // account -> 'sent' (R, no news yet) or 'busy' (R's sync seen queued or running)
+  var asked = Object.create(null);     // account -> 'sent' (R, no news yet) or 'busy' (R's sync seen queued or running)
   var askTimer = 0;
   var spinTimer = 0;
   var spinFrame = 0;
@@ -2330,7 +2331,7 @@
   function syncDetails() {
     var pu = Pneu.push || null;
     var polls = pu ? pu.poll(acctOrder.map(function (n) { return accounts[n]; }), syncEvery / 1000)
-      : { foot: 'Checks every ' + Math.round(syncEvery / 1000) + 's', per: {} };
+      : { foot: 'Checks every ' + Math.round(syncEvery / 1000) + 's', per: Object.create(null) };
     var box = el('div', 'syncinfo');
     box.appendChild(el('h2', null, 'Sync'));
     var dl = el('dl');

@@ -694,43 +694,59 @@ var deliveryRE = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{
 const DeliverySkew = 24 * time.Hour
 
 // cleanPush holds an account's push health to D7's shape, field by field:
-// absent or null is off (nil); state one of control.PushStates but off
-// (absent is off); reason exactly when the state takes one, from that
-// state's closed list; lastDelivery RFC 3339 UTC to the second, from 2000
-// to a day past now. Anything else, of any type, is nil: push dropped for
+// absent or null is off (nil); state a string from control.PushStates
+// but off (absent is off); reason present exactly when the state takes
+// one, from that state's closed list; lastDelivery, when present, RFC
+// 3339 UTC to the second, from 2000 to a day past now. Anything else, of
+// any type, null where a value belongs included, is nil: push dropped for
 // the account, the rest of its view kept.
 func cleanPush(raw json.RawMessage, now time.Time) *web.PushView {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil
 	}
-	var p web.PushView
-	if json.Unmarshal(raw, &p) != nil || p.State == control.PushOff || !slices.Contains(control.PushStates, p.State) {
+	var p struct{ State, Reason, LastDelivery json.RawMessage }
+	if json.Unmarshal(raw, &p) != nil {
 		return nil
 	}
-	switch p.State {
+	state, ok := rawString(p.State)
+	if !ok || state == control.PushOff || !slices.Contains(control.PushStates, state) {
+		return nil
+	}
+	v := &web.PushView{State: state}
+	var reasons []string
+	switch state {
 	case control.PushReauth:
-		if !slices.Contains(control.ReauthReasons, p.Reason) {
-			return nil
-		}
+		reasons = control.ReauthReasons
 	case control.PushFailing:
-		if !slices.Contains(control.FailingReasons, p.Reason) {
-			return nil
-		}
-	default:
-		if p.Reason != "" {
+		reasons = control.FailingReasons
+	}
+	if reasons == nil && p.Reason != nil {
+		return nil
+	}
+	if reasons != nil {
+		if v.Reason, ok = rawString(p.Reason); !ok || !slices.Contains(reasons, v.Reason) {
 			return nil
 		}
 	}
-	v := &web.PushView{State: p.State, Reason: p.Reason}
 	if p.LastDelivery != nil {
-		t, err := time.Parse(time.RFC3339, *p.LastDelivery)
-		if !deliveryRE.MatchString(*p.LastDelivery) || err != nil || t.Year() < 2000 || t.After(now.Add(DeliverySkew)) {
+		s, ok := rawString(p.LastDelivery)
+		t, err := time.Parse(time.RFC3339, s)
+		if !ok || !deliveryRE.MatchString(s) || err != nil || t.Year() < 2000 || t.After(now.Add(DeliverySkew)) {
 			return nil
 		}
 		at := t.UTC().Format(time.RFC3339)
 		v.LastDelivery = &at
 	}
 	return v
+}
+
+// rawString is a JSON string's value; ok only for a string (never null).
+func rawString(raw json.RawMessage) (string, bool) {
+	var s *string
+	if raw == nil || json.Unmarshal(raw, &s) != nil || s == nil {
+		return "", false
+	}
+	return *s, true
 }
 
 // cleanView holds a view to shape: from a window id or nothing, threads

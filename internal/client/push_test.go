@@ -2,10 +2,13 @@ package client
 
 import (
 	"encoding/json"
+	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jmckible/pneu/internal/link/linktest"
 	"github.com/jmckible/pneu/internal/web"
 )
 
@@ -20,7 +23,6 @@ func TestCleanPush(t *testing.T) {
 		{`null`, `null`},
 		{`{"state":"delivering","lastDelivery":"2026-10-03T11:58:00Z"}`, `{"state":"delivering","lastDelivery":"2026-10-03T11:58:00Z"}`},
 		{`{"state":"quiet"}`, `{"state":"quiet"}`},
-		{`{"state":"starting","reason":null,"lastDelivery":null}`, `{"state":"starting"}`},
 		{`{"state":"reauth","reason":"owner-reauth"}`, `{"state":"reauth","reason":"owner-reauth"}`},
 		{`{"state":"reauth","reason":"mailbox-reauth"}`, `{"state":"reauth","reason":"mailbox-reauth"}`},
 		{`{"state":"failing","reason":"api-disabled","x":"<b>"}`, `{"state":"failing","reason":"api-disabled"}`},
@@ -28,6 +30,11 @@ func TestCleanPush(t *testing.T) {
 		{`{"state":"delivering","lastDelivery":"2026-10-04T11:00:00Z"}`, `{"state":"delivering","lastDelivery":"2026-10-04T11:00:00Z"}`}, // a server clock ahead
 
 		// Dropped.
+		{`{"state":"starting","reason":null}`, `null`},
+		{`{"state":"quiet","reason":""}`, `null`},
+		{`{"state":"delivering","lastDelivery":null}`, `null`},
+		{`{"state":"failing","reason":null}`, `null`},
+		{`{"state":null}`, `null`},
 		{`{"state":"off"}`, `null`},
 		{`{"state":""}`, `null`},
 		{`{}`, `null`},
@@ -152,5 +159,63 @@ func TestStatusPushDropped(t *testing.T) {
 	}
 	if a := raw["accounts"].([]any)[0].(map[string]any); a["push"] != nil {
 		t.Fatalf("status.json has push: %v", a)
+	}
+}
+
+// Two accounts, one push off-shape in each of hello's accounts, hello's
+// status, `account` and `status`: the bad one loses push alone, its
+// sibling's reaches the page and status.json, and nothing is dropped.
+func TestPushPerAccount(t *testing.T) {
+	good := `{"state":"delivering","lastDelivery":"2026-10-03T11:58:00Z"}`
+	bad := `{"state":"quiet","reason":"<b>x</b>"}`
+	view := func(name, push string) string {
+		return `{"name":"` + name + `","state":"ready","pulled":true,"failures":0,"error":null,"authing":false,"progress":null,` +
+			`"lastSync":"2026-09-30T10:00:00Z","queued":false,"running":false,"push":` + push + `,"pollEvery":30}`
+	}
+	status := func(unread int, pPush, wPush string) string {
+		return statusBlock(unread, `[]`, `[{"name":"personal","unread":1,"state":"ready","push":`+pPush+`},{"name":"work","unread":0,"state":"ready","push":`+wPush+`}]`)
+	}
+	keys := linktest.NewKeys(t)
+	u := linktest.StartUpstream(t, keys.Server, keys.Creds.Identity.SPKI, newScript(nil,
+		block("hello", `{"epoch":"abcd","gen":3,"accounts":[`+view("personal", bad)+`,`+view("work", good)+`],"status":null}`),
+		status(1, bad, good),
+		sleep(1500*time.Millisecond),
+		block("account", view("work", bad)),
+		block("account", view("personal", good)),
+		status(2, good, `"delivering"`),
+	))
+	u.SetHello(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(web.ProtocolHeader, strconv.Itoa(web.Protocol))
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"protocol":` + strconv.Itoa(web.Protocol) + `,"name":"server","revision":"0123456789abcdef0123456789abcdef01234567","modified":false,"epoch":"abcd","gen":3,` +
+			`"accounts":[{"name":"personal","email":"me@example.com"},{"name":"work","email":"me@work.example"}]}`))
+	})
+	r := newRig(t, keys, u.Port, nil)
+	r.waitUp()
+	p := r.page()
+	h := p.handshaken()
+	if len(h.Accounts) != 2 || h.Accounts[0].Push != nil || h.Accounts[0].PollEvery != 30 || h.Accounts[1].Push == nil || h.Accounts[1].Push.State != "delivering" {
+		t.Fatalf("hello: %+v", h.Accounts)
+	}
+	doc := waitV2(t, r.status, "the first status", func(d StatusV2) bool { return d.Unread == 1 })
+	if len(doc.Accounts) != 2 || doc.Accounts[0].Push != nil || doc.Accounts[1].Push == nil || *doc.Accounts[1].Push.LastDelivery != "2026-10-03T11:58:00Z" {
+		t.Fatalf("status.json: %+v", doc.Accounts)
+	}
+	for _, want := range []struct {
+		name string
+		push bool
+	}{{"work", false}, {"personal", true}} {
+		var av web.AccountView
+		ev := p.until("account", func(ev sseEvent) bool { return ownLinkUp(ev) || ev.name == "status" })
+		if json.Unmarshal(ev.data, &av) != nil || av.Name != want.name || (av.Push != nil) != want.push || av.PollEvery != 30 {
+			t.Fatalf("account %s: %s", want.name, ev.data)
+		}
+	}
+	doc = waitV2(t, r.status, "the second status", func(d StatusV2) bool { return d.Unread == 2 })
+	if doc.Accounts[0].Push == nil || doc.Accounts[1].Push != nil {
+		t.Fatalf("status.json: %+v", doc.Accounts)
+	}
+	if a := r.page().handshaken().Accounts; a[0].Push == nil || a[1].Push != nil {
+		t.Fatalf("later hello: %+v", a)
 	}
 }
