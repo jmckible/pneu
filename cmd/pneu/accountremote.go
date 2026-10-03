@@ -95,7 +95,7 @@ func (e *remoteEnv) run(verb remote.Verb, req any) error {
 		return err
 	}
 	out := &lockedWriter{w: e.stdout}
-	var rl *relay
+	var rl *callbackServer
 	if verb.Consent() {
 		// Before ssh: both loopbacks, or no consent.
 		lns, err := e.listen()
@@ -265,7 +265,7 @@ func (l *lockedWriter) Write(b []byte) (int, error) {
 // its bounds, any event that doesn't parse, a consent URL without a relay
 // or a state, a second one, or anything after the closing event is an
 // error.
-func (e *remoteEnv) events(r io.Reader, out io.Writer, rl *relay, onTerminal func()) (remote.Event, error) {
+func (e *remoteEnv) events(r io.Reader, out io.Writer, rl *callbackServer, onTerminal func()) (remote.Event, error) {
 	br := bufio.NewReaderSize(r, 4096)
 	var last remote.Event
 	total, n, opened := 0, 0, false
