@@ -830,14 +830,12 @@ browser as `<owner>` first.
    → application type **Desktop app** → **Create** → **Download JSON**.
 
 The download is the newest `~/Downloads/client_secret_*.json`; find it
-there, as in step 4, and call it `<push client JSON>`. Check it's the push
-project's and not lieer's: `jq -r .installed.project_id <push client JSON>`
-must print the push project ID, and none of the IDs `jq -r
-.installed.project_id ~/.config/pneu/*/client_secret.json` prints on the
-server (from a client, run that one over SSH there: a client holds no
-lieer clients, and finding none proves nothing). `pneu push init` checks
-only that the JSON's project is `--project`; it can't tell lieer's
-project from a new one.
+there, as in step 4, and call it `<push client JSON>`.
+`jq -r .installed.project_id <push client JSON>` must print the push
+project ID. `pneu push init` refuses a JSON whose project isn't
+`--project`, and one whose client is any account's lieer client (it
+compares client IDs: pneu keeps no lieer project ID), since in a shared
+project revoking push's grant would end lieer's.
 
 ### Turn it on
 

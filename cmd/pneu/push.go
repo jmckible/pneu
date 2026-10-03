@@ -21,6 +21,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -347,6 +348,9 @@ func (e *pushEnv) init(p initParams) error {
 	if err := checkInit(cur.File, have, c, p.replace); err != nil {
 		return err
 	}
+	if err := notLieerClient(e.cfgPath, c.ID); err != nil {
+		return err
+	}
 	px := pushCtx{project: c.Project}
 	if have && !p.replace {
 		px.owner = cur.Owner.Email
@@ -479,6 +483,36 @@ func checkInit(f state.File, have bool, c state.Client, replace bool) error {
 	if replace && len(f.Accounts) > 0 {
 		names := slices.Sorted(maps.Keys(f.Accounts))
 		return fmt.Errorf("--replace needs every account's push off first: pneu account push <name> --off for %s", strings.Join(names, ", "))
+	}
+	return nil
+}
+
+// notLieerClient refuses a push client that is an account's lieer
+// client (D1): in a shared project, revoking push's grant would revoke
+// lieer's too. Only the client ID is compared, from each account's
+// client_secret.json (pneu keeps no lieer project ID); a file that isn't
+// there or doesn't parse has nothing to compare.
+func notLieerClient(cfgPath, id string) error {
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return nil // not a server's config: no lieer clients here
+	}
+	for _, a := range cfg.Accounts {
+		if a.NotmuchConfig == "" {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(filepath.Dir(a.NotmuchConfig), "client_secret.json"))
+		if err != nil {
+			continue
+		}
+		var lc struct {
+			Installed struct {
+				ClientID string `json:"client_id"`
+			} `json:"installed"`
+		}
+		if json.Unmarshal(b, &lc) == nil && lc.Installed.ClientID == id {
+			return fmt.Errorf("that client is account %s's lieer client: push needs its own project's client, so revoking push's grant can't end lieer's", a.Name)
+		}
 	}
 	return nil
 }

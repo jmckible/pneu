@@ -390,6 +390,28 @@ func TestPushInitRefusals(t *testing.T) {
 	}
 }
 
+// A push client that is an account's lieer client is refused before any
+// consent (D1).
+func TestPushInitRefusesLieerClient(t *testing.T) {
+	pt := newPushTest(t)
+	nm := filepath.Join(t.TempDir(), "notmuch-config")
+	cfg := `{"port":7317,"accounts":[{"name":"personal","email":"` + mailAddr + `","notmuchConfig":"` + nm + `","gmiDir":"/nonexistent/gmi"}]}`
+	if err := os.WriteFile(pt.cfg, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lieer := `{"installed":{"client_id":"` + pt.f.ClientID + `","client_secret":"s","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token"}}`
+	if err := os.WriteFile(filepath.Join(filepath.Dir(nm), "client_secret.json"), []byte(lieer), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := pt.init(initParams{project: pt.f.Project, client: pushClientJSON(pt.f)})
+	if err == nil || !strings.Contains(err.Error(), "account personal's lieer client") {
+		t.Fatalf("lieer's client as push's: %v", err)
+	}
+	if pt.consents() != 0 {
+		t.Fatal("a refused init consented")
+	}
+}
+
 // Re-init: the stored owner grant is reused; --reconsent must come back
 // as the pinned owner; a revoked owner grant consents by itself; a
 // rotated secret for the same client is taken.
