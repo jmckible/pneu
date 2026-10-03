@@ -205,6 +205,17 @@ type stubDaemon struct {
 	// reload, when set, answers instead.
 	reload func(gen uint64, hash string) (control.Reload, error)
 	state  func(account string, gen uint64) control.PushState
+	srv    *control.Server
+	dl     *state.DaemonLock
+	once   sync.Once
+}
+
+// stop plays the daemon exiting: its socket closed, daemon.lock released.
+func (d *stubDaemon) stop() {
+	d.once.Do(func() {
+		d.srv.Close()
+		d.dl.Unlock()
+	})
 }
 
 const stubInstance = "0123456789abcdef"
@@ -216,7 +227,7 @@ func startStubDaemon(t *testing.T, e *pushEnv) *stubDaemon {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(dl.Unlock)
+	d.dl = dl
 	s, err := control.Listen(e.socket, control.Handler{
 		PushReload: func(gen uint64, hash string) (control.Reload, error) {
 			d.mu.Lock()
@@ -243,7 +254,8 @@ func startStubDaemon(t *testing.T, e *pushEnv) *stubDaemon {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
+	d.srv = s
+	t.Cleanup(d.stop)
 	return d
 }
 
@@ -1178,5 +1190,80 @@ func TestPushOnPreconditions(t *testing.T) {
 	l.Unlock()
 	if err := pt.e.on("personal", false); err == nil || !strings.Contains(err.Error(), "isn't the client recorded at init") {
 		t.Fatalf("swapped client: %v", err)
+	}
+}
+
+// Credentials written meanwhile aren't overwritten with the ones this run
+// read: the owner's at init, the account's at push.
+func TestPushCredentialChangedMeanwhile(t *testing.T) {
+	pt := newPushTest(t)
+	pt.firstInit()
+	bump := func(modify func(f *state.File)) {
+		l, err := pt.e.store.Lock(context.Background())
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer l.Unlock()
+		if _, err := l.Update(func(f *state.File) error { modify(f); return nil }); err != nil {
+			t.Error(err)
+		}
+	}
+	tp := pt.e.out.(termPush)
+	pt.e.out = sayHook{termPush: tp, hook: func(line string) {
+		if strings.Contains(line, "reaches project") {
+			bump(func(f *state.File) { f.Owner.Refresh = "1//newer-owner-grant" })
+		}
+	}}
+	if err := pt.init(initParams{}); err == nil || !strings.Contains(err.Error(), "push's setup changed while this ran") {
+		t.Fatalf("init: %v", err)
+	}
+	if pt.load().Owner.Refresh != "1//newer-owner-grant" {
+		t.Fatal("the newer owner grant was overwritten")
+	}
+
+	pt = newPushTest(t)
+	pt.firstInit()
+	if err := pt.e.on("personal", false); err != nil {
+		t.Fatal(err)
+	}
+	tp = pt.e.out.(termPush)
+	pt.e.out = sayHook{termPush: tp, hook: func(line string) {
+		if strings.Contains(line, "subscription pneu-personal:") {
+			bump(func(f *state.File) {
+				a := f.Accounts["personal"]
+				a.Refresh = "1//newer-mailbox-grant"
+				f.Accounts["personal"] = a
+			})
+		}
+	}}
+	if err := pt.e.on("personal", true); err == nil || !strings.Contains(err.Error(), "personal's push state changed while this ran") {
+		t.Fatalf("on: %v", err)
+	}
+	if pt.load().Accounts["personal"].Refresh != "1//newer-mailbox-grant" {
+		t.Fatal("the newer mailbox grant was overwritten")
+	}
+}
+
+// The daemon acknowledges off-pending, then exits before the removal's
+// reload: daemon.lock, taken to decide "no daemon", is let go.
+func TestPushOffDaemonGoesBetweenReloads(t *testing.T) {
+	pt := newPushTest(t)
+	d := startStubDaemon(t, pt.e)
+	pt.firstInit()
+	if err := pt.e.on("personal", false); err != nil {
+		t.Fatal(err)
+	}
+	tp := pt.e.out.(termPush)
+	pt.e.out = sayHook{termPush: tp, hook: func(line string) {
+		if strings.Contains(line, "watch on me@example.com is stopped") {
+			d.stop()
+		}
+	}}
+	if err := pt.e.off("personal"); err != nil {
+		t.Fatal(err)
+	}
+	if running, _ := pt.e.store.DaemonRunning(); running {
+		t.Fatal("daemon.lock still held after --off")
 	}
 }

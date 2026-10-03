@@ -416,7 +416,7 @@ func (e *pushEnv) init(p initParams) error {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) && have {
 		return fmt.Errorf("the stored push client: %w", err)
 	}
-	if haveNow != have || (haveNow && (now.Owner.Sub != cur.Owner.Sub || now.Client != cur.Client || now.Project != cur.Project)) ||
+	if haveNow != have || (haveNow && (now.Owner != cur.Owner || now.Client != cur.Client || now.Project != cur.Project)) ||
 		storedNow.ID != stored.ID || storedNow.Secret != stored.Secret || storedNow.Project != stored.Project {
 		return errors.New("push's setup changed while this ran (another pneu push init or account push?); nothing changed: run this again")
 	}
@@ -624,6 +624,11 @@ func (e *pushEnv) on(name string, reconsent bool) error {
 		if other := holder(*f, name, address); other != "" {
 			return fmt.Errorf("%s was pushed as account %s while this ran; nothing was committed", address, other)
 		}
+		// Another push or --off for this account committed meanwhile: its
+		// grant may be newer than the one this run read.
+		if f.Accounts[name] != snap.Accounts[name] {
+			return fmt.Errorf("%s's push state changed while this ran; nothing was committed: run this again", name)
+		}
 		f.Accounts[name] = state.Account{State: state.On, Address: address, Refresh: mailbox.refresh, Granted: granted}
 		return nil
 	})
@@ -793,7 +798,10 @@ func (e *pushEnv) off(name string) error {
 	if dl == nil {
 		// The daemon has no worker for it either way; this only moves its
 		// generation on.
-		if h2, _, _, _ := e.handOver(l, removed); h2 == handPending {
+		switch h2, dl2, _, _ := e.handOver(l, removed); {
+		case dl2 != nil:
+			dl2.Unlock()
+		case h2 == handPending:
 			o.say("  (the running pneu hasn't confirmed generation %d; it changes nothing it runs)", removed.Generation)
 		}
 	}
