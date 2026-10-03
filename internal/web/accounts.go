@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jmckible/pneu/internal/control"
 	"github.com/jmckible/pneu/internal/gmi"
 )
 
@@ -27,13 +28,44 @@ type AccountView struct {
 	Name     string        `json:"name"`
 	State    gmi.State     `json:"state"`
 	Pulled   bool          `json:"pulled"`
-	Failures int           `json:"failures"` // consecutive
-	Error    *string       `json:"error"`    // null after any success
-	Authing  bool          `json:"authing"`  // a re-auth waits on the consent screen
-	Progress *ProgressView `json:"progress"` // the first pull's, while pulling
-	LastSync *string       `json:"lastSync"` // RFC 3339; null until the first successful sync
-	Queued   bool          `json:"queued"`   // a sync was asked for and hasn't started
-	Running  bool          `json:"running"`  // a sync or first pull runs (never a push)
+	Failures int           `json:"failures"`       // consecutive
+	Error    *string       `json:"error"`          // null after any success
+	Authing  bool          `json:"authing"`        // a re-auth waits on the consent screen
+	Progress *ProgressView `json:"progress"`       // the first pull's, while pulling
+	LastSync *string       `json:"lastSync"`       // RFC 3339; null until the first successful sync
+	Queued   bool          `json:"queued"`         // a sync was asked for and hasn't started
+	Running  bool          `json:"running"`        // a sync or first pull runs (never a push)
+	Push     *PushView     `json:"push,omitempty"` // absent: push sync off for the account
+}
+
+// PushView is an account's push sync health (docs/push.md D5, D7), in the
+// account view and status.json alike. Absent when push is off for the
+// account; Reason only with reauth or failing; LastDelivery (RFC 3339,
+// UTC) only once a message came. Every value is the push manager's closed
+// vocabulary or its own clock, never anything Google wrote. It never
+// feeds Sick: the bar doesn't turn red over push.
+type PushView struct {
+	State        string  `json:"state"`
+	Reason       string  `json:"reason,omitempty"`
+	LastDelivery *string `json:"lastDelivery,omitempty"`
+}
+
+// pushView is the account's PushView; nil without a push manager or with
+// push off for it.
+func (s *Server) pushView(account string) *PushView {
+	if s.Push == nil {
+		return nil
+	}
+	p := s.Push(account)
+	if p.State == "" || p.State == control.PushOff {
+		return nil
+	}
+	v := &PushView{State: p.State, Reason: p.Reason}
+	if !p.LastDelivery.IsZero() {
+		at := p.LastDelivery.UTC().Truncate(time.Second).Format(time.RFC3339)
+		v.LastDelivery = &at
+	}
+	return v
 }
 
 type ProgressView struct {
@@ -83,7 +115,9 @@ func (s *Server) accountViews() []AccountView {
 			log.Printf("status %s: %v", a.Name, err)
 			continue
 		}
-		out = append(out, viewOf(a.Name, st))
+		v := viewOf(a.Name, st)
+		v.Push = s.pushView(a.Name)
+		out = append(out, v)
 	}
 	return out
 }
@@ -117,11 +151,15 @@ func readOnlyMsg(account string) string {
 	return fmt.Sprintf("%s is still downloading its mail; changes unlock when that finishes", account)
 }
 
-// progressMark is what the status file last showed of an account's pull.
+// progressMark is what the status file last showed of an account's pull,
+// and of its push health (state and reason: a delivery alone doesn't
+// rewrite the file, the sync it brings does).
 type progressMark struct {
-	state   gmi.State
-	phase   gmi.Phase
-	percent int
+	state      gmi.State
+	phase      gmi.Phase
+	percent    int
+	push       string
+	pushReason string
 }
 
 // accountMarks remembers progressMark per account for AccountChanged. mu
@@ -135,9 +173,10 @@ type accountMarks struct {
 }
 
 // AccountChanged broadcasts the account's view (SSE `account`) and rewrites
-// the status file when what the bar shows moved: the state, the phase, or
-// a whole percent. Called on every progress report, so the file isn't
-// rewritten once a second for an hour.
+// the status file when what the bar shows moved: the state, the phase, a
+// whole percent, or the push state or reason. Called on every progress
+// report, so the file isn't rewritten once a second for an hour, and by
+// the push manager whenever an account's push health changes.
 func (s *Server) AccountChanged(account string) {
 	if s.Syncer == nil {
 		return
@@ -149,8 +188,12 @@ func (s *Server) AccountChanged(account string) {
 		return
 	}
 	v := viewOf(account, st)
+	v.Push = s.pushView(account)
 	s.Hub.Broadcast("account", v)
 	mark := progressMark{state: v.State}
+	if v.Push != nil {
+		mark.push, mark.pushReason = v.Push.State, v.Push.Reason
+	}
 	if v.Progress != nil {
 		mark.phase = v.Progress.Phase
 		if v.Progress.Percent != nil {

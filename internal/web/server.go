@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jmckible/pneu/internal/control"
 	"github.com/jmckible/pneu/internal/gmi"
 	"github.com/jmckible/pneu/internal/notmuch"
 	"github.com/jmckible/pneu/internal/unsub"
@@ -49,6 +50,11 @@ type Server struct {
 	// SyncInterval is the engine's sync period, for the status line's
 	// staleness threshold; 0 leaves the page its default.
 	SyncInterval time.Duration
+	// Push is an account's push sync health (the push manager's
+	// PushState); nil: no push manager, every account off. Quick, and
+	// never calls back into the server: the account view and status file
+	// read it under their locks.
+	Push func(account string) control.PushState
 
 	byName map[string]notmuch.Account
 	order  map[string]int
