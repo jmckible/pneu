@@ -227,7 +227,7 @@ func (s *Server) answerPush(cmd Command) (reply string, handled bool) {
 	if args, ok := strings.CutPrefix(string(cmd), string(PushReload)+" "); ok {
 		gen, hash, ok := parseReload(args)
 		switch {
-		case !ok:
+		case !ok || gen > maxPushGen:
 			return badPushRL, true
 		case s.h.Client || s.h.PushReload == nil:
 			return "error " + pushOff, true

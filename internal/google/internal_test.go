@@ -41,6 +41,10 @@ func TestClassify(t *testing.T) {
 		{401, `{"error":{"status":"UNAUTHENTICATED"}}`, false, CodeUnknown},
 		{400, `{"error":{"status":"INVALID_ARGUMENT"}}`, false, CodeUnknown},
 		{302, ``, false, CodeUnknown},
+		{403, `{"error":{"code":403,"errors":[{"domain":"global","reason":"domainPolicy","message":"The domain administrators have disabled Gmail apps."}]}}`, false, CodeOrgPolicy},
+		// A partial decode must not decide: the HTTP status does.
+		{503, `{"error":{"status":"ABORTED","details":"bad"}}`, false, CodeUnavailable},
+		{500, `{"error":{"errors":[{"reason":"SERVICE_DISABLED"}],"details":"bad"}}`, false, CodeUnavailable},
 	} {
 		if got := classify(c.status, []byte(c.body), c.oauth); got != c.want {
 			t.Errorf("classify(%d, %s) = %s, want %s", c.status, c.body, got, c.want)

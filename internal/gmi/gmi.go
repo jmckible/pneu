@@ -531,7 +531,9 @@ func (e *Engine) nudgeWait(a *account) (time.Duration, bool) {
 }
 
 // runStarted and runEnded bracket a run that pulls (sync, push, first
-// pull): its start answers every nudge made before it.
+// pull). runStarted is called holding the slot and flock, just before gmi
+// starts: only then does the run answer every nudge made before it, and
+// only from then does NudgeGap count.
 func (a *account) runStarted() {
 	a.smu.Lock()
 	a.nudged = false
@@ -566,7 +568,9 @@ func (a *account) startSync(running bool) {
 	a.smu.Lock()
 	a.status.Queued = false
 	a.status.Syncing = running
-	a.nudged = false // nothing to run for it, or this run answers it
+	if !running {
+		a.nudged = false // nothing to run for it
+	}
 	select {
 	case <-a.syncReq:
 	default:
@@ -740,7 +744,6 @@ func (e *Engine) do(ctx context.Context, a *account, op Op) {
 	if e.opts.OnStart != nil {
 		e.opts.OnStart(a.Name, op)
 	}
-	a.runStarted()
 	var r Result
 	var ok bool
 	if op == OpPull {
@@ -868,6 +871,9 @@ func (e *Engine) run(ctx context.Context, a *account, op Op, args []string, o ru
 	switch op {
 	case OpSync, OpPush, OpPull, OpSend: // the runs that store mail (see cleanTmp)
 		e.cleanTmp(a)
+	}
+	if syncs || op == OpPull {
+		a.runStarted()
 	}
 	if o.before != nil {
 		o.before()

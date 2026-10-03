@@ -487,6 +487,19 @@ func TestPolicyKeepsWhatItDoesntModel(t *testing.T) {
 	if strings.Count(got, google.PublisherMember) != 2 {
 		t.Fatalf("want the conditional and an unconditional binding: %s", got)
 	}
+	// On the wire: the policy is read at version 3 and written at 3.
+	for _, r := range f.Requests() {
+		switch r.Op {
+		case google.OpGetPolicy:
+			if q, _ := url.ParseQuery(r.Query); q.Get("options.requestedPolicyVersion") != "3" {
+				t.Errorf("getIamPolicy query %q", r.Query)
+			}
+		case google.OpSetPolicy:
+			if !strings.Contains(string(r.Body), `"version":3`) || !strings.Contains(string(r.Body), `"etag":`) {
+				t.Errorf("setIamPolicy body %s", r.Body)
+			}
+		}
+	}
 
 	// A policy pneu can't round-trip is refused, never written.
 	other, _ := google.Resource("vocal")

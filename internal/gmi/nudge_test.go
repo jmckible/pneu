@@ -137,3 +137,30 @@ func TestNudgeKeepsPoll(t *testing.T) {
 		}
 	}
 }
+
+// NudgeGap counts from when gmi starts, not from when the sync began
+// waiting: a sync held up by the flock (a manual pneu gmi) and then run
+// briefly is followed by a nudge's sync only NudgeGap after that start.
+func TestNudgeGapFromGmiStart(t *testing.T) {
+	f := newFixture(t)
+	shortGap(t, 400*time.Millisecond)
+	t.Setenv("FAKEGMI_SLEEP", "0.1")
+	a := f.account("personal")
+	e := mustNew(t, []Account{a}, f.opts(Options{}))
+	start(t, e)
+	waitFor(t, 3*time.Second, "the first sync", func() bool { return len(f.runs()) == 1 && !f.runs()[0].end.IsZero() })
+	release, err := Lock(DefaultLockPath(a.GmiDir), time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.SyncNow("personal")
+	time.Sleep(2 * NudgeGap) // the sync waits on the flock past the gap
+	release()
+	waitFor(t, 3*time.Second, "the held sync to start", func() bool { return len(f.runs()) == 2 })
+	e.Nudge("personal") // during that sync
+	waitFor(t, 3*time.Second, "the nudged sync", func() bool { return f.count("sync") == 3 })
+	rs := f.runs()
+	if gap := rs[2].start.Sub(rs[1].start); gap < NudgeGap-spawnSlack {
+		t.Fatalf("nudged sync %v after gmi started, under the gap", gap)
+	}
+}

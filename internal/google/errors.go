@@ -96,7 +96,7 @@ var (
 		"access_denied":         CodePermission,
 	}
 	apiDisabledReasons = []string{"SERVICE_DISABLED", "accessNotConfigured", "API_DISABLED"}
-	orgPolicyReasons   = []string{"ORG_POLICY_CONSTRAINT_FAILED", "ORG_RESTRICTION_VIOLATION", "ORG_RESTRICTION_HEADER_INVALID"}
+	orgPolicyReasons   = []string{"domainPolicy", "ORG_POLICY_CONSTRAINT_FAILED", "ORG_RESTRICTION_VIOLATION", "ORG_RESTRICTION_HEADER_INVALID"}
 	scopeReasons       = []string{"ACCESS_TOKEN_SCOPE_INSUFFICIENT", "insufficientPermissions"}
 	quotaReasons       = []string{"RATE_LIMIT_EXCEEDED", "RESOURCE_EXHAUSTED", "rateLimitExceeded",
 		"userRateLimitExceeded", "dailyLimitExceeded", "quotaExceeded"}
@@ -138,7 +138,9 @@ func classify(status int, body []byte, oauth bool) Code {
 	}
 	var reasons []string
 	org := false
-	if json.Unmarshal(body, &e) == nil {
+	if json.Unmarshal(body, &e) != nil {
+		e.Error.Status = "" // a partial decode says nothing: the HTTP status decides
+	} else {
 		for _, r := range e.Error.Errors {
 			reasons = append(reasons, r.Reason)
 		}

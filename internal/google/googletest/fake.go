@@ -668,7 +668,7 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	case google.OpPull:
 		f.servePull(w, r, path, body)
 	default:
-		f.servePubSub(w, op, path, body)
+		f.servePubSub(w, op, path, r.URL.RawQuery, body)
 	}
 }
 
@@ -898,6 +898,20 @@ func (f *Fake) serveGmail(w http.ResponseWriter, op google.Op, at *accessTok, bo
 	}
 }
 
+// hasCondition reports whether any binding in p carries a condition.
+func hasCondition(p map[string]json.RawMessage) bool {
+	var bindings []struct {
+		Condition json.RawMessage `json:"condition"`
+	}
+	json.Unmarshal(p["bindings"], &bindings)
+	for _, b := range bindings {
+		if b.Condition != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // grantsPublisher reports whether the policy has PublisherMember in an
 // unconditional PublisherRole binding.
 func (t *topic) grantsPublisher() bool {
@@ -915,7 +929,7 @@ func (t *topic) grantsPublisher() bool {
 	return false
 }
 
-func (f *Fake) servePubSub(w http.ResponseWriter, op google.Op, path string, body []byte) {
+func (f *Fake) servePubSub(w http.ResponseWriter, op google.Op, path, query string, body []byte) {
 	parts := strings.Split(strings.TrimPrefix(path, "/v1/"), "/")
 	if parts[1] != f.Project {
 		jsonAnswer(w, 403, apiError(403, "PERMISSION_DENIED", "IAM_PERMISSION_DENIED"))
@@ -950,6 +964,12 @@ func (f *Fake) servePubSub(w http.ResponseWriter, op google.Op, path string, bod
 			jsonAnswer(w, 404, apiError(404, "NOT_FOUND", ""))
 			return
 		}
+		// A policy with conditions is only read at version 3; anything
+		// asking for less would get it stripped, so the fake refuses.
+		if q, _ := url.ParseQuery(query); q.Get("options.requestedPolicyVersion") != "3" {
+			jsonAnswer(w, 400, apiError(400, "INVALID_ARGUMENT", ""))
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(t.policyJSON())
 		if n := f.policyRace[f.topicName(id)]; n > 0 {
@@ -973,6 +993,10 @@ func (f *Fake) servePubSub(w http.ResponseWriter, op google.Op, path string, bod
 		json.Unmarshal(req.Policy["etag"], &etag)
 		if etag != base64.StdEncoding.EncodeToString([]byte("etag"+strconv.Itoa(t.etag))) {
 			jsonAnswer(w, 409, apiError(409, "ABORTED", ""))
+			return
+		}
+		if string(req.Policy["version"]) != "3" && hasCondition(req.Policy) {
+			jsonAnswer(w, 400, apiError(400, "INVALID_ARGUMENT", "")) // conditions need version 3
 			return
 		}
 		delete(req.Policy, "etag")

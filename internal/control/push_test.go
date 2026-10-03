@@ -69,6 +69,8 @@ func TestPushReload(t *testing.T) {
 		"push-reload 7 " + hashP + "0",
 		"push-reload 7\t" + hashP,
 		"push-reload 7 " + hashP + "\r",
+		"push-reload 9007199254740993 " + hashP, // past state.json's generation bound
+		"push-reload 18446744073709551615 " + hashP,
 	} {
 		if got := raw(t, path, []byte(line+"\n")); got != "error bad push-reload\n" {
 			t.Errorf("%q: %q", line, got)
