@@ -367,7 +367,7 @@ and build order; this file is the working contract. Read PLAN.md before touching
 - Push sync (`internal/google`, `internal/push`, `cmd/pneu/push.go`;
   docs/push.md, its "As built" sections): server only, optional per
   account; the 30s poll is untouched and push only adds syncs. A Gmail
-  watch per mailbox posts to topic `pneu-<account>` in the user's **push
+  watch per mailbox (`INBOX` changes only) posts to topic `pneu-<account>` in the user's **push
   project**, a GCP project of its own (never lieer's) with its own
   Desktop client; the daemon keeps two `:pull`s outstanding on
   subscription `pneu-<account>` with the owner's token (`pubsub`,

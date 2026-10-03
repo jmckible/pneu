@@ -388,9 +388,10 @@ a server where it's set up.
     a running `pneu push init` or `pneu account push`, never the service:
     on the server, only while its consent waits, closed when Google
     answers or after 10 minutes. Run from a client, it's the client's
-    8080, bound before the SSH command starts (whether or not a consent
-    turns out to be needed) and held until the command ends; the server
-    then opens nothing.
+    8080, bound before the SSH command starts whether or not a consent
+    turns out to be needed, and closed as soon as Google's answer comes
+    back (or the command ends, fails or times out); `--off` binds
+    nothing. The server then opens nothing.
 
 ## 1. Packages
 
@@ -621,7 +622,7 @@ when a server is running.
 of yours, see [Let other machines in](#let-other-machines-in) once the
 install is done.
 
-**Instant mail (optional).** To have new mail land within seconds rather
+**Instant mail (optional).** To have new inbox mail land, usually within seconds, rather
 than at the next 30-second sync, see [Instant mail](#instant-mail), any
 time after the install.
 
@@ -729,11 +730,14 @@ instead):
 
 ## Instant mail
 
-Server only, optional, and any time after the install: new mail reaches
-pneu, and the bar's count, within seconds of arriving in Gmail, window
-open or not, instead of at the next sync. The sync every 30 seconds stays
-exactly as it is: Instant mail adds syncs and never replaces one, and with
-it off or failing everything works as before.
+Server only, optional, and any time after the install: a change to a
+mailbox's inbox (new mail, or mail archived from the phone) reaches pneu,
+and the bar's count, usually within seconds, window open or not, instead
+of at the next sync. Gmail watches the inbox only, so mail a filter keeps
+out of it waits for the next sync, as does anything Google's notice is
+late for (it promises no timing). The sync every 30 seconds stays exactly
+as it is: Instant mail adds syncs and never replaces one, and with it off
+or failing everything works as before.
 
 **Agents:** confirm with the human first, and say what it does and what it
 costs:
@@ -829,9 +833,11 @@ The download is the newest `~/Downloads/client_secret_*.json`; find it
 there, as in step 4, and call it `<push client JSON>`. Check it's the push
 project's and not lieer's: `jq -r .installed.project_id <push client JSON>`
 must print the push project ID, and none of the IDs `jq -r
-.installed.project_id ~/.config/pneu/*/client_secret.json` prints.
-`pneu push init` checks only that the JSON's project is `--project`; it
-can't tell lieer's project from a new one.
+.installed.project_id ~/.config/pneu/*/client_secret.json` prints on the
+server (from a client, run that one over SSH there: a client holds no
+lieer clients, and finding none proves nothing). `pneu push init` checks
+only that the JSON's project is `--project`; it can't tell lieer's
+project from a new one.
 
 ### Turn it on
 
@@ -927,12 +933,14 @@ fix. The ones a human may meet:
 - **"`<address>`'s Workspace admin doesn't allow this app"**, or Google's
   own screen saying the organization blocked access (pneu then says
   "consent wasn't given: Google answered with a refusal…"): the
-  mailbox's Workspace restricts third-party apps, or the push app's
-  Audience was set to *Internal* (it must be *External*). Its admin, in the Admin
+  mailbox's Workspace restricts third-party apps. Its admin, in the Admin
   console → **Security** → **Access and data control** → **API
   controls** → **Manage Third-Party App Access** → **Add app** → **OAuth
   App Name Or Client ID**, enters the push client ID and sets it to
-  **Trusted**. The admin's decision.
+  **Trusted**. The admin's decision. (If the push app's Audience was set
+  to *Internal*, a mailbox outside the owner's organization is refused
+  the same way, and trusting doesn't help: the owner sets it to
+  *External* on the Audience page of step 4, then **Publish app**.)
 - **"the Gmail API isn't enabled in project …"** or **"the Cloud Pub/Sub
   API isn't enabled…"**: the link it gives (add `authuser=<owner>&`)
   → **Enable**, wait a minute, run the command again.
@@ -971,7 +979,9 @@ state, then says what's left, none of which pneu removes:
   nothing runs for the account, and the watch lapses by itself within 7
   days, but pneu keeps it *off-pending* (and `pneu push init --replace`
   refuses) until it's cleaned up: `pneu account push <acct>` (a new
-  consent), then `pneu account push <acct> --off`. **If pneu doesn't
+  consent), then `pneu account push <acct> --off`. If the owner's grant
+  went with it (the owner is that mailbox), `pneu push init --reconsent`
+  first. **If pneu doesn't
   confirm,** it says "pending" and deleted nothing; run it again.
 
 To remove Instant mail altogether: `--off` for every account, then delete
