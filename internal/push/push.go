@@ -533,11 +533,16 @@ func ctxIn(parent, ectx context.Context) (context.Context, func()) {
 	return ctx, func() { stop(); cancel() }
 }
 
-// sleep waits d, or less if a wake comes; false when ctx ended.
-func (m *Manager) sleep(ctx context.Context, d time.Duration) bool {
+// sleep waits d, or less if a wake comes, or none if one has come since
+// epoch ep (the epoch the caller last looked at: a wake in between isn't
+// lost); false when ctx ended.
+func (m *Manager) sleep(ctx context.Context, d time.Duration, ep uint64) bool {
 	m.mu.Lock()
-	wake := m.wakeCh
+	wake, moved := m.wakeCh, m.epoch.Load() != ep
 	m.mu.Unlock()
+	if moved {
+		return ctx.Err() == nil
+	}
 	select {
 	case <-ctx.Done():
 		return false

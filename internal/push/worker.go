@@ -237,12 +237,13 @@ func (w *worker) pullLoop() {
 	m := w.m
 	b := pullBackoff
 	var lastStart time.Time
+	lastEp := m.epochNow()
 	empty, retried := false, false
 	for {
 		if empty {
 			// Capped, so a wall clock stepped back can't stretch it.
 			if d := min(lastStart.Add(PullFloor).Sub(m.clock.Now()), PullFloor); d > 0 {
-				if !m.sleep(w.ctx, d) {
+				if !m.sleep(w.ctx, d, lastEp) {
 					return
 				}
 				continue
@@ -252,7 +253,7 @@ func (w *worker) pullLoop() {
 		if !ok {
 			return
 		}
-		empty = false
+		lastEp, empty = ep, false
 		tok, err := w.owner.get(ctx, ep, ectx)
 		var ids []string
 		if err == nil {
@@ -300,7 +301,7 @@ func (w *worker) pullLoop() {
 				continue
 			}
 		}
-		if !m.sleep(w.ctx, b.fail(m.clock.Now())) {
+		if !m.sleep(w.ctx, b.fail(m.clock.Now()), ep) {
 			return
 		}
 	}
@@ -353,7 +354,7 @@ func (w *worker) watchLoop() {
 			seen, next = ep, time.Time{} // renewed after every wake's settle
 		}
 		if d := next.Sub(m.clock.Now()); d > 0 {
-			if !m.sleep(w.ctx, d) {
+			if !m.sleep(w.ctx, d, seen) {
 				return
 			}
 			continue // a wake cuts the wait short: look again by the wall clock
