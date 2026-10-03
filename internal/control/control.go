@@ -5,9 +5,10 @@
 // SO_PEERCRED and by the socket directory's owner and mode.
 //
 // One request line per connection, one reply line. Commands are a fixed
-// set; the only arguments are peers-reload's decimal generation and hex
-// hash, validated to exactly that shape (docs/client.md, "The control
-// socket").
+// set; the only arguments are peers-reload's and push-reload's decimal
+// generation and hex hash, and push-state's account name, validated to
+// exactly that shape before any handler runs (docs/client.md, "The
+// control socket"; docs/push.md D4).
 package control
 
 import (
@@ -190,6 +191,18 @@ type Handler struct {
 	// Status answers Status; nil: Self(). A seam for tests that play a
 	// daemon of another build.
 	Status func() Info
+	// PushReload (nil, or a client's daemon: refused as push off) reads
+	// push's state.json and applies generation gen if its hash is hash
+	// (ReloadApplied), or says it has applied a newer one (ReloadStale) or
+	// that the file isn't that generation (ReloadMismatch). It makes no
+	// network call and must return well inside ReloadTimeout: joining a
+	// cancelled worker is bounded by request cancellation.
+	PushReload func(gen uint64, hash string) (Reload, error)
+	// PushState (nil, or a client's daemon: refused as push off) is an
+	// account's push health; PushOff for one it runs no worker for. Quick:
+	// it runs before the reply. Instance may be left empty: the server
+	// fills in this process's.
+	PushState func(account string) PushState
 }
 
 // Server accepts commands on the socket until Close.
@@ -316,7 +329,7 @@ func (s *Server) handle(c *net.UnixConn) {
 	case err != nil:
 		return
 	default:
-		if strings.HasPrefix(line, string(PeersReload)+" ") {
+		if strings.HasPrefix(line, string(PeersReload)+" ") || strings.HasPrefix(line, string(PushReload)+" ") {
 			c.SetDeadline(time.Now().Add(ReloadTimeout))
 		}
 		reply = s.answer(Command(line))
@@ -325,6 +338,9 @@ func (s *Server) handle(c *net.UnixConn) {
 }
 
 func (s *Server) answer(cmd Command) string {
+	if reply, ok := s.answerPush(cmd); ok {
+		return reply
+	}
 	if args, ok := strings.CutPrefix(string(cmd), string(PeersReload)+" "); ok {
 		gen, hash, ok := parseReload(args)
 		switch {
@@ -787,6 +803,21 @@ func Send(path string, cmd Command, timeout time.Duration) (string, error) {
 }
 
 func send(path string, cmd Command, timeout time.Duration, uid int) (string, error) {
+	reply, err := sendLine(path, string(cmd), timeout, uid)
+	if err != nil {
+		return "", err
+	}
+	if msg, ok := strings.CutPrefix(reply, "error "); ok {
+		return "", fmt.Errorf("control: %s: %s", cmd, msg)
+	}
+	return reply, nil
+}
+
+func uidSelf() int { return os.Getuid() }
+
+// sendLine sends line and returns the reply line as it came, within
+// timeout, refusing a socket answered by another uid.
+func sendLine(path, line string, timeout time.Duration, uid int) (string, error) {
 	c, err := net.DialTimeout("unix", path, timeout)
 	if err != nil {
 		return "", err
@@ -801,15 +832,12 @@ func send(path string, cmd Command, timeout time.Duration, uid int) (string, err
 	if peer != uid {
 		return "", fmt.Errorf("control: %s is answered by uid %d, not us", path, peer)
 	}
-	if _, err := io.WriteString(uc, string(cmd)+"\n"); err != nil {
+	if _, err := io.WriteString(uc, line+"\n"); err != nil {
 		return "", err
 	}
 	reply, err := readLine(uc)
 	if err != nil {
 		return "", fmt.Errorf("control: reading the reply: %w", err)
-	}
-	if msg, ok := strings.CutPrefix(reply, "error "); ok {
-		return "", fmt.Errorf("control: %s: %s", cmd, msg)
 	}
 	return reply, nil
 }
