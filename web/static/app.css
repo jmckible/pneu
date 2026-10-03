@@ -630,6 +630,7 @@ dialog#keys::backdrop, dialog#syncinfo::backdrop { background: rgb(0 0 0 / 0.45)
 .syncinfo .when { color: var(--muted); }
 .syncinfo .bad { color: var(--accent-hot); overflow-wrap: anywhere; }
 .syncinfo .foot { margin: 10px 0 0; color: var(--muted); }
+.syncinfo code { color: var(--fg); overflow-wrap: anywhere; }
 dialog#keys .syncinfo + h2 { margin-top: 12px; }
 
 /* The unsubscribe confirmation (actions.js, docs/actions.md), dressed as the

@@ -145,13 +145,20 @@
     };
   }
 
+  // remoteName is the server's name on a client (the SSH target it was
+  // paired with), for the words that say a command runs there; null on a
+  // server.
+  function remoteName(link) {
+    return valid(link) ? serverName(link) : null;
+  }
+
   // reauthRefused reports whether a failed Reconnect is the server's
   // 409 reauth-on-server.
   function reauthRefused(err) {
     return !!err && err.status === 409 && err.message === 'reauth-on-server';
   }
 
-  var api = { reauthHelp: reauthHelp, reauthRefused: reauthRefused, nudge: nudge, updateText: updateText, accountWord: accountWord, lineState: lineState, outcome: outcome, failText: failText, reachText: reachText, reasonText: reasonText, details: details, workerLine: workerLine };
+  var api = { remoteName: remoteName, reauthHelp: reauthHelp, reauthRefused: reauthRefused, nudge: nudge, updateText: updateText, accountWord: accountWord, lineState: lineState, outcome: outcome, failText: failText, reachText: reachText, reasonText: reasonText, details: details, workerLine: workerLine };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else (root.Pneu = root.Pneu || {}).link = api;
 })(this);
