@@ -117,7 +117,8 @@ them here if they're wrong.
   shown and on focus; a screen reader hears changes of state (a live
   region), not the age ticking. Never a progress bar.
   `data-accounts` carries each account's `lastSync`, `queued`, `running`,
-  `failures` and `error`, and the line reads its stale threshold from the
+  `failures` and `error` (and, for the details only, `pollEvery` and
+  `push`), and the line reads its stale threshold from the
   sync period (`data-every`), so the first paint is right; SSE `account`
   keeps them current: sent when a sync is queued, starts and ends.
   `syncing`/`sync` still bracket each sync, for the line only; a sync that
@@ -129,8 +130,20 @@ them here if they're wrong.
   Clicking the line opens its details (Esc or a click closes it), and the
   `?` overlay leads with the same: per account, the last sync as a time
   and an age, whether it's checking now or queued, failures and the last
-  error, and the sync period; on a client also the link (connected, or
-  why not, and since when) and both builds' revisions.
+  error, and its instant mail (docs/push.md D7): `Instant: delivering ·
+  last message 2m ago`, `Instant: quiet`, `Instant: starting`, `Instant:
+  off`, or `Instant: failing — <reason in words>` with the command that
+  fixes it (`pneu account push <name>`; `pneu push init --reconsent` for
+  the push owner's grant; for an API, permission or org policy,
+  `pneu account push <name>` prints the fix; none for a network
+  failure, which retries). Push never touches the line itself or turns
+  anything red. The footer is the polling note, `Checks every 30s`, from
+  the engine's real delay (`pollEvery`, gmi `PollDelay`: the ready
+  accounts' shortest, else `data-every`), and an account backing off
+  after failures says `checks every 4m while failing`. On a client also
+  the link (connected, or why not, and since when) and both builds'
+  revisions, and the commands are to run in a terminal there (they run
+  on the server over SSH, as `pneu account auth` does).
   On a client a write that couldn't reach the server says so instead of
   its usual failure: `Not sent: can't reach <server>.` when nothing left
   this machine (pressing again is safe), `<server> didn't answer; checking
