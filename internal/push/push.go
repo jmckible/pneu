@@ -57,8 +57,9 @@ const (
 	// WatchEvery caps the time between watch renewals.
 	WatchEvery = 24 * time.Hour
 	// watchFloor is the least time to the next renewal, whatever
-	// expiration Google names: never a tight loop.
-	watchFloor = 5 * time.Second
+	// expiration Google names: never a tight loop. A lease shorter than
+	// twice this may lapse before it's renewed; Gmail's are 7 days.
+	watchFloor = time.Second
 )
 
 // Backoffs (D5): pull errors 2s doubling to 5 min, back to 2s after 5
@@ -495,41 +496,41 @@ func (m *Manager) inEpoch(ep uint64, fn func()) bool {
 	return true
 }
 
-// reqCtx is a context for one request by w: it ends with the worker or at
-// the next wake. ep is the epoch it was made in, ectx that epoch's
-// context.
-func (m *Manager) reqCtx(parent context.Context) (ctx context.Context, done func(), ep uint64, ectx context.Context) {
-	m.mu.Lock()
-	ep, ectx = m.epoch.Load(), m.epochCtx
-	m.mu.Unlock()
-	ctx, done = ctxIn(parent, ectx)
-	return ctx, done, ep, ectx
-}
-
-// ctxIn is a context ending with parent or with ectx.
-func ctxIn(parent, ectx context.Context) (context.Context, func()) {
-	ctx, cancel := context.WithCancel(parent)
-	stop := context.AfterFunc(ectx, cancel)
-	return ctx, func() { stop(); cancel() }
-}
-
-// settle waits out a wake's settle; false when ctx ended.
-func (m *Manager) settle(ctx context.Context) bool {
+// admit waits out a wake's settle and then gives a context for one
+// request: it ends with parent or at the next wake. ep is the epoch it
+// was made in, ectx that epoch's context. The settle check and the epoch
+// are read together, so a wake after the check can't hand out its own
+// epoch before its settle has passed. ok false when parent ended.
+func (m *Manager) admit(parent context.Context) (ctx context.Context, done func(), ep uint64, ectx context.Context, ok bool) {
 	for {
 		m.mu.Lock()
 		until, wake := m.settleUntil, m.wakeCh
-		m.mu.Unlock()
 		d := until.Sub(m.clock.Now())
 		if d <= 0 {
-			return true
+			ep, ectx = m.epoch.Load(), m.epochCtx
+			m.mu.Unlock()
+			ctx, done = ctxIn(parent, ectx)
+			return ctx, done, ep, ectx, true
 		}
+		m.mu.Unlock()
 		select {
-		case <-ctx.Done():
-			return false
+		case <-parent.Done():
+			return nil, nil, 0, nil, false
 		case <-m.clock.After(min(d, m.o.Settle)):
 		case <-wake:
 		}
 	}
+}
+
+// ctxIn is a context ending with parent or with ectx, already ended if
+// ectx has (AfterFunc would end it only a moment later).
+func ctxIn(parent, ectx context.Context) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(parent)
+	stop := context.AfterFunc(ectx, cancel)
+	if ectx.Err() != nil {
+		cancel()
+	}
+	return ctx, func() { stop(); cancel() }
 }
 
 // sleep waits d, or less if a wake comes; false when ctx ended.

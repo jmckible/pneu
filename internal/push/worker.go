@@ -239,9 +239,6 @@ func (w *worker) pullLoop() {
 	var lastStart time.Time
 	empty, retried := false, false
 	for {
-		if !m.settle(w.ctx) {
-			return
-		}
 		if empty {
 			// Capped, so a wall clock stepped back can't stretch it.
 			if d := min(lastStart.Add(PullFloor).Sub(m.clock.Now()), PullFloor); d > 0 {
@@ -251,8 +248,11 @@ func (w *worker) pullLoop() {
 				continue
 			}
 		}
+		ctx, done, ep, ectx, ok := m.admit(w.ctx)
+		if !ok {
+			return
+		}
 		empty = false
-		ctx, done, ep, ectx := m.reqCtx(w.ctx)
 		tok, err := w.owner.get(ctx, ep, ectx)
 		var ids []string
 		if err == nil {
@@ -336,8 +336,9 @@ func (w *worker) ack(tok string, ids []string, ep uint64, ectx context.Context) 
 	}
 }
 
-// watchLoop renews the mailbox's watch at start, then at min(now +
-// WatchEvery, expiration − (expiration − now)/2), backing off on failure.
+// watchLoop renews the mailbox's watch at start and after every wake's
+// settle, then at min(now + WatchEvery, expiration − (expiration − now)/2),
+// backing off on failure.
 // A 401 drops the token and retries once at once; invalid_grant on the
 // refresh stops the worker as reauth/mailbox. An answer counts only with
 // no wake since its request.
@@ -346,9 +347,10 @@ func (w *worker) watchLoop() {
 	b := watchBackoff
 	var next time.Time
 	retried := false
+	seen := m.epochNow()
 	for {
-		if !m.settle(w.ctx) {
-			return
+		if ep := m.epochNow(); ep != seen {
+			seen, next = ep, time.Time{} // renewed after every wake's settle
 		}
 		if d := next.Sub(m.clock.Now()); d > 0 {
 			if !m.sleep(w.ctx, d) {
@@ -356,7 +358,10 @@ func (w *worker) watchLoop() {
 			}
 			continue // a wake cuts the wait short: look again by the wall clock
 		}
-		ctx, done, ep, _ := m.reqCtx(w.ctx)
+		ctx, done, ep, _, ok := m.admit(w.ctx)
+		if !ok {
+			return
+		}
 		tok, err := w.mbx.get(ctx, m, ep)
 		var exp time.Time
 		if err == nil {

@@ -103,12 +103,10 @@ func (o *ownerSource) get(ctx context.Context, ep uint64, ectx context.Context) 
 // run is one refresh, bounded by this owner's context and ep's.
 func (o *ownerSource) run(fl *flight, ep uint64, ectx context.Context) {
 	defer o.m.flights.Done()
-	ctx, cancel := context.WithCancel(o.ctx)
-	stop := context.AfterFunc(ectx, cancel)
+	ctx, done := ctxIn(o.ctx, ectx)
 	tok, err := o.m.api.Refresh(ctx, o.creds, google.Owner, o.refresh, o.sub)
 	o.m.after(google.OpRefresh)
-	stop()
-	cancel()
+	done()
 	o.mu.Lock()
 	switch {
 	case o.m.epochNow() != ep:

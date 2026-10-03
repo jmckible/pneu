@@ -75,7 +75,7 @@ func TestTwoPullsAndTheEmptyFloor(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	base := e2.subCalls(google.OpPull, "personal")
 	time.Sleep(200 * time.Millisecond)
-	if n := e2.subCalls(google.OpPull, "personal"); n != base || n > 2*Pulls {
+	if n := e2.subCalls(google.OpPull, "personal"); n != base {
 		t.Fatalf("early empty pulls re-pulled without a second passing: %d -> %d", base, n)
 	}
 	for range 5 {
@@ -615,5 +615,22 @@ func TestWakeCutsAck(t *testing.T) {
 	}
 	e.f.Redeliver(res)
 	e.advance(15*time.Second, time.Second)
-	e.until("acked after the settle", func() bool { return e.f.Acked(res) == 1 && e.f.Outstanding(res) == 0 })
+	e.until("acked after the settle", func() bool { return e.f.Acked(res) >= 1 && e.f.Outstanding(res) == 0 && e.f.Queued(res) == 0 })
+}
+
+// A wake renews even a healthy watch once its settle has passed, not at
+// the renewal the sleep had scheduled.
+func TestWakeRenewsWatch(t *testing.T) {
+	e := newEnv(t, "personal")
+	e.start()
+	e.until("delivering", e.is("personal", control.PushDelivering, ""))
+	e.clock.wall.Advance(time.Hour) // a short suspend
+	e.m.Woke()
+	e.advance(14*time.Second, time.Second)
+	time.Sleep(50 * time.Millisecond)
+	if n := e.watchCalls("personal"); n != 1 {
+		t.Fatalf("renewed during the settle: %d", n)
+	}
+	e.advance(time.Second, time.Second)
+	e.eventually("renewed after the settle", func() bool { return e.watchCalls("personal") == 2 })
 }

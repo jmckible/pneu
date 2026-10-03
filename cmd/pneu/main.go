@@ -265,7 +265,13 @@ func serve(args []string) error {
 			pm = nil // never started: State says off
 		} else {
 			pm.Start()
-			defer pm.Stop() // every exit path; Stop again is harmless
+			// Every exit path, in D5's order: the socket first (its
+			// deferred Close above would run after this). Both are
+			// harmless again.
+			defer func() {
+				ctl.Close()
+				pm.Stop()
+			}()
 		}
 	}
 	if ps != nil {
