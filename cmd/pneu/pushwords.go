@@ -95,9 +95,9 @@ func (p pushCtx) why(op google.Op, code google.Code, kind google.Kind) string {
 		return fmt.Sprintf("the push owner%s lacks permission in project %s: the owner must own the project (or hold Pub/Sub Admin there)", p.ownerWords(), p.project)
 	case google.CodeScope:
 		if kind == google.Owner {
-			return "the owner's grant lacks a scope it needs: run pneu push init --reconsent and allow everything asked"
+			return "the owner's grant lacks a scope it needs (Google's consent screen has a checkbox per permission, and Pub/Sub's starts unticked): run pneu push init --reconsent and tick every permission it asks for"
 		}
-		return fmt.Sprintf("the mailbox's grant lacks a scope it needs: run pneu account push %s --reconsent and allow everything asked", p.name)
+		return fmt.Sprintf("the mailbox's grant lacks a scope it needs (Google's consent screen may show a checkbox for it, unticked): run pneu account push %s --reconsent and tick every permission it asks for", p.name)
 	case google.CodeNotFound:
 		if op == google.OpTopicList {
 			return fmt.Sprintf("project %s doesn't exist, or the push owner%s can't see it", p.project, p.ownerWords())

@@ -945,6 +945,10 @@ fix. The ones a human may meet:
 - **"a consent is already waiting on localhost:8080 (lieer's or
   pneu's)"**: a `pneu account auth`, a Reconnect or another push consent
   is waiting; finish or close it.
+- **"the owner's grant lacks a scope it needs"** (or the mailbox's):
+  Google's consent screen shows a checkbox per permission, and Pub/Sub's
+  starts unticked; continuing without it grants less, which pneu refuses.
+  Run the command it names and tick every permission (or "Select all").
 - **"the push owner … lacks permission in project …"**: the owner
   consented as an account that doesn't own the push project.
 - **"…belongs to another pneu server"**: one server per push project, so
