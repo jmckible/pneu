@@ -647,6 +647,14 @@ func (e *pushEnv) on(name string, reconsent bool) error {
 		return err
 	}
 	o.say("  committed: %s is on (generation %d)", name, next.Generation)
+	// The daemon process before the hand-over: the proof counts only from
+	// it (a restart in between could deliver what an earlier one queued).
+	var before string
+	if e.sockErr == nil {
+		if info, err := control.AskStatus(e.socket); err == nil {
+			before = info.Instance
+		}
+	}
 	h, dl, next, why := e.handOver(l, next)
 	l.Unlock()
 	if dl != nil {
@@ -663,7 +671,7 @@ func (e *pushEnv) on(name string, reconsent bool) error {
 		return fmt.Errorf("%s is on in state.json, but the running pneu hasn't confirmed it (%s): pending. Running pneu account push %s again is safe", name, why, name)
 	}
 	// 5. The proof.
-	return e.awaitDelivery(name, next.Generation, !subCreated)
+	return e.awaitDelivery(name, next.Generation, before, !subCreated)
 }
 
 func pick(b bool, yes, no string) string {
@@ -675,14 +683,15 @@ func pick(b bool, yes, no string) string {
 
 // awaitDelivery waits up to deliverWait for the daemon to report the
 // account delivering at generation gen: it renewed the watch and then
-// received a message (a watch publishes one at once). A timeout leaves
-// everything in place and says what's unproven.
-func (e *pushEnv) awaitDelivery(name string, gen uint64, reused bool) error {
+// received a message (a watch publishes one at once). It's proof of this
+// watch only from instance, the process asked before the hand-over; any
+// other (a restart, or none known) is worded as messages arriving. A
+// timeout leaves everything in place and says what's unproven.
+func (e *pushEnv) awaitDelivery(name string, gen uint64, instance string, reused bool) error {
 	o := e.out
 	o.say("  waiting up to %v for Gmail's first notification", e.deliverWait)
 	deadline := time.Now().Add(e.deliverWait)
-	instance := ""
-	restarted := false
+	restarted := instance == ""
 	var last control.PushState
 	for {
 		p, err := control.AskPushState(e.socket, name)
@@ -708,7 +717,7 @@ func (e *pushEnv) awaitDelivery(name string, gen uint64, reused bool) error {
 				case reused:
 					o.say("Instant mail is on for %s: its subscription is delivering. It existed before this run, so that shows messages arrive, not that this watch sent them.", name)
 				case restarted:
-					o.say("Instant mail is on for %s: its subscription is delivering. pneu restarted during the wait, so that shows messages arrive, not that this watch sent them.", name)
+					o.say("Instant mail is on for %s: its subscription is delivering. pneu restarted around the hand-over, so that shows messages arrive, not that this watch sent them.", name)
 				default:
 					o.say("Instant mail is on for %s: Gmail's watch delivered its first notification.", name)
 				}

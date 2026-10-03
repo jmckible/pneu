@@ -57,7 +57,7 @@ func (p pushCtx) explain(err error, kind google.Kind) error {
 		}
 		return fmt.Errorf("subscription %s in project %s exists, but its %s isn't what pneu makes: delete it (gcloud pubsub subscriptions delete %s --project=%s) and run this again", res, p.project, me.Field, res, p.project)
 	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
-		return errors.New("stopped before Google answered; nothing past the last step shown was done")
+		return errors.New("stopped before Google answered: the step that was running may or may not have taken effect, and running this again is safe")
 	case !errors.As(err, &ge):
 		return errors.New("an unexpected failure talking to Google")
 	}

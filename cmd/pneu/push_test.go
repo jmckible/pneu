@@ -218,7 +218,8 @@ func (d *stubDaemon) stop() {
 	})
 }
 
-const stubInstance = "0123456789abcdef"
+// stubInstance is what the stub answers status with: this process's.
+var stubInstance = control.Instance()
 
 func startStubDaemon(t *testing.T, e *pushEnv) *stubDaemon {
 	t.Helper()
@@ -1327,7 +1328,7 @@ func TestPushAwaitDeliveryRestart(t *testing.T) {
 	d.state = func(account string, gen uint64) control.PushState {
 		calls++
 		if calls == 1 {
-			return control.PushState{Instance: stubInstance, Generation: gen, State: control.PushStarting}
+			return control.PushState{Instance: control.Instance(), Generation: gen, State: control.PushStarting}
 		}
 		return control.PushState{Instance: "fedcba9876543210", Generation: gen, State: control.PushDelivering}
 	}
@@ -1335,8 +1336,22 @@ func TestPushAwaitDeliveryRestart(t *testing.T) {
 	if err := pt.e.on("personal", false); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(pt.out.String(), "pneu restarted during the wait, so that shows messages arrive, not that this watch sent them.") ||
+	if !strings.Contains(pt.out.String(), "pneu restarted around the hand-over, so that shows messages arrive, not that this watch sent them.") ||
 		strings.Contains(pt.out.String(), "Gmail's watch delivered its first notification") {
 		t.Fatalf("output:\n%s", pt.out.String())
+	}
+	// Restarted before the first answer: the instance asked before the
+	// hand-over never answers push-state.
+	pt.out.Reset()
+	d.mu.Lock()
+	d.state = func(account string, gen uint64) control.PushState {
+		return control.PushState{Instance: "fedcba9876543210", Generation: gen, State: control.PushDelivering}
+	}
+	d.mu.Unlock()
+	if err := pt.e.on("personal", true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pt.out.String(), "(pneu restarted meanwhile)") || strings.Contains(pt.out.String(), "Gmail's watch delivered its first notification") {
+		t.Fatalf("restart before the first answer:\n%s", pt.out.String())
 	}
 }
