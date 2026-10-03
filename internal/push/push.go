@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jmckible/pneu/internal/control"
@@ -55,9 +56,9 @@ const (
 	Pulls = 2
 	// WatchEvery caps the time between watch renewals.
 	WatchEvery = 24 * time.Hour
-	// watchMin is the least time to the next renewal, whatever
-	// expiration Google names.
-	watchMin = time.Minute
+	// watchFloor is the least time to the next renewal, whatever
+	// expiration Google names: never a tight loop.
+	watchFloor = 5 * time.Second
 )
 
 // Backoffs (D5): pull errors 2s doubling to 5 min, back to 2s after 5
@@ -108,6 +109,13 @@ type Manager struct {
 
 	reloadMu sync.Mutex // one reload (or the first load) at a time
 
+	// epoch counts wakes; an answer from an older epoch is discarded.
+	// Written under epochMu's write lock (and mu); read lock-free, or
+	// under the read lock (inEpoch) to act on an answer with no wake in
+	// between. epochMu comes before mu.
+	epoch   atomic.Uint64
+	epochMu sync.RWMutex
+
 	mu       sync.Mutex
 	started  bool
 	stopped  bool
@@ -119,9 +127,8 @@ type Manager struct {
 	owner    *ownerSource
 	workers  map[string]*worker
 	draining []*worker // cancelled, not yet joined
-	// epoch counts wakes. Requests run under epochCtx, which a wake
-	// cancels; an answer from an older epoch is discarded.
-	epoch       uint64
+	// epochCtx is the current epoch's: requests run under it, and a wake
+	// cancels it.
 	epochCtx    context.Context
 	epochCancel context.CancelFunc
 	wokeAt      time.Time
@@ -443,8 +450,9 @@ func (m *Manager) State(account string) control.PushState {
 // are dropped, and nothing is pulled or renewed until Settle has passed.
 // No sync of its own: main.go's wake sync covers that.
 func (m *Manager) Woke() {
+	m.epochMu.Lock()
 	m.mu.Lock()
-	m.epoch++
+	m.epoch.Add(1)
 	m.epochCancel()
 	m.epochCtx, m.epochCancel = context.WithCancel(m.ctx)
 	now := m.clock.Now()
@@ -455,6 +463,7 @@ func (m *Manager) Woke() {
 	owner := m.owner
 	ws := slices.Collect(maps.Values(m.workers))
 	m.mu.Unlock()
+	m.epochMu.Unlock()
 	if owner != nil {
 		owner.forget()
 	}
@@ -472,21 +481,36 @@ func (m *Manager) after(op google.Op) {
 	}
 }
 
-func (m *Manager) epochNow() uint64 {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.epoch
+func (m *Manager) epochNow() uint64 { return m.epoch.Load() }
+
+// inEpoch runs fn if no wake has come since epoch ep, with none able to
+// come until it returns: an answer from before a wake changes nothing.
+func (m *Manager) inEpoch(ep uint64, fn func()) bool {
+	m.epochMu.RLock()
+	defer m.epochMu.RUnlock()
+	if m.epoch.Load() != ep {
+		return false
+	}
+	fn()
+	return true
 }
 
 // reqCtx is a context for one request by w: it ends with the worker or at
-// the next wake. ep is the epoch it was made in.
+// the next wake. ep is the epoch it was made in, ectx that epoch's
+// context.
 func (m *Manager) reqCtx(parent context.Context) (ctx context.Context, done func(), ep uint64, ectx context.Context) {
 	m.mu.Lock()
-	ep, ectx = m.epoch, m.epochCtx
+	ep, ectx = m.epoch.Load(), m.epochCtx
 	m.mu.Unlock()
+	ctx, done = ctxIn(parent, ectx)
+	return ctx, done, ep, ectx
+}
+
+// ctxIn is a context ending with parent or with ectx.
+func ctxIn(parent, ectx context.Context) (context.Context, func()) {
 	ctx, cancel := context.WithCancel(parent)
 	stop := context.AfterFunc(ectx, cancel)
-	return ctx, func() { stop(); cancel() }, ep, ectx
+	return ctx, func() { stop(); cancel() }
 }
 
 // settle waits out a wake's settle; false when ctx ended.

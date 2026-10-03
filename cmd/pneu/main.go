@@ -231,19 +231,21 @@ func serve(args []string) error {
 	srv.SyncInterval = syncer.Interval()
 	// Theme switches restyle open pages (SSE `theme`).
 	go srv.WatchTheme(ctx, web.ThemePoll)
+	// Push sync (docs/push.md D5): a nudge per message on each pushed
+	// account's subscription. Wired before the engine runs, whose
+	// callbacks read it through the account view; started once the
+	// control socket is up (until then, and if never, every account is
+	// off).
+	pm := newPushManager(syncer, srv)
+	if pm != nil {
+		srv.Push = pm.State
+	}
 	// The engine has its own context: at shutdown it stops only after the
 	// push manager, which nudges it, has stopped (docs/push.md D5).
 	engineCtx, stopEngine := context.WithCancel(context.Background())
 	defer stopEngine()
 	syncDone := make(chan struct{})
 	go func() { syncer.Run(engineCtx); close(syncDone) }()
-	// Push sync (docs/push.md D5): a nudge per message on each pushed
-	// account's subscription. Read by the account view and status file
-	// before either runs; started once the control socket is up.
-	pm := newPushManager(syncer, srv)
-	if pm != nil {
-		srv.Push = pm.State
-	}
 
 	// Before Serve: `pneu open` sends `launch` once HTTP answers. The peer
 	// server exists before the socket, so a `pneu peer add|remove` that
@@ -260,8 +262,7 @@ func serve(args []string) error {
 	if pm != nil {
 		if ctl == nil {
 			log.Printf("pneu: no push sync: it needs the control socket, which acknowledges pneu account push")
-			srv.Push = nil
-			pm = nil
+			pm = nil // never started: State says off
 		} else {
 			pm.Start()
 			defer pm.Stop() // every exit path; Stop again is harmless

@@ -1,6 +1,7 @@
 package push
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"sync"
@@ -47,8 +48,8 @@ type facts struct {
 }
 
 // health is the state, first match wins: reauth, then failing (no 2xx
-// pull for FailAfter since the worker started or woke, or the watch has
-// lapsed), then starting (neither a 2xx pull nor a watch yet), then
+// pull for FailAfter since the worker started or woke, the watch has
+// lapsed, or none was ever had in FailAfter), then starting (neither a 2xx pull nor a watch yet), then
 // delivering (a message within DeliveringFor), then quiet.
 func (f facts) health(now time.Time) (string, string) {
 	ref := f.since
@@ -59,9 +60,18 @@ func (f facts) health(now time.Time) (string, string) {
 	case f.reauth != "":
 		return control.PushReauth, f.reauth
 	case now.Sub(ref) >= FailAfter:
-		return control.PushFailing, reasonOf(f.pullErr, control.ReasonNetwork)
+		return control.PushFailing, cmp.Or(reasonOf(f.pullErr), control.ReasonNetwork)
 	case !f.watchExp.IsZero() && !now.Before(f.watchExp):
-		return control.PushFailing, reasonOf(f.watchErr, control.ReasonWatchExpired)
+		switch r := reasonOf(f.watchErr); r {
+		case "", control.ReasonNetwork, control.ReasonUnknown:
+			return control.PushFailing, control.ReasonWatchExpired
+		default:
+			return control.PushFailing, r
+		}
+	case !f.watched && now.Sub(f.since) >= FailAfter:
+		// No watch at all yet: watchExp says nothing, and pulls alone
+		// would read as quiet.
+		return control.PushFailing, cmp.Or(reasonOf(f.watchErr), control.ReasonNetwork)
 	case f.lastPullOK.IsZero() && !f.watched:
 		return control.PushStarting, ""
 	case !f.lastDelivery.IsZero() && now.Sub(f.lastDelivery) < DeliveringFor:
@@ -70,12 +80,13 @@ func (f facts) health(now time.Time) (string, string) {
 	return control.PushQuiet, ""
 }
 
-// reasonOf maps a google code to the closed reasons. The ones a person
-// can act on are kept; a network failure is network; anything else, or
-// nothing recorded, is dflt for a lapsed watch (whose renewals say only
-// that they didn't get through) and unknown otherwise.
-func reasonOf(c google.Code, dflt string) string {
+// reasonOf maps a google code to the closed reasons: the ones a person
+// can act on kept, a failure to get through network, anything else
+// unknown; "" for none recorded.
+func reasonOf(c google.Code) string {
 	switch c {
+	case "":
+		return ""
 	case google.CodeAPIDisabled:
 		return control.ReasonAPIDisabled
 	case google.CodePermission, google.CodeScope:
@@ -83,15 +94,7 @@ func reasonOf(c google.Code, dflt string) string {
 	case google.CodeOrgPolicy:
 		return control.ReasonOrgPolicy
 	case google.CodeNetwork, google.CodeUnavailable:
-		if dflt == control.ReasonWatchExpired {
-			return dflt
-		}
 		return control.ReasonNetwork
-	case "":
-		return dflt
-	}
-	if dflt == control.ReasonWatchExpired {
-		return dflt
 	}
 	return control.ReasonUnknown
 }
@@ -228,16 +231,13 @@ func opOf(err error, dflt google.Op) google.Op {
 
 // pullLoop keeps one pull outstanding: messages are a nudge and then an
 // ack; an empty answer re-pulls, at most once per PullFloor; an error
-// backs off. A 401 drops the token and retries once at once.
+// backs off. A 401 drops the token and retries once at once. An answer is
+// acted on (health, nudge, ack) only with no wake since its request.
 func (w *worker) pullLoop() {
 	m := w.m
 	b := pullBackoff
 	var lastStart time.Time
 	empty, retried := false, false
-	fail := func(op google.Op, err error) bool {
-		w.pullFailed(opOf(err, op), err)
-		return m.sleep(w.ctx, b.fail(m.clock.Now()))
-	}
 	for {
 		if !m.settle(w.ctx) {
 			return
@@ -254,62 +254,84 @@ func (w *worker) pullLoop() {
 		empty = false
 		ctx, done, ep, ectx := m.reqCtx(w.ctx)
 		tok, err := w.owner.get(ctx, ep, ectx)
-		if err != nil {
+		var ids []string
+		if err == nil {
+			lastStart = m.clock.Now()
+			ids, err = m.api.Pull(ctx, tok, w.project, w.res)
+			m.after(google.OpPull)
+		} else if errors.Is(err, errReauth) {
 			done()
-			switch {
-			case w.ctx.Err() != nil, errors.Is(err, errReauth):
-				return // ownerReauth stops every worker
-			case errors.Is(err, errStale), m.epochNow() != ep:
-				continue
-			}
-			if !fail(google.OpRefresh, err) {
-				return
-			}
-			continue
+			return // ownerReauth stops every worker
 		}
-		lastStart = m.clock.Now()
-		ids, err := m.api.Pull(ctx, tok, w.project, w.res)
-		m.after(google.OpPull)
 		done()
 		switch {
 		case w.ctx.Err() != nil:
 			return
-		case m.epochNow() != ep:
-			continue // from before a wake: discarded, redelivered later
-		case google.CodeOf(err) == google.CodeUnauthenticated && !retried:
+		case errors.Is(err, errStale):
+			continue
+		case google.CodeOf(err) == google.CodeUnauthenticated && !retried && m.epochNow() == ep:
 			w.owner.drop(tok)
 			retried = true
 			continue
-		case err != nil:
-			retried = false
-			if !fail(google.OpPull, err) {
+		}
+		acted := m.inEpoch(ep, func() {
+			if err != nil {
+				w.pullFailed(opOf(err, google.OpRefresh), err)
 				return
 			}
-			continue
+			now := m.clock.Now()
+			b.ok(now)
+			w.pulled(now, len(ids) > 0)
+			if len(ids) > 0 {
+				w.nudge()
+			}
+		})
+		if !acted {
+			continue // from before a wake: discarded, redelivered later
 		}
 		retried = false
-		now := m.clock.Now()
-		b.ok(now)
-		w.pulled(now, len(ids) > 0)
-		if len(ids) == 0 {
+		if err == nil && len(ids) == 0 {
 			empty = true
 			continue
 		}
-		w.nudge()
-		if m.epochNow() != ep {
-			continue // a wake since: the ack waits for the redelivery
+		if err == nil {
+			err = w.ack(tok, ids, ep, ectx)
+			if err == nil || !m.inEpoch(ep, func() { w.pullFailed(opOf(err, google.OpAck), err) }) {
+				continue
+			}
 		}
-		ctx, done, ep, _ = m.reqCtx(w.ctx)
-		err = m.api.Ack(ctx, tok, w.project, w.res, ids)
+		if !m.sleep(w.ctx, b.fail(m.clock.Now())) {
+			return
+		}
+	}
+}
+
+// ack acknowledges ids pulled in epoch ep, under that epoch's context so
+// a wake cuts it off. A 401 drops the token and retries once with a fresh
+// one. nil also when the worker ended or a wake came: nothing to back off
+// for (the messages are redelivered).
+func (w *worker) ack(tok string, ids []string, ep uint64, ectx context.Context) error {
+	m := w.m
+	for retried := false; ; retried = true {
+		ctx, done := ctxIn(w.ctx, ectx)
+		err := m.api.Ack(ctx, tok, w.project, w.res, ids)
 		m.after(google.OpAck)
+		if err == nil || w.ctx.Err() != nil || m.epochNow() != ep {
+			done()
+			return nil
+		}
+		if google.CodeOf(err) != google.CodeUnauthenticated || retried {
+			done()
+			return err
+		}
+		w.owner.drop(tok)
+		tok, err = w.owner.get(ctx, ep, ectx)
 		done()
 		switch {
-		case w.ctx.Err() != nil:
-			return
-		case err != nil && m.epochNow() == ep:
-			if !fail(google.OpAck, err) {
-				return
-			}
+		case w.ctx.Err() != nil, errors.Is(err, errReauth), errors.Is(err, errStale):
+			return nil
+		case err != nil:
+			return err
 		}
 	}
 }
@@ -317,7 +339,8 @@ func (w *worker) pullLoop() {
 // watchLoop renews the mailbox's watch at start, then at min(now +
 // WatchEvery, expiration − (expiration − now)/2), backing off on failure.
 // A 401 drops the token and retries once at once; invalid_grant on the
-// refresh stops the worker as reauth/mailbox.
+// refresh stops the worker as reauth/mailbox. An answer counts only with
+// no wake since its request.
 func (w *worker) watchLoop() {
 	m := w.m
 	b := watchBackoff
@@ -335,51 +358,49 @@ func (w *worker) watchLoop() {
 		}
 		ctx, done, ep, _ := m.reqCtx(w.ctx)
 		tok, err := w.mbx.get(ctx, m, ep)
-		if err != nil {
-			done()
-			switch {
-			case w.ctx.Err() != nil:
-				return
-			case errors.Is(err, errReauth):
-				m.logf("push %s: mailbox: %s: a new consent is needed (pneu account push %s)", w.name, google.CodeInvalidGrant, w.name)
-				w.stopReauth(control.ReasonMailboxReauth)
-				return
-			case errors.Is(err, errStale), m.epochNow() != ep:
-				continue
-			}
-			w.watchFailed(opOf(err, google.OpRefresh), err)
-			next = m.clock.Now().Add(b.fail(m.clock.Now()))
-			continue
+		var exp time.Time
+		if err == nil {
+			exp, err = m.api.Watch(ctx, tok, w.project, w.res)
+			m.after(google.OpWatch)
 		}
-		exp, err := m.api.Watch(ctx, tok, w.project, w.res)
-		m.after(google.OpWatch)
 		done()
 		now := m.clock.Now()
 		switch {
 		case w.ctx.Err() != nil:
 			return
-		case m.epochNow() != ep:
-			continue // from before a wake: renewed again after the settle
-		case google.CodeOf(err) == google.CodeUnauthenticated && !retried:
+		case errors.Is(err, errReauth):
+			m.logf("push %s: mailbox: %s: a new consent is needed (pneu account push %s)", w.name, google.CodeInvalidGrant, w.name)
+			w.stopReauth(control.ReasonMailboxReauth)
+			return
+		case errors.Is(err, errStale):
+			continue
+		case google.CodeOf(err) == google.CodeUnauthenticated && !retried && m.epochNow() == ep:
 			w.mbx.drop()
 			retried = true
 			continue
 		case err == nil && !exp.After(now):
 			err = &google.Error{Op: google.OpWatch, Code: google.CodeUnknown}
 		}
+		if !m.inEpoch(ep, func() {
+			if err != nil {
+				w.watchFailed(opOf(err, google.OpRefresh), err)
+			} else {
+				w.watched(exp)
+			}
+		}) {
+			continue // from before a wake: renewed again after the settle
+		}
 		retried = false
 		if err != nil {
-			w.watchFailed(google.OpWatch, err)
 			next = now.Add(b.fail(now))
 			continue
 		}
 		b.reset()
-		w.watched(exp)
 		next = exp.Add(-exp.Sub(now) / 2)
 		if cap := now.Add(WatchEvery); next.After(cap) {
 			next = cap
 		}
-		if floor := now.Add(watchMin); next.Before(floor) {
+		if floor := now.Add(watchFloor); next.Before(floor) {
 			next = floor
 		}
 	}

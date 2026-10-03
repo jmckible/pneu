@@ -10,8 +10,14 @@ import (
 )
 
 // RefreshAhead: an access token is refreshed once less than this remains
-// of it, by the wall clock (D5).
+// of it, by the wall clock (D5); a token given for less than twice that
+// is refreshed halfway, so a short one is still used.
 const RefreshAhead = 5 * time.Minute
+
+// renewAt is when a token fetched at now, good until expiry, is refreshed.
+func renewAt(now, expiry time.Time) time.Time {
+	return expiry.Add(-min(RefreshAhead, expiry.Sub(now)/2))
+}
 
 var (
 	// errReauth: the token's grant is dead (invalid_grant on refresh); a
@@ -36,15 +42,17 @@ type ownerSource struct {
 
 	mu     sync.Mutex
 	access string
-	expiry time.Time
+	renew  time.Time // renewAt
 	epoch  uint64
 	dead   bool // invalid_grant: every worker is reauth/owner
 	flight *flight
 }
 
 type flight struct {
-	done chan struct{}
-	err  error // set before done closes
+	done   chan struct{}
+	ep     uint64
+	access string // set before done closes, or err
+	err    error
 }
 
 func newOwnerSource(m *Manager, creds google.Credentials, refresh, sub string) *ownerSource {
@@ -65,14 +73,14 @@ func (o *ownerSource) get(ctx context.Context, ep uint64, ectx context.Context) 
 			o.mu.Unlock()
 			return "", errReauth
 		}
-		if o.access != "" && o.epoch == ep && o.m.clock.Now().Before(o.expiry.Add(-RefreshAhead)) {
+		if o.access != "" && o.epoch == ep && o.m.clock.Now().Before(o.renew) {
 			a := o.access
 			o.mu.Unlock()
 			return a, nil
 		}
 		fl := o.flight
 		if fl == nil {
-			fl = &flight{done: make(chan struct{})}
+			fl = &flight{done: make(chan struct{}), ep: ep}
 			o.flight = fl
 			o.m.flights.Add(1)
 			go o.run(fl, ep, ectx)
@@ -82,6 +90,9 @@ func (o *ownerSource) get(ctx context.Context, ep uint64, ectx context.Context) 
 		case <-fl.done:
 			if fl.err != nil {
 				return "", fl.err
+			}
+			if fl.ep == ep {
+				return fl.access, nil // however short its life
 			}
 		case <-ctx.Done():
 			return "", ctx.Err()
@@ -103,7 +114,8 @@ func (o *ownerSource) run(fl *flight, ep uint64, ectx context.Context) {
 	case o.m.epochNow() != ep:
 		err = errStale
 	case err == nil:
-		o.access, o.expiry, o.epoch = tok.Access, tok.Expiry, ep
+		o.access, o.renew, o.epoch = tok.Access, renewAt(o.m.clock.Now(), tok.Expiry), ep
+		fl.access = tok.Access
 	case google.CodeOf(err) == google.CodeInvalidGrant:
 		o.dead = true
 		err = errReauth
@@ -145,14 +157,14 @@ type mailboxSource struct {
 	creds   google.Credentials
 	refresh string
 	access  string
-	expiry  time.Time
+	renew   time.Time // renewAt
 	epoch   uint64
 }
 
 // get is mb's access token good in epoch ep, refreshed if needed;
 // errReauth on invalid_grant, errStale when a wake overtook the refresh.
 func (mb *mailboxSource) get(ctx context.Context, m *Manager, ep uint64) (string, error) {
-	if mb.access != "" && mb.epoch == ep && m.clock.Now().Before(mb.expiry.Add(-RefreshAhead)) {
+	if mb.access != "" && mb.epoch == ep && m.clock.Now().Before(mb.renew) {
 		return mb.access, nil
 	}
 	mb.access = ""
@@ -166,7 +178,7 @@ func (mb *mailboxSource) get(ctx context.Context, m *Manager, ep uint64) (string
 	case err != nil:
 		return "", err
 	}
-	mb.access, mb.expiry, mb.epoch = tok.Access, tok.Expiry, ep
+	mb.access, mb.renew, mb.epoch = tok.Access, renewAt(m.clock.Now(), tok.Expiry), ep
 	return mb.access, nil
 }
 

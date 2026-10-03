@@ -557,3 +557,63 @@ func TestNoStateThenInit(t *testing.T) {
 		t.Fatalf("reload with no file: %v %v", r, err)
 	}
 }
+
+// A watch that never comes up (every renewal refused) while pulls work is
+// failing with the watch's reason, not quiet.
+func TestWatchNeverUp(t *testing.T) {
+	e := newEnv(t, "personal")
+	e.f.PullHold = 0
+	e.f.FailCode(google.OpWatch, google.CodePermission, -1)
+	e.start()
+	e.until("quiet: pulls answer", e.is("personal", control.PushQuiet, ""))
+	e.pump("failing", 5*time.Second, FailAfter+HealthTick*2, e.is("personal", control.PushFailing, control.ReasonPermission))
+}
+
+// An ack refused as unauthenticated drops the owner's token and is
+// retried at once with a fresh one.
+func TestAckUnauthenticatedRefreshes(t *testing.T) {
+	e := newEnv(t, "personal")
+	e.f.FailCode(google.OpAck, google.CodeUnauthenticated, 1)
+	e.start()
+	res, _ := google.Resource("personal")
+	e.until("acked", func() bool { return e.f.Acked(res) == 1 })
+	if n := e.subCalls(google.OpAck, "personal"); n != 2 {
+		t.Fatalf("%d acks: want the refused one and its retry", n)
+	}
+	for _, l := range e.logged() {
+		if strings.Contains(l, "acknowledge") {
+			t.Fatalf("a retried 401 was logged as a failure: %s", l)
+		}
+	}
+}
+
+// A token Google gives for under 5 minutes is used, and refreshed
+// halfway, never in a loop.
+func TestShortLivedToken(t *testing.T) {
+	e := newEnv(t, "personal")
+	e.f.MutateNextToken(func(a map[string]any) { a["expires_in"] = 60 })
+	e.start()
+	e.until("delivering", e.is("personal", control.PushDelivering, ""))
+	time.Sleep(100 * time.Millisecond)
+	if n := e.f.Calls(google.OpRefresh); n > 2 {
+		t.Fatalf("%d refreshes in a moment", n)
+	}
+}
+
+// A wake while an ack is in flight cuts it off; nothing is acked during
+// the settle, and the redelivery is acked after it.
+func TestWakeCutsAck(t *testing.T) {
+	e := newEnv(t, "personal")
+	e.f.Fail(google.OpAck, googletest.Failure{Stall: true, Times: 1})
+	e.start()
+	res, _ := google.Resource("personal")
+	e.eventually("ack stalled", func() bool { return e.subCalls(google.OpAck, "personal") == 1 })
+	e.m.Woke()
+	time.Sleep(100 * time.Millisecond)
+	if n := e.subCalls(google.OpAck, "personal"); n != 1 {
+		t.Fatalf("%d acks during the settle", n)
+	}
+	e.f.Redeliver(res)
+	e.advance(15*time.Second, time.Second)
+	e.until("acked after the settle", func() bool { return e.f.Acked(res) == 1 && e.f.Outstanding(res) == 0 })
+}
