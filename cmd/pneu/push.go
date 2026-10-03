@@ -16,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"net"
 	"net/url"
@@ -66,7 +67,7 @@ type pushEnv struct {
 
 // The commands' bounds.
 var (
-	pushLockWait    = 30 * time.Second // for push.lock, held by another push command
+	pushLockWait    = 2 * time.Minute // for push.lock: another push command's commit, or --off's users.stop
 	pushDeliverWait = 60 * time.Second
 	reloadTries     = 3 // push-reload answered "mismatch": re-read and send again
 )
@@ -304,6 +305,15 @@ func (e *pushEnv) init(p initParams) error {
 	if err != nil && !errors.Is(err, state.ErrNoState) {
 		return err
 	}
+	// stored is the client.json read now, to be found unchanged at the
+	// commit; zero when there's none.
+	stored, err := e.store.LoadClient()
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if have || p.client == nil {
+			return fmt.Errorf("the stored push client: %w", err)
+		}
+		stored = state.Client{} // a damaged leftover with no state: replaced
+	}
 	var c state.Client
 	switch {
 	case p.client != nil:
@@ -311,11 +321,9 @@ func (e *pushEnv) init(p initParams) error {
 			return err
 		}
 	case have:
-		if c, err = e.store.LoadClient(); err != nil {
-			return fmt.Errorf("the stored push client: %w", err)
-		}
+		c = stored
 		if err := state.CheckClient(cur.File, c); err != nil {
-			return err
+			return fmt.Errorf("%w; rerunning the last pneu push init (with its --client-secret) finishes it", err)
 		}
 	default:
 		return errors.New("the first pneu push init needs --project and --client-secret (the push project's ID and its Desktop-app client JSON)")
@@ -337,25 +345,27 @@ func (e *pushEnv) init(p initParams) error {
 
 	// The owner: the stored grant when it still works, else a consent.
 	var (
-		access, refresh string
-		id              google.Identity
-		granted         time.Time
+		id      google.Identity
+		granted time.Time
 	)
+	owner := &grant{creds: c.Credentials(), kind: google.Owner}
 	sameClient := have && c.ID == cur.Client && c.Project == cur.Project
 	if sameClient && !p.replace && !p.reconsent {
-		tok, err := e.api.Refresh(ctx, c.Credentials(), google.Owner, cur.Owner.Refresh, cur.Owner.Sub)
+		owner.refresh, owner.sub = cur.Owner.Refresh, cur.Owner.Sub
+		err := e.fresh(owner)
 		switch code := google.CodeOf(err); {
 		case err == nil:
-			access, refresh, granted = tok.Access, cur.Owner.Refresh, cur.Owner.Granted
+			granted = cur.Owner.Granted
 			id = google.Identity{Sub: cur.Owner.Sub, Email: cur.Owner.Email}
 			o.say("  the owner's stored grant (%s) works; --reconsent asks again", cur.Owner.Email)
 		case code == google.CodeInvalidGrant || code == google.CodeScope:
+			owner.refresh = ""
 			o.say("  the owner's stored grant (%s) no longer works; asking again", cur.Owner.Email)
 		default:
 			return px.explain(err, google.Owner)
 		}
 	}
-	if access == "" {
+	if owner.access == "" {
 		hint := ""
 		if have && !p.replace {
 			hint = cur.Owner.Email
@@ -373,11 +383,12 @@ func (e *pushEnv) init(p initParams) error {
 		if have && !p.replace && tok.Identity.Sub != cur.Owner.Sub {
 			return fmt.Errorf("consent was given as a different Google account than the push owner, %s, so nothing changed: sign in as %s, or set up a new owner with --replace (every account's push off first)", cur.Owner.Email, cur.Owner.Email)
 		}
-		access, refresh, granted, id = tok.Access, tok.Refresh, e.now(), *tok.Identity
+		id, granted = *tok.Identity, e.now()
+		owner.access, owner.refresh, owner.sub = tok.Access, tok.Refresh, tok.Identity.Sub
 	}
 
 	// The probe: the owner's token reaches the project's Pub/Sub.
-	if err := e.api.ProbeTopics(ctx, access, c.Project); err != nil {
+	if err := e.with(owner, func(access string) error { return e.api.ProbeTopics(ctx, access, c.Project) }); err != nil {
 		return px.explain(err, google.Owner)
 	}
 	o.say("  %s reaches project %s's Pub/Sub", id.Email, c.Project)
@@ -401,8 +412,13 @@ func (e *pushEnv) init(p initParams) error {
 	if err := checkInit(now.File, haveNow, c, p.replace); err != nil {
 		return err
 	}
-	if haveNow != have || (haveNow && (now.Owner.Sub != cur.Owner.Sub || now.Client != cur.Client)) {
-		return errors.New("push's setup changed while this ran (another pneu push init?); nothing changed: run this again")
+	storedNow, err := e.store.LoadClient()
+	if err != nil && !errors.Is(err, fs.ErrNotExist) && have {
+		return fmt.Errorf("the stored push client: %w", err)
+	}
+	if haveNow != have || (haveNow && (now.Owner.Sub != cur.Owner.Sub || now.Client != cur.Client || now.Project != cur.Project)) ||
+		storedNow.ID != stored.ID || storedNow.Secret != stored.Secret || storedNow.Project != stored.Project {
+		return errors.New("push's setup changed while this ran (another pneu push init or account push?); nothing changed: run this again")
 	}
 	if _, err := l.WriteClient(cleanPushClient(c)); err != nil {
 		return err
@@ -412,7 +428,7 @@ func (e *pushEnv) init(p initParams) error {
 		if f.Install == "" {
 			f.Install = state.NewInstall()
 		}
-		f.Owner = state.Owner{Sub: id.Sub, Email: id.Email, Refresh: refresh, Granted: granted}
+		f.Owner = state.Owner{Sub: id.Sub, Email: id.Email, Refresh: owner.refresh, Granted: granted}
 		return nil
 	})
 	if err != nil {
@@ -525,38 +541,42 @@ func (e *pushEnv) on(name string, reconsent bool) error {
 		return fmt.Errorf("%s is already pushed as account %s: one mailbox, one topic", address, other)
 	}
 	o.say("Instant mail for %s (%s), push project %s", name, address, snap.Project)
-	owner, err := e.api.Refresh(ctx, c.Credentials(), google.Owner, snap.Owner.Refresh, snap.Owner.Sub)
-	if err != nil {
+	owner := &grant{creds: c.Credentials(), kind: google.Owner, refresh: snap.Owner.Refresh, sub: snap.Owner.Sub}
+	if err := e.fresh(owner); err != nil {
 		return px.explain(err, google.Owner)
 	}
 
 	// 1. The mailbox's grant: the stored one when it's this address's and
 	// still works, else a consent; getProfile must name the address.
-	var (
-		access, refresh string
-		granted         time.Time
-	)
+	mailbox := &grant{creds: c.Credentials(), kind: google.Mailbox}
+	var granted time.Time
 	if prev, had := snap.Accounts[name]; had && google.SameAddress(prev.Address, address) && !reconsent {
-		tok, err := e.api.Refresh(ctx, c.Credentials(), google.Mailbox, prev.Refresh, "")
+		mailbox.refresh = prev.Refresh
+		err := e.fresh(mailbox)
 		switch code := google.CodeOf(err); {
 		case err == nil:
-			access, refresh, granted = tok.Access, prev.Refresh, prev.Granted
+			granted = prev.Granted
 			o.say("  the stored mailbox grant works; --reconsent asks again")
 		case code == google.CodeInvalidGrant || code == google.CodeScope:
+			mailbox.refresh = ""
 			o.say("  the stored mailbox grant no longer works; asking again")
 		default:
 			return px.explain(err, google.Mailbox)
 		}
 	}
-	if access == "" {
+	if mailbox.access == "" {
 		o.say("  Sign in as %s and allow pneu to see its mail's metadata (labels and headers, never bodies).", address)
 		tok, err := e.consent(c.Credentials(), google.Mailbox, address, px)
 		if err != nil {
 			return err
 		}
-		access, refresh, granted = tok.Access, tok.Refresh, e.now()
+		mailbox.access, mailbox.refresh, granted = tok.Access, tok.Refresh, e.now()
 	}
-	got, err := e.api.Profile(ctx, access)
+	var got string
+	err = e.with(mailbox, func(access string) (err error) {
+		got, err = e.api.Profile(ctx, access)
+		return err
+	})
 	if err != nil {
 		return px.explain(err, google.Mailbox)
 	}
@@ -566,17 +586,27 @@ func (e *pushEnv) on(name string, reconsent bool) error {
 	o.say("  Gmail answers for %s", address)
 
 	// 2. Provisioning, with the owner's token; each step idempotent.
-	created, err := e.api.EnsureTopic(ctx, owner.Access, snap.Project, res)
+	var created, changed, subCreated bool
+	err = e.with(owner, func(access string) (err error) {
+		created, err = e.api.EnsureTopic(ctx, access, snap.Project, res)
+		return err
+	})
 	if err != nil {
 		return px.explain(err, google.Owner)
 	}
 	o.say("  topic %s: %s", res, pick(created, "created", "already there"))
-	changed, err := e.api.GrantPublisher(ctx, owner.Access, snap.Project, res)
+	err = e.with(owner, func(access string) (err error) {
+		changed, err = e.api.GrantPublisher(ctx, access, snap.Project, res)
+		return err
+	})
 	if err != nil {
 		return px.explain(err, google.Owner)
 	}
 	o.say("  Gmail may publish to it: %s", pick(changed, "granted", "already granted"))
-	subCreated, err := e.api.EnsureSubscription(ctx, owner.Access, snap.Project, res, res, snap.Install)
+	err = e.with(owner, func(access string) (err error) {
+		subCreated, err = e.api.EnsureSubscription(ctx, access, snap.Project, res, res, snap.Install)
+		return err
+	})
 	if err != nil {
 		return px.explain(err, google.Owner)
 	}
@@ -594,7 +624,7 @@ func (e *pushEnv) on(name string, reconsent bool) error {
 		if other := holder(*f, name, address); other != "" {
 			return fmt.Errorf("%s was pushed as account %s while this ran; nothing was committed", address, other)
 		}
-		f.Accounts[name] = state.Account{State: state.On, Address: address, Refresh: refresh, Granted: granted}
+		f.Accounts[name] = state.Account{State: state.On, Address: address, Refresh: mailbox.refresh, Granted: granted}
 		return nil
 	})
 	if err != nil {
@@ -693,40 +723,40 @@ func (e *pushEnv) awaitDelivery(name string, gen uint64, reused bool) error {
 // committed, the daemon's worker confirmed gone, users.stop with the
 // mailbox's token, then the account's removal. Topic and subscription
 // stay; pneu never revokes a grant.
+//
+// It holds push.lock from the first commit to the last, users.stop
+// included (bounded: one refresh and one call, each within the API's
+// timeout): released around the stop, a concurrent `pneu account push`
+// could commit and start a new watch that this stop then ends, since
+// users.stop ends every watch on the mailbox.
 func (e *pushEnv) off(name string) error {
 	o := e.out
 	l, err := e.lock()
 	if err != nil {
 		return err
 	}
+	defer l.Unlock()
 	snap, err := l.Current()
 	if errors.Is(err, state.ErrNoState) {
-		l.Unlock()
 		return errors.New("push isn't set up here; there's nothing to turn off")
 	}
 	if err != nil {
-		l.Unlock()
 		return err
 	}
 	acct, ok := snap.Accounts[name]
 	if !ok {
-		l.Unlock()
 		o.say("Instant mail is already off for %s.", name)
 		return nil
 	}
 	// 1. off-pending, the token kept for users.stop.
 	if acct.State == state.On {
 		snap, err = l.Update(func(f *state.File) error {
-			a, ok := f.Accounts[name]
-			if !ok {
-				return errors.New("unreachable: the account went under the lock")
-			}
+			a := f.Accounts[name]
 			a.State = state.OffPending
 			f.Accounts[name] = a
 			return nil
 		})
 		if err != nil {
-			l.Unlock()
 			return err
 		}
 		o.say("  committed: %s is off-pending (generation %d)", name, snap.Generation)
@@ -736,7 +766,6 @@ func (e *pushEnv) off(name string) error {
 	// 2. The worker gone: acknowledged, or no daemon (daemon.lock held
 	// until the removal is committed).
 	h, dl, _, why := e.handOver(l, snap)
-	l.Unlock()
 	if h == handPending {
 		return fmt.Errorf("%s is off in state.json, but the running pneu hasn't confirmed its worker is gone (%s): pending; the daemon applies it when it answers. Nothing was deleted; run pneu account push %s --off again", name, why, name)
 	}
@@ -744,52 +773,31 @@ func (e *pushEnv) off(name string) error {
 		defer dl.Unlock()
 	}
 
-	// 3. users.stop with the mailbox's token.
+	// 3. users.stop with the mailbox's token. A failure leaves it
+	// off-pending, to retry.
 	px := pushCtx{project: snap.Project, name: name, address: acct.Address, owner: snap.Owner.Email}
-	lapse, stopErr := e.stopWatch(snap.File, acct, px)
-	if stopErr != nil {
-		return fmt.Errorf("%s is off, but Gmail's watch wasn't stopped (%v): remote cleanup is pending. Run pneu account push %s --off again to retry; the watch also lapses by itself within 7 days", name, stopErr, name)
+	if err := e.stopWatch(snap.File, acct, px); errors.Is(err, errGrantGone) {
+		return fmt.Errorf("%s is off, but Gmail's watch wasn't stopped: the mailbox's grant no longer works, so pneu can't stop it. The watch lapses by itself within 7 days, and nothing runs for %s meanwhile; it stays off-pending until then. To clean up now: pneu account push %s, then pneu account push %s --off", name, name, name, name)
+	} else if err != nil {
+		return fmt.Errorf("%s is off, but Gmail's watch wasn't stopped (%v): remote cleanup is pending. Run pneu account push %s --off again to retry; the watch also lapses by itself within 7 days", name, err, name)
 	}
 
 	// 4. The account's removal.
-	l, err = e.lock()
-	if err != nil {
-		return err
-	}
 	removed, err := l.Update(func(f *state.File) error {
-		a, ok := f.Accounts[name]
-		switch {
-		case !ok:
-			return errGone
-		case a.State != state.OffPending || a.Refresh != acct.Refresh:
-			return errReenabled
-		}
 		delete(f.Accounts, name)
 		return nil
 	})
-	switch {
-	case errors.Is(err, errGone):
-		l.Unlock()
-	case errors.Is(err, errReenabled):
-		l.Unlock()
-		return fmt.Errorf("instant mail was turned on again for %s while this ran; left it on", name)
-	case err != nil:
-		l.Unlock()
+	if err != nil {
 		return err
-	default:
-		if dl == nil {
-			// The daemon has no worker for it either way; this only moves
-			// its generation on.
-			if h2, _, _, _ := e.handOver(l, removed); h2 == handPending {
-				o.say("  (the running pneu hasn't confirmed generation %d; it changes nothing it runs)", removed.Generation)
-			}
+	}
+	if dl == nil {
+		// The daemon has no worker for it either way; this only moves its
+		// generation on.
+		if h2, _, _, _ := e.handOver(l, removed); h2 == handPending {
+			o.say("  (the running pneu hasn't confirmed generation %d; it changes nothing it runs)", removed.Generation)
 		}
-		l.Unlock()
-		o.say("  committed: %s removed (generation %d)", name, removed.Generation)
 	}
-	if lapse {
-		o.say("%s's grant no longer works, so pneu couldn't stop its watch; it lapses by itself within 7 days.", acct.Address)
-	}
+	o.say("  committed: %s removed (generation %d)", name, removed.Generation)
 	res, _ := google.Resource(name)
 	o.say("Instant mail is off for %s.", name)
 	o.say("Its topic and subscription stay in project %s. To delete them:", snap.Project)
@@ -803,35 +811,64 @@ func (e *pushEnv) off(name string) error {
 	return nil
 }
 
-var (
-	errGone      = errors.New("the account is gone already")
-	errReenabled = errors.New("the account was turned on again")
-)
+// errGrantGone: the stored grant's refresh answered invalid_grant.
+var errGrantGone = errors.New("the grant no longer works")
 
-// stopWatch runs users.stop with the mailbox's token. A refresh refused
-// with invalid_grant can never stop it (lapse: the watch runs out within
-// 7 days), and counts as done; any other failure is returned in words.
-func (e *pushEnv) stopWatch(f state.File, a state.Account, px pushCtx) (lapse bool, err error) {
+// stopWatch runs users.stop with the mailbox's token. errGrantGone when
+// the stored grant is dead (no stop can ever run with it); any other
+// failure is returned in words.
+func (e *pushEnv) stopWatch(f state.File, a state.Account, px pushCtx) error {
 	c, err := e.store.LoadClient()
 	if err != nil {
-		return false, fmt.Errorf("the stored push client: %w", err)
+		return fmt.Errorf("the stored push client: %w", err)
 	}
 	if err := state.CheckClient(f, c); err != nil {
-		return false, err
+		return err
 	}
-	ctx := e.out.ctx()
-	tok, err := e.api.Refresh(ctx, c.Credentials(), google.Mailbox, a.Refresh, "")
-	if google.CodeOf(err) == google.CodeInvalidGrant {
-		return true, nil
+	g := &grant{creds: c.Credentials(), kind: google.Mailbox, refresh: a.Refresh}
+	if err := e.fresh(g); google.CodeOf(err) == google.CodeInvalidGrant {
+		return errGrantGone
+	} else if err != nil {
+		return px.explain(err, google.Mailbox)
 	}
-	if err != nil {
-		return false, px.explain(err, google.Mailbox)
-	}
-	if err := e.api.Stop(ctx, tok.Access); err != nil {
-		return false, px.explain(err, google.Mailbox)
+	if err := e.with(g, func(access string) error { return e.api.Stop(e.out.ctx(), access) }); err != nil {
+		return px.explain(err, google.Mailbox)
 	}
 	e.out.say("  Gmail's watch on %s is stopped", a.Address)
-	return false, nil
+	return nil
+}
+
+// grant is a stored or just-made grant and its current access token.
+type grant struct {
+	creds   google.Credentials
+	kind    google.Kind
+	refresh string
+	sub     string // the owner's pinned sub; "" for a mailbox
+	access  string
+}
+
+// fresh gets g a new access token from its refresh token.
+func (e *pushEnv) fresh(g *grant) error {
+	tok, err := e.api.Refresh(e.out.ctx(), g.creds, g.kind, g.refresh, g.sub)
+	if err != nil {
+		return err
+	}
+	g.access = tok.Access
+	return nil
+}
+
+// with runs call with g's access token; an answer of unauthenticated (the
+// token refused: expired during a long consent, or dropped) gets one
+// fresh token and one more try (D6).
+func (e *pushEnv) with(g *grant, call func(access string) error) error {
+	err := call(g.access)
+	if google.CodeOf(err) != google.CodeUnauthenticated {
+		return err
+	}
+	if err := e.fresh(g); err != nil {
+		return err
+	}
+	return call(g.access)
 }
 
 // --- the hand-over ----------------------------------------------------

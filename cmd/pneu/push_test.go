@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -979,8 +980,9 @@ func TestPushOffInterrupted(t *testing.T) {
 	}
 }
 
-// --off with the mailbox's grant revoked: users.stop can't run, the
-// account goes, and the output says the watch lapses by itself.
+// --off with the mailbox's grant revoked: users.stop can't run, so it
+// stays off-pending (D4), the output says the watch lapses by itself and
+// how to clean up now; that way works.
 func TestPushOffRevoked(t *testing.T) {
 	pt := newPushTest(t)
 	pt.firstInit()
@@ -988,11 +990,128 @@ func TestPushOffRevoked(t *testing.T) {
 		t.Fatal(err)
 	}
 	pt.f.Revoke(mailAddr)
+	err := pt.e.off("personal")
+	if err == nil || !strings.Contains(err.Error(), "the mailbox's grant no longer works, so pneu can't stop it. The watch lapses by itself within 7 days") {
+		t.Fatalf("%v", err)
+	}
+	if pt.load().Accounts["personal"].State != state.OffPending {
+		t.Fatalf("%+v", pt.load().File)
+	}
+	if err := pt.e.on("personal", false); err != nil {
+		t.Fatal(err)
+	}
 	if err := pt.e.off("personal"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := pt.load().Accounts["personal"]; ok || !strings.Contains(pt.out.String(), "it lapses by itself within 7 days") {
-		t.Fatalf("%+v\n%s", pt.load().File, pt.out.String())
+	if _, ok := pt.load().Accounts["personal"]; ok || pt.f.Stops(mailAddr) != 1 {
+		t.Fatalf("cleanup: %+v, stops %d", pt.load().File, pt.f.Stops(mailAddr))
+	}
+}
+
+// --off holds push.lock through users.stop: an enable can't commit (and
+// start a watch the stop would end) in between.
+func TestPushOffHoldsLockThroughStop(t *testing.T) {
+	pt := newPushTest(t)
+	pt.firstInit()
+	if err := pt.e.on("personal", false); err != nil {
+		t.Fatal(err)
+	}
+	locked := make(chan error, 1)
+	tp := pt.e.out.(termPush)
+	pt.e.out = sayHook{termPush: tp, hook: func(line string) {
+		if strings.Contains(line, "watch on me@example.com is stopped") {
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			l, err := pt.e.store.Lock(ctx)
+			if err == nil {
+				l.Unlock()
+			}
+			locked <- err
+		}
+	}}
+	if err := pt.e.off("personal"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-locked; err == nil {
+		t.Fatal("push.lock was free during users.stop")
+	}
+}
+
+// An access token refused (401) is dropped, refreshed, and the call made
+// once more, at every step that takes one.
+func TestPushRetriesRefusedToken(t *testing.T) {
+	for _, op := range []google.Op{google.OpProfile, google.OpTopicMake, google.OpGetPolicy, google.OpSetPolicy, google.OpSubMake} {
+		pt := newPushTest(t)
+		pt.firstInit()
+		pt.f.FailCode(op, google.CodeUnauthenticated, 1)
+		if err := pt.e.on("personal", false); err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+	}
+	pt := newPushTest(t)
+	pt.f.FailCode(google.OpTopicList, google.CodeUnauthenticated, 1)
+	pt.firstInit()
+	if err := pt.e.on("personal", false); err != nil {
+		t.Fatal(err)
+	}
+	pt.f.FailCode(google.OpStop, google.CodeUnauthenticated, 1)
+	if err := pt.e.off("personal"); err != nil || pt.f.Stops(mailAddr) != 1 {
+		t.Fatalf("off: %v, stops %d", err, pt.f.Stops(mailAddr))
+	}
+	// Twice in a row is a failure, in words.
+	pt.f.FailCode(google.OpTopicList, google.CodeUnauthenticated, 2)
+	if err := pt.init(initParams{}); err == nil || !strings.Contains(err.Error(), "Google refused the access token") {
+		t.Fatalf("twice: %v", err)
+	}
+}
+
+// Init finds client.json as it read it, or commits nothing: a rotated
+// secret written meanwhile isn't overwritten with the stale one.
+func TestPushInitClientChangedMeanwhile(t *testing.T) {
+	pt := newPushTest(t)
+	pt.firstInit()
+	rotated := []byte(strings.Replace(string(pushClientJSON(pt.f)), pt.f.Secret, "GOCSPX-rotated", 1))
+	tp := pt.e.out.(termPush)
+	pt.e.out = sayHook{termPush: tp, hook: func(line string) {
+		if strings.Contains(line, "reaches project") {
+			l, err := pt.e.store.Lock(context.Background())
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			l.WriteClient(rotated)
+			l.Unlock()
+		}
+	}}
+	err := pt.init(initParams{})
+	if err == nil || !strings.Contains(err.Error(), "push's setup changed while this ran") {
+		t.Fatalf("%v", err)
+	}
+	if c, _ := pt.e.store.LoadClient(); c.Secret != "GOCSPX-rotated" || pt.load().Generation != 1 {
+		t.Fatalf("the rotated secret was overwritten, or a generation committed: %v", c)
+	}
+}
+
+// A client.json left by an interrupted re-init that doesn't match the
+// state: the next plain init says how to finish, and rerunning with the
+// client finishes it.
+func TestPushInitRecoversClientMismatch(t *testing.T) {
+	pt := newPushTest(t)
+	pt.firstInit()
+	l, err := pt.e.store.Lock(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.WriteClient([]byte(strings.Replace(string(pushClientJSON(pt.f)), pt.f.ClientID, "999-other.apps.googleusercontent.com", 1)))
+	l.Unlock()
+	if err := pt.init(initParams{}); err == nil || !strings.Contains(err.Error(), "rerunning the last pneu push init (with its --client-secret) finishes it") {
+		t.Fatalf("plain init: %v", err)
+	}
+	if err := pt.init(initParams{client: pushClientJSON(pt.f)}); err != nil {
+		t.Fatalf("rerun: %v", err)
+	}
+	if c, _ := pt.e.store.LoadClient(); c.ID != pt.f.ClientID {
+		t.Fatalf("client %v", c)
 	}
 }
 
