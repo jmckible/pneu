@@ -388,9 +388,12 @@ and build order; this file is the working contract. Read PLAN.md before touching
   `push-state` reports instance, generation and health. The CLI decides
   "no daemon" only by taking `daemon.lock`; no ack is "pending", never
   "done". Consent and network calls run outside `push.lock`, and every
-  commit re-reads under it and refuses what changed meanwhile. `--off`
-  is off-pending, ack, `users.stop`, removal, holding the lock
-  throughout; topic, subscription and grants stay.
+  commit re-reads under it and refuses what changed meanwhile; the one
+  exception is `--off`: off-pending, ack, refresh and `users.stop`,
+  removal, holding the lock throughout, since released around the stop
+  a concurrent `account push` could start a watch the stop then ends
+  (`users.stop` ends every watch on the mailbox). Topic, subscription
+  and grants stay.
 - The Google boundary is `internal/google` alone: one `http.Client`,
   three constant hosts (`oauth2`, `gmail`, `pubsub.googleapis.com`; tests
   swap a base through an unexported hook, never config or env), no
@@ -408,8 +411,10 @@ and build order; this file is the working contract. Read PLAN.md before touching
   line and the server checks `state` against its own consent in constant
   time and exchanges only the code (remote verbs `push`, `push-off`,
   `push-init`; the push client JSON travels as its three fields). A
-  working stored grant is reused unless `--reconsent`; a consent as
-  anyone but the pinned owner is refused. pneu never revokes a grant;
+  working stored grant is reused unless `--reconsent`. An owner consent
+  must be the pinned `sub` (a new owner only with `push init
+  --replace`, every account off); a mailbox consent must be the
+  configured address by `getProfile`, and no two accounts one address. pneu never revokes a grant;
   it points to the permissions page with the owner caveat (an owner that
   is also a pushed mailbox loses both grants to one revocation).
   Tests use `internal/google/googletest` (a fake of every call, failure
