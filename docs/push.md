@@ -647,7 +647,12 @@ remote run that needs no consent must finish within that (normally ~65s).
   "… changed while this ran; nothing was committed: run this again".
 - An access token refused (401) is refreshed and the call made once more.
 - The delivering proof counts only from the daemon instance `status`
-  names before the hand-over.
+  names before the hand-over, and only on a last message no older than
+  the hand-over: a reload keeps a worker whose credential didn't change,
+  health included, so a subscription deleted and made again under the
+  same grants reads delivering on a message from before this run ("pneu
+  kept the worker it already ran for it, …, not that this watch sent
+  them"; found by the seam tests, `cmd/pneu/push_e2e_test.go`).
 
 **AGENTS.md lines task 5 might add**: push's files and locks
 (`$XDG_STATE_HOME/pneu/push/`: state.json and client.json written only by
