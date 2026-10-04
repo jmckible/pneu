@@ -124,3 +124,23 @@ func TestOldestUnknown(t *testing.T) {
 		t.Error("no match wasn't cached")
 	}
 }
+
+// A request from an older generation that finishes late never replaces
+// a newer generation's entries.
+func TestOldestKeepsNewer(t *testing.T) {
+	s := newServer(t)
+	ctx := context.Background()
+	old := s.viewLabel()
+	newer := viewLabel{old.Epoch, old.Gen + 1}
+	want := s.viewOldest(ctx, newer, "tag:inbox", false)
+	s.viewOldest(ctx, old, "tag:sent", false)
+	if s.oldest.at != newer {
+		t.Fatalf("cache at %+v, want %+v", s.oldest.at, newer)
+	}
+	if n, ok := s.oldest.m["tag:inbox"]; !ok || n != want {
+		t.Error("an older generation's answer replaced the newer entries")
+	}
+	if _, ok := s.oldest.m["tag:sent"]; ok {
+		t.Error("an older generation's answer was cached")
+	}
+}

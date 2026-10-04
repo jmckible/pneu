@@ -20,7 +20,8 @@ const oldestSearches = 16
 // generation, the way spamCache keeps the newest spam: every write that
 // changes what a list shows, a sync that pulled mail included, bumps the
 // generation, so only the first paged render after a change asks notmuch,
-// once per account.
+// once per account. The lookup runs on the request path; measured at about
+// 25ms on a 44k-thread account.
 type oldestCache struct {
 	mu       sync.Mutex
 	at       viewLabel
@@ -73,6 +74,9 @@ func (s *Server) viewOldest(ctx context.Context, at viewLabel, query string, sea
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.at.Epoch == at.Epoch && at.Gen < c.at.Gen {
+		return n // a slower request from an older generation: keep the newer entries
+	}
 	if c.at != at || c.m == nil {
 		c.at, c.m, c.searches = at, map[string]int64{}, nil
 	}
