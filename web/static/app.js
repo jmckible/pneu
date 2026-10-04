@@ -1100,17 +1100,28 @@
 
   // takeRow pulls row i out of the list (animated) and selects its successor.
   // In the split, a row that was the open thread hands the pane to the new
-  // cursor row, or empties it with the list.
+  // cursor row, or empties it with the list. With motion (motion.js leave)
+  // the row slides out and its gap closes, the next row moving up into the
+  // cursor, which stays put (or follows up from the last row); the
+  // selection changes now and the next key acts on it while that runs.
   function takeRow(i) {
     var el = L.items[i];
     var wasShown = split && shown(el);
+    var anim = moving() && L.cursor;
+    if (anim) L.cursor.settle();
     clearSelection();
     L.items.splice(i, 1);
-    el.classList.add('removing');
-    setTimeout(function () { if (el.classList.contains('removing')) el.remove(); }, 150);
     var n = tri.nextIndex(i, L.items.length);
-    if (n >= 0) select(L, n);
-    else if (L.cursor) L.cursor.to(null);
+    if (anim) {
+      if (n === i) el.scrollIntoView({ block: 'nearest' }); // the slot the next row moves into
+      if (n >= 0) select(L, n, n !== i, 'keep');
+      mo.leave(el, L.cursor, n >= 0 ? { row: L.items[n], stay: n === i } : null);
+    } else {
+      el.classList.add('removing');
+      setTimeout(function () { if (el.classList.contains('removing')) el.remove(); }, 150);
+      if (n >= 0) select(L, n);
+      else if (L.cursor) L.cursor.to(null);
+    }
     listCount();
     if (wasShown) {
       leaving = true; // the pane's thread is gone: its keys wait for the next one
@@ -1123,15 +1134,21 @@
   // putRow re-inserts a row taken by takeRow at its old position and selects
   // it; if it was the open thread, it opens again.
   function putRow(h) {
+    if (L.cursor) L.cursor.settle(); // a leave still running ends first
     var i = Math.min(h.index, L.items.length);
-    h.el.classList.remove('removing');
+    h.el.classList.remove('removing', 'leaving');
     var before = L.items[i] || null;
     var ol = L.root.querySelector('ol');
     if (before) before.parentNode.insertBefore(h.el, before);
     else ol.appendChild(h.el);
     clearSelection();
     L.items.splice(i, 0, h.el);
-    select(L, i);
+    if (moving() && L.cursor) {
+      select(L, i, undefined, 'keep');
+      mo.enter(h.el, L.cursor);
+    } else {
+      select(L, i);
+    }
     listCount();
     if (h.shown && split) show(h.el.dataset.url, { history: 'replace' });
   }

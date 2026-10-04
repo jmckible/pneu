@@ -276,6 +276,12 @@ uncached, the page shows the range first and the total follows.
     `j` never lags. A list rendered or re-rendered (a load, paging, a
     refresh, a resize) places it still. At rest it looks exactly as the
     row's own `.selected` look did.
+  - *A removed row closes its gap.* Archive, trash or spam slides the row
+    28px right as it fades, then its height closes (280ms in all); the
+    rows below move up, so the next row moves into the cursor, which stays
+    put. From the last row the cursor moves up in step. Undo is the
+    reverse, shorter (240ms): the gap opens, the row fades in from the
+    right.
 
 ## Thread page
 

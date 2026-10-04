@@ -960,6 +960,10 @@ main.list ol.cursored > .cursor {
 main.list ol.cursored > .row.selected { background: transparent !important; border-left-color: transparent !important; }
 body.split #panes[data-focus=thread] main.list ol.cursored > .cursor { border-left-color: var(--muted); }
 
+/* A row leaving (archive, trash, spam) slides right and fades, then its
+   gap closes; the keyframes are motion.js's. */
+.row.leaving { overflow: hidden; pointer-events: none; }
+
 @media (prefers-reduced-motion: reduce) {
   main.list ol.cursored > .cursor { transition: none !important; }
 }
