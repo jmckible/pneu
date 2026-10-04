@@ -94,7 +94,7 @@ them here if they're wrong.
   of the panes (clamped to
   `64ch`-`100ch`), the thread the rest (at least `48ch`). The thread has a
   one-line sticky title row, its subject; the list has none (the tube
-  names the view; a paged list has its pager row). The pane without
+  names the view; every list has its pager row). The pane without
   the keys dims its cursor's edge; nothing shifts when focus moves. With
   no thread open the list fills the window. Below `140ch` the active pane
   is the whole screen (list or thread).
@@ -163,8 +163,8 @@ them here if they're wrong.
   are this browser's (localStorage); when any hint has gone, the `?`
   overlay ends with a button that brings them all back.
   On the right, the status line (flashes, the undo hint and its button)
-  while it says something. The bar runs under the tube too. The list's
-  position is the pager row's (Index views), never the key bar's.
+  while it says something. The bar runs under the tube too. Where the
+  list is in time is the pager row's (Index views), never the key bar's.
 - **Sync state.** The mark says how current the view is: at rest when
   fresh, breathing (opacity and scale, 1.4s) while checking, and in
   `--accent-hot` for every problem below (a service worker, the link
@@ -329,20 +329,35 @@ them here if they're wrong.
 
 Inbox (default), Starred, Sent, All (All Mail), Spam, Trash. Same
 template, different query. Paginated (`<`/`>`, 50 threads a page).
-`main.list` carries the page's place (`data-start`, `data-rows`,
-`data-total`, `data-paged`). The total is a thread count cached at each
-database's revision; uncached, the place shows first and the total
-follows.
+A paged list's `main.list` carries `data-paged` and `data-oldest`, the
+view's oldest message date (unix seconds, 0 unknown): one notmuch search
+per account (`--sort=oldest-first --limit=1`, the list's exclusions),
+the oldest across accounts, cached per query until the view generation
+moves (searches too, the last 16 queries). An account that fails makes
+it unknown and uncached. An unpaged list never asks.
 
-- **The pager row**, only on a list with more than one page, at the top
-  of the list pane (sticky): `<` newer on the left and older `>` on the
-  right, each with its key drawn as a small keycap, dimmed at either end;
-  between them the list cursor's place in the whole view, `53 of 2,318`
-  (the number rolls like an odometer when it changes: the old one slides
-  out and the new one in, in the direction of the change, 260ms), a thin
-  track with an accent segment for this page's slice and a dot for the
-  cursor, and the page's range, `51–100`. A click is the key (the split
-  swaps the pane). An unpaged list shows no position at all.
+- **The pager row**, on every list at the top of the list pane (sticky),
+  always the same height, so switching between a paged and an unpaged
+  view never moves a row (2026-10-04). On a list that fits one page it
+  is empty: its background and bottom rule only. A paged list's: `<`
+  newer on the left and older `>` on the right, each with its key drawn
+  as a small keycap, dimmed at either end; between them, in dates, not
+  counts:
+  - *The page's span*, newest to oldest, from its first and last rows'
+    own dates (`<time datetime>`): `Sep 23 – Aug 14`; a year other than
+    this one once at the end, `Dec 30 – Nov 2, 2024`; across years both,
+    `Jan 3, 2025 – Dec 12, 2024`; a page within one day, `Sep 23`.
+    Months as the rows'; tabular figures.
+  - *A timeline*: `now` at its left end and the year of the view's oldest
+    message at its right (muted, 11px), the track between mapping time
+    linearly from now back to that date. An accent segment spans this
+    page's dates (at least 4px, so a dense page shows); a dot sits at
+    the cursor row's date and glides as the cursor moves (160ms). With the
+    oldest date unknown the timeline hides and the span stays.
+  The span and segment follow the rows: an archive or undo that changes
+  the page's first or last row, or new mail, moves them. A click on `<` or
+  `>` is the key (the split swaps the pane). Reduced motion: no
+  transitions. Theme tokens only.
 
 - **Merged stream.** Both accounts in one list sorted by date. No per-row
   account marker; the account shows on the thread page only.

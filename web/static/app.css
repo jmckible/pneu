@@ -480,12 +480,15 @@ main.list ol { list-style: none; margin: 0; padding: 0; }
   border-left-color: var(--accent);
 }
 
-/* The pager row (list.html .pager), only on a paged list: < newer and
-   older > as keycapped buttons, dimmed at either end; between them the
-   cursor's place in the whole view, rolling (app.js updatePager), a track
-   with this page's slice and the cursor's dot, and the page's range.
-   Sticky at the top of the list (under the #accounts strip when narrow);
-   the list's scroll padding keeps the cursor row out from under it. */
+/* The pager row (list.html .pager), on every list at the same height, so
+   switching between a paged and an unpaged view never moves a row; an
+   unpaged list's is empty, its background and rule only. A paged list's:
+   < newer and older > as keycapped buttons, dimmed at either end; between
+   them the page's dates and a timeline from now back to the view's oldest
+   message, this page's stretch on it and the cursor's dot (app.js
+   updatePager). Sticky at the top of the list (under the #accounts strip
+   when narrow); the list's scroll padding keeps the cursor row out from
+   under it. */
 main.list > .pager {
   position: sticky;
   top: 0;
@@ -520,18 +523,19 @@ body.split main.list:has(> .pager) { scroll-padding-top: var(--pager-h); }
 }
 .pager .prev kbd { margin-right: 0.8ch; }
 .pager .next kbd { margin-left: 0.8ch; }
-.pager .pmid { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 1.2ch; }
-.pager .pos { display: inline-flex; color: var(--unread); font-variant-numeric: tabular-nums; }
-.pager .odo { display: inline-grid; overflow: hidden; }
-.pager .odo > span { grid-area: 1 / 1; text-align: right; }
-.pager .range { font-variant-numeric: tabular-nums; }
-.pager .ptrack { position: relative; flex: 0 1 14ch; min-width: 6ch; height: 3px; border-radius: 3px; background: var(--border); }
+.pager .pmid { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 2ch; }
+.pager .pspan { flex: none; color: var(--fg); font-variant-numeric: tabular-nums; }
+.pager .tl { flex: 0 1 30ch; min-width: 0; display: flex; align-items: center; gap: 0.8ch; }
+.pager .tl[hidden] { display: none; }
+.pager .tnow, .pager .tend { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pager .ptrack { position: relative; flex: 1; min-width: 4ch; height: 3px; border-radius: 3px; background: var(--border); }
 .pager .pseg {
   position: absolute;
   top: 0;
   bottom: 0;
   border-radius: 3px;
   background: color-mix(in oklab, var(--accent) 45%, var(--border));
+  transition: left 160ms cubic-bezier(.2, .8, .2, 1), width 160ms cubic-bezier(.2, .8, .2, 1);
 }
 .pager .pdot {
   position: absolute;
@@ -544,9 +548,9 @@ body.split main.list:has(> .pager) { scroll-padding-top: var(--pager-h); }
   box-shadow: 0 0 5px color-mix(in oklab, var(--accent) 60%, transparent);
   transition: left 160ms cubic-bezier(.2, .8, .2, 1);
 }
-.pager .pseg[hidden], .pager .pdot[hidden] { display: none; }
+.pager .pdot[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) {
-  .pager .pdot, .pager .pg { transition: none; }
+  .pager .pdot, .pager .pseg, .pager .pg { transition: none; }
 }
 
 /* ---- thread ------------------------------------------------------------ */

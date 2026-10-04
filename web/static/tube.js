@@ -78,35 +78,48 @@
     return { lit: newest > seen, seen: null };
   }
 
-  function num(v) { return Number(v).toLocaleString('en-US'); }
+  // The pager row (list.html .pager) reads in dates, not counts: the
+  // page's span, newest to oldest, from its first and last rows, and a
+  // timeline from now back to the view's oldest message (main.list
+  // data-oldest). Months are the app's (read.go's "Jan 2"); dates are the
+  // browser's local time, as the rows' own are the server's.
+  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-  // pager is the pager row's reading (list.html .pager) for the cursor at
-  // sel on a page of rows starting at start, of total threads (-1 while
-  // uncounted): at, the cursor's place in the whole view; pos and of, "53"
-  // and " of 2,318" (of empty while uncounted); range, "51–100"; seg, the
-  // page's slice of the track, and dot, the cursor's place on it, in
-  // percent (null while uncounted).
-  function pager(start, sel, rows, total) {
-    var out = { at: 0, pos: '', of: '', range: '', seg: null, dot: null };
-    if (!(rows > 0)) return out;
-    var at = start + Math.max(sel, 0) + 1;
-    out.at = at;
-    out.pos = sel >= 0 ? num(at) : '';
-    out.range = num(start + 1) + '–' + num(start + rows);
-    if (total > 0) {
-      total = Math.max(total, start + rows);
-      out.of = '\u00a0of ' + num(total);
-      out.seg = { left: start / total * 100, width: rows / total * 100 };
-      out.dot = sel >= 0 ? (at - 0.5) / total * 100 : null;
-    }
-    return out;
+  function day(d) { return MONTHS[d.getMonth()] + ' ' + d.getDate(); }
+  function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
+
+  // span is the page's dates, newest to oldest (Dates), in the year now
+  // is in: "Sep 23 – Aug 14"; another year once at the end, "Dec 30 –
+  // Nov 2, 2024"; across years both, "Jan 3, 2025 – Dec 12, 2024"; one
+  // day alone, "Sep 23". '' when either is missing.
+  function span(newest, oldest, now) {
+    if (!newest || !oldest || isNaN(newest) || isNaN(oldest)) return '';
+    if (newest < oldest) { var t = newest; newest = oldest; oldest = t; }
+    var y = now.getFullYear(), ny = newest.getFullYear(), oy = oldest.getFullYear();
+    if (sameDay(newest, oldest)) return day(newest) + (ny === y ? '' : ', ' + ny);
+    if (ny !== oy) return day(newest) + ', ' + ny + ' – ' + day(oldest) + ', ' + oy;
+    return day(newest) + ' – ' + day(oldest) + (oy === y ? '' : ', ' + oy);
   }
 
-  // rollDir is the odometer's direction for a change from place a to b: up
-  // (1) when it grows, 0 for no change or no earlier place.
-  function rollDir(a, b) {
-    if (!a || !b || a === b) return 0;
-    return b > a ? 1 : -1;
+  // timeline places the page on the track, which runs from now (0%) back
+  // to the view's oldest message (100%), linearly in time; all times in
+  // ms. newest and oldest are the page's first and last rows, cur the
+  // cursor row's (null: none). Returns {seg: {left, width}, dot, year},
+  // percents and the far end's year, or null when the view's oldest is
+  // unknown (0) or not in the past, so the track hides. A row older than
+  // the view's oldest (a stale date) stretches the far end to it; a row
+  // dated in the future sits at now.
+  function timeline(now, viewOldest, newest, oldest, cur) {
+    if (!(viewOldest > 0) || !(newest > 0) || !(oldest > 0)) return null;
+    var far = Math.min(viewOldest, oldest, newest);
+    if (!(far < now)) return null;
+    var at = function (t) { return Math.min(100, Math.max(0, (now - t) / (now - far) * 100)); };
+    var left = at(Math.max(newest, oldest)), right = at(Math.min(newest, oldest));
+    return {
+      seg: { left: left, width: right - left },
+      dot: cur > 0 ? at(cur) : null,
+      year: new Date(far).getFullYear(),
+    };
   }
 
   // LEARNED: a hint leaves the key bar once its key has been used this
@@ -133,7 +146,7 @@
 
   var X = {
     STATIONS: STATIONS, LEARNED: LEARNED, stationOf: stationOf, queryOf: queryOf, flight: flight, animates: animates,
-    cameFrom: cameFrom, spamLight: spamLight, pager: pager, rollDir: rollDir, learn: learn, parseCounts: parseCounts,
+    cameFrom: cameFrom, spamLight: spamLight, span: span, timeline: timeline, learn: learn, parseCounts: parseCounts,
   };
   if (typeof module === 'object' && module.exports) { module.exports = X; return; }
   var Pneu = (root.Pneu = root.Pneu || {});
