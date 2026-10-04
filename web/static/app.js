@@ -2799,6 +2799,9 @@
   var genAtHide = null;
   window.addEventListener('pagehide', function () { genAtHide = gen(); });
   window.addEventListener('pageshow', function (e) {
+    // Back to a page that left by a search: its field, marked sent, would
+    // otherwise stay open (and hold off the list's reloads) for good.
+    if (e.persisted) closeSearchField();
     if (e.persisted && gen() !== genAtHide) {
       if (split && L.root) refreshList();
       else if (primary === 'list') { location.reload(); return; }
