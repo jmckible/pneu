@@ -248,10 +248,21 @@ body:not(.split) #tube {
 
 /* Folded to its digits: the mark, the /, the digits, on the same line with
    the capsule and the drop; the names are titles; the foot hides, so the
-   mark's colour carries the sync status alone; the search field floats
-   beside the column. */
+   mark's colour carries the sync status alone (the live region still
+   speaks); the search field floats beside the column. */
 :root.tube-fold #tube [data-station] { padding-left: 3.4ch; }
-:root.tube-fold #tube .nm, :root.tube-fold #tube .qt, :root.tube-fold #tube .x, :root.tube-fold #tube .foot { display: none; }
+/* The names and the query are hidden only to the eye: a screen reader
+   still hears "Inbox", not "1" (a title doesn't name a link that has
+   text). */
+:root.tube-fold #tube .nm, :root.tube-fold #tube .qt {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+:root.tube-fold #tube .x, :root.tube-fold #tube .foot { display: none; }
 :root.tube-fold #tube a[data-station] > kbd { font-size: 12px; vertical-align: baseline; margin: 0; }
 :root.tube-fold #tube .q input {
   position: absolute;
