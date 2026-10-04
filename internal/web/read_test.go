@@ -227,7 +227,7 @@ func TestPagination(t *testing.T) {
 		t.Fatalf("pages concatenated:\n got %q\nwant %q", all, inboxOrder)
 	}
 	// A paged list carries the view's oldest date for the timeline.
-	if body := getOK(t, s, "/?page=1"); !regexp.MustCompile(`<main class="list" data-view="inbox" data-paged data-oldest="[1-9]\d*">`).MatchString(body) {
+	if body := getOK(t, s, "/?page=1"); !regexp.MustCompile(`<main class="list" data-view="inbox" data-paged data-oldest="\d{4}-\d\d-\d\dT[^"]+">`).MatchString(body) {
 		t.Errorf("paged list's oldest date: %s", body)
 	}
 	// The pager row: both ends live in the middle, the first page's newer

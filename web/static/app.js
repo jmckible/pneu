@@ -545,23 +545,23 @@
   // timeline). It follows the rows: a removal or an undo that changes the
   // first or last row changes the span, and the dot follows the cursor.
 
-  function rowTime(el) {
+  // rowISO is a row's date as the server rendered it (RFC 3339, its zone).
+  function rowISO(el) {
     var t = el && el.querySelector('time[datetime]');
-    var ms = t ? Date.parse(t.getAttribute('datetime')) : NaN;
-    return isNaN(ms) ? 0 : ms;
+    return t ? t.getAttribute('datetime') : null;
   }
 
   function updatePager() {
     var root = L.root, pg = root && root.querySelector(':scope > nav.pager');
     if (!pg || !tube) return;
     var n = L.items.length;
-    var newest = n ? rowTime(L.items[0]) : 0, oldest = n ? rowTime(L.items[n - 1]) : 0;
+    var newest = n ? rowISO(L.items[0]) : null, oldest = n ? rowISO(L.items[n - 1]) : null;
     var now = Date.now();
     var when = pg.querySelector('.pspan');
-    if (when) when.textContent = newest && oldest ? tube.span(new Date(newest), new Date(oldest), new Date(now)) : '';
+    if (when) when.textContent = tube.span(newest, oldest, now);
     var tl = pg.querySelector('.tl');
     if (!tl) return;
-    var p = tube.timeline(now, parseInt(root.dataset.oldest, 10) * 1000, newest, oldest, L.sel >= 0 ? rowTime(L.items[L.sel]) : null);
+    var p = tube.timeline(now, root.dataset.oldest, newest, oldest, L.sel >= 0 ? rowISO(L.items[L.sel]) : null);
     tl.hidden = !p;
     if (!p) return;
     var seg = tl.querySelector('.pseg'), dot = tl.querySelector('.pdot'), end = tl.querySelector('.tend');

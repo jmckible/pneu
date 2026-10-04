@@ -56,9 +56,19 @@ type listPage struct {
 	Err   string
 	Empty bool // show the mark as a watermark once the list is empty
 	// Oldest is the view's oldest message date, unix seconds (0: unknown
-	// or none), for the pager row's timeline (viewOldest; app.js
-	// updatePager). Only a paged list carries it.
+	// or none), for the pager row's timeline (viewOldest; rendered by
+	// OldestISO; app.js updatePager). Only a paged list carries it.
 	Oldest int64
+}
+
+// OldestISO is Oldest as data-oldest: RFC 3339 in the server's zone, as
+// the rows' <time datetime> are, so the pager's year is the server's; ""
+// when unknown.
+func (p listPage) OldestISO() string {
+	if p.Oldest <= 0 {
+		return ""
+	}
+	return time.Unix(p.Oldest, 0).Local().Format(time.RFC3339)
 }
 
 // Paged says the view has more than one page: the pager row shows its

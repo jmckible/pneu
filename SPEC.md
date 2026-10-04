@@ -330,7 +330,8 @@ them here if they're wrong.
 Inbox (default), Starred, Sent, All (All Mail), Spam, Trash. Same
 template, different query. Paginated (`<`/`>`, 50 threads a page).
 A paged list's `main.list` carries `data-paged` and `data-oldest`, the
-view's oldest message date (unix seconds, 0 unknown): one notmuch search
+view's oldest message date (RFC 3339 in the server's zone, as the rows'
+`<time datetime>`, empty when unknown): one notmuch search
 per account (`--sort=oldest-first --limit=1`, the list's exclusions),
 the oldest across accounts, cached per query until the view generation
 moves (searches too, the last 16 queries). An account that fails makes
@@ -347,7 +348,9 @@ it unknown and uncached. An unpaged list never asks.
     own dates (`<time datetime>`): `Sep 23 – Aug 14`; a year other than
     this one once at the end, `Dec 30 – Nov 2, 2024`; across years both,
     `Jan 3, 2025 – Dec 12, 2024`; a page within one day, `Sep 23`.
-    Months as the rows'; tabular figures.
+    Months as the rows'; tabular figures. Days and years are read off
+    the server's datetimes, so they agree with the rows wherever the
+    browser runs (a client in another zone).
   - *A timeline*: `now` at its left end and the year of the view's oldest
     message at its right (muted, 11px), the track between mapping time
     linearly from now back to that date. An accent segment spans this

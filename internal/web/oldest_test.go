@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"strconv"
 	"testing"
+	"time"
 )
 
-var dataOldestRE = regexp.MustCompile(`<main class="list" data-view="[a-z]+" data-paged data-oldest="(\d+)">`)
+var dataOldestRE = regexp.MustCompile(`<main class="list" data-view="[a-z]+" data-paged data-oldest="([^"]*)">`)
 
 func oldestAt(t *testing.T, s *Server, path string) int64 {
 	t.Helper()
@@ -16,8 +16,14 @@ func oldestAt(t *testing.T, s *Server, path string) int64 {
 	if m == nil {
 		t.Fatalf("%s: no data-oldest on a paged list", path)
 	}
-	n, _ := strconv.ParseInt(m[1], 10, 64)
-	return n
+	if m[1] == "" {
+		return 0
+	}
+	ts, err := time.Parse(time.RFC3339, m[1])
+	if err != nil {
+		t.Fatalf("%s: data-oldest %q: %v", path, m[1], err)
+	}
+	return ts.Unix()
 }
 
 // oldestOf is what viewOldest should say: the oldest match over every
