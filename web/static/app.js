@@ -210,6 +210,8 @@
     L.sel = -1;
     var ol = root.querySelector('ol');
     L.cursor = mo && ol ? new mo.Cursor(ol) : null;
+    // What this render showed, for telling new mail in the next (loadList).
+    L.shown = { url: L.url, keys: L.items.map(function (r) { return rowId(r.dataset.account, r.dataset.thread); }) };
     if (!want) {
       // A thread triaged away from its own page is gone: keep its slot.
       var saved = storage(function (s) { return s.getItem(selKey()); });
@@ -716,6 +718,8 @@
       if (seq !== listSeq) return;
       if (sent && tri.refreshStale(sent, quiet())) { if (onStale) onStale(); return; }
       if (typeof want === 'function') want = want();
+      // A refresh of the same list: rows it didn't have are new mail.
+      var before = sent && L.shown && L.shown.url === url ? L.shown.keys : null;
       var top = L.root ? L.root.scrollTop : 0;
       if (L.root) L.root.replaceWith(got.main);
       else panes.insertBefore(got.main, panes.firstChild);
@@ -727,6 +731,7 @@
       got.main.scrollTop = top;
       var row = cur(L);
       if (row) row.scrollIntoView({ block: 'nearest' });
+      if (before && moving()) mo.arrive(L.items, mo.freshRows(before, L.shown.keys), L.sel, L.cursor);
       // Rendered before a change this window has since heard of: again.
       if (tri.behind(L.label, L.need)) refreshList();
     }).catch(function (err) {
@@ -2003,7 +2008,11 @@
     var wait = Math.max(lastKey, lastTag) + 2000 - Date.now();
     if (inflight > 0) wait = Math.max(wait, 500);
     if (wait <= 0 && document.activeElement !== search) {
-      if (primary === 'list') { carryFlash(); location.reload(); }
+      if (primary === 'list') {
+        carryFlash();
+        if (mo && L.shown) mo.stash(L.shown.url, L.shown.keys); // the reload tells new mail by it
+        location.reload();
+      }
       return;
     }
     reloadTimer = setTimeout(reloadWhenQuiet, Math.max(wait, 500));
@@ -2491,7 +2500,13 @@
 
   setPrimary(primary); // also shows the footer's keys
   if (primary === 'list') storage(function (s) { s.setItem(VIEW_KEY, L.url); });
-  if (L.root) { L.label = pageLabel(document); initList(L.root); }
+  if (L.root) {
+    L.label = pageLabel(document);
+    initList(L.root);
+    // Reloaded for new mail (narrow; reloadWhenQuiet): it opens in.
+    var stashed = mo && mo.unstash(L.url);
+    if (stashed && moving()) mo.arrive(L.items, mo.freshRows(stashed, L.shown.keys), L.sel, L.cursor);
+  }
   if (T.root) {
     T.label = pageLabel(document);
     T.url = location.pathname;

@@ -984,6 +984,20 @@ body.split #panes[data-focus=thread] main.list ol.cursored > .cursor { border-le
   pointer-events: none;
 }
 
+/* New mail opens in (motion.js arrive), then carries a short accent wash. */
+.row.fresh { position: relative; }
+.row.fresh::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: color-mix(in oklab, var(--accent) 20%, transparent);
+  opacity: 0;
+  animation: row-wash 1600ms ease-out 240ms backwards;
+}
+@keyframes row-wash { from { opacity: 1; } to { opacity: 0; } }
+
 @media (prefers-reduced-motion: reduce) {
   main.list ol.cursored > .cursor { transition: none !important; }
+  .row.fresh::after { animation: none; display: none; }
 }

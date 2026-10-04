@@ -264,7 +264,7 @@ uncached, the page shows the range first and the total follows.
   mock's). Small, quick, and never in the way: the state changes on the
   key and motion only catches up; the next key ends any row still
   opening or closing (and the cursor moving with it) and acts on the end
-  state, while a glide is retargeted and a star plays out. With
+  state, while a glide is retargeted and a star or a wash plays out. With
   `prefers-reduced-motion` none of it runs: every change is what it was
   before (the cursor jumps; a removed row keeps its 120ms fade). Colours
   are the theme's tokens.
@@ -289,6 +289,15 @@ uncached, the page shows the range first and the total follows.
     opens (150ms). Unstarring shrinks it out (160ms). At rest the star is
     the same glyph as before. The thread page's stars (one per message)
     don't pop.
+  - *New mail opens in.* A refresh of the same list (a `view` or `hello`;
+    not a first load, another view or page) opens each row it didn't have
+    before, by account and thread, from nothing to its height (240ms,
+    `cubic-bezier(.2,.8,.2,1)`), then washes it with the accent at 20%,
+    fading over 1.6s after 240ms. The cursor stays on its thread and moves
+    down in step. More than ten new rows at once (a first pull filling the
+    list) is a bulk change and renders still. A narrow list refreshes by
+    reloading, so it keeps the rows it showed across the reload
+    (sessionStorage, for 15s) to tell what's new.
 
 ## Thread page
 

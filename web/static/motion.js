@@ -1,18 +1,45 @@
 // motion.js — the list's small motions (SPEC.md "Index views", Motion): the
 // cursor gliding between rows, a removed row closing its gap (and opening
-// again on undo), the star's pop. Motion only catches up: app.js changes
-// the state first and calls these after, a key press ends any row still
-// opening or closing (settle) before app.js measures, and under
-// prefers-reduced-motion none of it runs.
+// again on undo), the star's pop, new mail opening in. Motion only catches
+// up: app.js changes the state first and calls these after, a key press
+// ends any row still opening or closing (settle) before app.js measures,
+// and under prefers-reduced-motion none of it runs. freshRows and the
+// stash checks are pure; web/motion.test.js runs them under node --test.
 (function (root) {
   'use strict';
 
   var GLIDE = 'cubic-bezier(.2,.7,.3,1)';  // the cursor between rows
   var LEAVE = 'cubic-bezier(.3,.6,.2,1)';  // a removed row
-  var OUT = 'cubic-bezier(.2,.8,.2,1)';    // the star's width
-  var GLIDE_MS = 110, LEAVE_MS = 280, ENTER_MS = 240;
+  var OUT = 'cubic-bezier(.2,.8,.2,1)';    // arrivals: new rows, the star's width
+  var GLIDE_MS = 110, LEAVE_MS = 280, ENTER_MS = 240, OPEN_MS = 240;
+  var WASH_MS = OPEN_MS + 1600;
+  // More new rows than this at once is a bulk change (a first pull filling
+  // the list, a filter), not mail landing: it renders still.
+  var FRESH_MAX = 10;
+  var STASH_KEY = 'pneu:rows';
+  var STASH_MS = 15000;
 
-  var P = {};
+  // freshRows: the indexes in next (row keys as rendered now) of rows prev
+  // (as rendered before) didn't have. No prev (a first load, another view,
+  // another page) or too many new rows: none.
+  function freshRows(prev, next, max) {
+    if (!prev || !next) return [];
+    var had = Object.create(null);
+    prev.forEach(function (k) { had[k] = true; });
+    var out = [];
+    next.forEach(function (k, i) { if (!had[k]) out.push(i); });
+    return out.length > (max || FRESH_MAX) ? [] : out;
+  }
+
+  // stashed: the keys a list stashed before reloading itself (narrow), if
+  // they are this list's and recent.
+  function stashed(v, url, now) {
+    if (!v || typeof v !== 'object' || v.url !== url || !Array.isArray(v.keys)) return null;
+    if (typeof v.at !== 'number' || now - v.at < 0 || now - v.at > STASH_MS) return null;
+    return v.keys.filter(function (k) { return typeof k === 'string'; });
+  }
+
+  var P = { freshRows: freshRows, stashed: stashed, FRESH_MAX: FRESH_MAX, STASH_MS: STASH_MS };
   if (typeof module === 'object' && module.exports) { module.exports = P; return; }
 
   var doc = root.document;
@@ -178,6 +205,48 @@
     if (cursor) cursor.to(el, { ms: ENTER_MS / 2, ease: LEAVE, h0: 0, h: b.h });
   }
 
+  // ---- new mail ----------------------------------------------------------
+
+  // arrive opens new rows (indexes into rows) from nothing to their height,
+  // then washes each with the accent. The cursor's row keeps the cursor: it
+  // moves down in step with the rows opening above it.
+  function arrive(rows, idx, sel, cursor) {
+    if (!idx.length || still()) return;
+    var row = rows[sel];
+    var m = row ? measure(row) : { top: 0, h: 0 }; // final: measured before anything opens
+    var top = m.top, h = m.h;
+    var above = 0, selNew = false;
+    var boxes = idx.map(function (i) {
+      var b = box(rows[i]);
+      if (i < sel) above += b.h;
+      if (i === sel) selNew = true;
+      return b;
+    });
+    idx.forEach(function (i, n) {
+      var el = rows[i];
+      track(el.animate([frame(shut(), {}), frame(open(boxes[n]), {})], { duration: OPEN_MS, easing: OUT }), null);
+      el.classList.add('fresh');
+      setTimeout(function () { el.classList.remove('fresh'); }, WASH_MS + 100);
+    });
+    if (cursor && row && (above || selNew)) {
+      cursor.to(row, { ms: OPEN_MS, ease: OUT, top: top, h: h, from: top - above, h0: selNew ? 0 : null });
+    }
+  }
+
+  // stash keeps a list's rows across the reload a narrow list refreshes
+  // with, so the page that loads can tell what's new (unstash).
+  function stash(url, keys) {
+    try { root.sessionStorage.setItem(STASH_KEY, JSON.stringify({ url: url, keys: keys, at: Date.now() })); } catch (e) { /* no storage: nothing animates */ }
+  }
+  function unstash(url) {
+    var v = null;
+    try {
+      v = JSON.parse(root.sessionStorage.getItem(STASH_KEY));
+      root.sessionStorage.removeItem(STASH_KEY);
+    } catch (e) { return null; }
+    return stashed(v, url, Date.now());
+  }
+
   // ---- the star ----------------------------------------------------------
   // At rest the star is the subject's ::before (app.css). While it moves, a
   // real one stands in for it (the row is .popping, which hides the
@@ -252,6 +321,9 @@
   P.Cursor = Cursor;
   P.leave = leave;
   P.enter = enter;
+  P.arrive = arrive;
+  P.stash = stash;
+  P.unstash = unstash;
   P.star = star;
   (root.Pneu = root.Pneu || {}).motion = P;
 })(this);
