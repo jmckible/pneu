@@ -409,7 +409,10 @@
   // animates (app.css, 260ms) once the page has settled; the capsule rides
   // inside its station, so it stays on it throughout. A crossing of the
   // split width is initSplit's.
+  // The window may have changed since tube.js folded the tube for the
+  // first paint: this decision is the one that holds.
   var lay = tube ? tube.layout() : { split: false, fold: false };
+  if (tube) tube.fold(lay.fold);
   var onSplitChange = null;
 
   function relayout() {
