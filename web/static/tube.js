@@ -163,9 +163,69 @@
     return out;
   }
 
+  // ---- the easter egg (app.js egg) -------------------------------------
+  // The mark is a valve: a click turns it open, the capsule falls down the
+  // tube to the floor, bounces, is sucked home, and the valve closes with a
+  // blink. One click in CORK plays the older egg instead (up out through
+  // the mark like a cork).
+  var CORK = 8;
+
+  // eggKind picks the egg: forced ('drop' or 'cork': app.js's
+  // sessionStorage pneu:egg, for testing) wins; else rand (0..1) picks the
+  // cork one time in CORK.
+  function eggKind(rand, forced) {
+    if (forced === 'drop' || forced === 'cork') return forced;
+    return rand < 1 / CORK ? 'cork' : 'drop';
+  }
+
+  // FALL is the fall's easing (a cubic-bezier), accelerating; fallTime is
+  // the share of the fall's duration at which the capsule has covered share
+  // p of the drop (the curve inverted, by bisection on its parameter), so a
+  // station's label rattles as the capsule passes its dot.
+  var FALL = [0.5, 0, 1, 0.5];
+  function bez(a1, a2, s) { var u = 1 - s; return 3 * u * u * s * a1 + 3 * u * s * s * a2 + s * s * s; }
+  function fallTime(p) {
+    if (!(p > 0)) return 0;
+    if (p >= 1) return 1;
+    var lo = 0, hi = 1;
+    for (var i = 0; i < 40; i++) {
+      var mid = (lo + hi) / 2;
+      if (bez(FALL[1], FALL[3], mid) < p) lo = mid; else hi = mid;
+    }
+    return bez(FALL[0], FALL[2], (lo + hi) / 2);
+  }
+
+  // eggPlan is the drop egg's timeline for a fall of `drop` px (the
+  // capsule's bottom to the floor), in ms from the click. The full drop
+  // takes about 450ms; a short one is quicker. The bounces scale down with
+  // a drop under 40px and go when they'd be too small to see. Each hop is
+  // {h, dur, at}: it leaves the floor at `at`, and lands with a squash.
+  function eggPlan(drop) {
+    var d = Math.max(0, Number(drop) || 0);
+    var clamp = function (v, lo, hi) { return Math.min(hi, Math.max(lo, v)); };
+    var p = { drop: d, valve: 160, squash: 60, land: 40, rest: 150, settle: 90 };
+    p.fall = Math.round(clamp(450 * Math.sqrt(d / 400), 160, 450));
+    p.stretch = Math.round((1 + Math.min(0.8, d / 150)) * 100) / 100;
+    p.impact = p.valve + p.fall;
+    var k = Math.min(1, d / 40);
+    p.hops = [{ h: 28, dur: 220 }, { h: 9, dur: 140 }].map(function (o) {
+      return { h: Math.round(o.h * k * 10) / 10, dur: Math.round(o.dur * Math.sqrt(k)) };
+    }).filter(function (o) { return o.h >= 3; });
+    var t = p.impact + p.squash;
+    p.hops.forEach(function (o) { o.at = t; t += o.dur + p.land; });
+    p.whoosh = t + p.rest;
+    p.home = Math.round(clamp(200 + d * 0.5, 200, 380));
+    p.homeStretch = Math.round((1 + Math.min(2, d / 80)) * 100) / 100;
+    p.dock = p.whoosh + p.home;
+    p.blink = p.dock + 80;
+    p.end = p.blink + 180;
+    return p;
+  }
+
   var X = {
     STATIONS: STATIONS, LEARNED: LEARNED, stationOf: stationOf, queryOf: queryOf, flight: flight, animates: animates,
     cameFrom: cameFrom, spamLight: spamLight, span: span, timeline: timeline, learn: learn, parseCounts: parseCounts,
+    CORK: CORK, FALL: FALL, eggKind: eggKind, fallTime: fallTime, eggPlan: eggPlan,
   };
   if (typeof module === 'object' && module.exports) { module.exports = X; return; }
   var Pneu = (root.Pneu = root.Pneu || {});
