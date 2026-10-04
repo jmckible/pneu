@@ -230,19 +230,46 @@
   // thread, the search stop, the Spam station's light, and the easter egg.
 
   var navEl = document.getElementById('rail');
-  var PRESEARCH_KEY = 'pneu:presearch'; // the last view shown before a search, where × and Esc return
+  // Where leaving a search (× or Esc) goes: the view it was started from.
+  // Every other list notes itself in the tab (PRESEARCH_KEY); a search
+  // takes the note once, as its page loads, into its own history entry
+  // (history.state.presearch), so Back to an older search, or a reload,
+  // returns where that search began, not to the last view the tab saw.
+  // searchFrom is that entry's; setURL and page carry it to the entries
+  // the split adds.
+  var PRESEARCH_KEY = 'pneu:presearch';
+  var searchFrom = (function () {
+    var st = history.state;
+    return st && typeof st.presearch === 'string' && tri ? tri.listURL(st.presearch) : null;
+  })();
 
-  // rememberView notes a list URL that isn't a search, for leaving one.
+  // rememberView notes a list URL that isn't a search, for leaving one;
+  // a search's page takes the note into its history entry.
   function rememberView(url) {
-    if (!rail || !url || rail.stationOf(url) === 'q' || !tri || tri.pathKind(url) !== 'list') return;
-    storage(function (s) { s.setItem(PRESEARCH_KEY, url); });
+    if (!rail || !url || !tri || tri.pathKind(url) !== 'list') return;
+    if (rail.stationOf(url) !== 'q') {
+      storage(function (s) { s.setItem(PRESEARCH_KEY, url); });
+      return;
+    }
+    if (!searchFrom) searchFrom = tri.listURL(storage(function (s) { return s.getItem(PRESEARCH_KEY); }));
+    if (!history.state || history.state.presearch !== searchFrom) {
+      history.replaceState(Object.assign({}, history.state, { presearch: searchFrom }), '');
+    }
     var x = navEl && navEl.querySelector('.q .x');
-    if (x) x.setAttribute('href', url);
+    if (x) x.setAttribute('href', searchFrom);
   }
 
   function presearch() {
+    if (searchFrom) return searchFrom;
     var v = storage(function (s) { return s.getItem(PRESEARCH_KEY); });
     return tri ? tri.listURL(v) : '/';
+  }
+
+  // withSearchFrom adds the search's return view to a history state the
+  // split writes while its list is a search.
+  function withSearchFrom(st) {
+    if (searchFrom && rail && rail.stationOf(L.url) === 'q') st.presearch = searchFrom;
+    return st;
   }
 
   function queryOf(url) {
@@ -955,7 +982,7 @@
   function setURL(url, push) {
     var op = tri.historyOp(location.pathname + location.search, url, push);
     // view: the list this entry's thread was shown beside, for a reload.
-    var st = { view: L.root ? L.url : undefined };
+    var st = withSearchFrom({ view: L.root ? L.url : undefined });
     if (op === 'push') history.pushState(st, '', url);
     else if (op === 'replace') history.replaceState(st, '', url);
     setPrimary(tri.pathKind(url));
@@ -1107,7 +1134,7 @@
       L.url = url;
       storage(function (s) { s.setItem(VIEW_KEY, url); });
       if (tri.pathKind(location.pathname + location.search) === 'list') setURL(url, true);
-      else history.replaceState({ view: url }, ''); // the thread's reload shows this page beside it
+      else history.replaceState(withSearchFrom({ view: url }), ''); // the thread's reload shows this page beside it
       loadList({ index: index });
     };
   }

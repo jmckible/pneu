@@ -58,7 +58,9 @@ them here if they're wrong.
     field cancels. On a results page the stop is a real station showing
     the query, with the capsule and a small `×` that leaves the search;
     Esc on the list (with no thread pane open) does the same. Leaving goes
-    back to the view you searched from. `/` there edits the query.
+    back to the view that search was started from, kept in its own
+    history entry, so Back to an older search or a reload still returns
+    there. `/` there edits the query.
   - *The easter egg.* Clicking the mark while sync is healthy winds the
     capsule up, shoots it off the right end of the rail, and brings it
     back in from the left out of the mark, which pulses as it passes,
