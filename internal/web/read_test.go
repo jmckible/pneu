@@ -114,12 +114,18 @@ func TestInbox(t *testing.T) {
 		`<link rel="stylesheet" href="/static/app.css">`,
 		`<script src="/static/purify.min.js"></script>`,
 		`<script src="/static/app.js" defer></script>`,
-		`<main class="list" data-view="inbox">`,
-		`<div class="pane-title">Inbox · <span class="n" data-start="0" data-rows="20" data-total="20">20</span></div>`, // the split's title row: view · count; one page, so no range
-		`<form class="search" action="/search" method="get"><input name="q"`,
-		`<a href="/" class="active" aria-current="page"><kbd>1</kbd>Inbox</a>`,
-		`<a href="/starred"><kbd>2</kbd>Starred</a>`, `<a href="/sent"><kbd>3</kbd>Sent</a>`,
-		`<a href="/spam"><kbd>4</kbd>Spam</a>`, `<a href="/trash"><kbd>5</kbd>Trash</a>`, `<a href="/all"><kbd>6</kbd>All</a>`,
+		// The page's place, for the key bar's counter; one page, so not paged.
+		`<main class="list" data-view="inbox" data-start="0" data-rows="20" data-total="20">`,
+		`<link rel="expect" href="#rail" blocking="render">`, // rail.js's pagereveal sees the rail
+		`<script src="/static/rail.js"></script>`,
+		// The rail: the main line, the ghost search stop, the siding; the
+		// capsule only on the active station.
+		`<span class="line"><span class="main"><a href="/" data-station="1" class="active" aria-current="page"><kbd>1</kbd>Inbox<span class="cap" aria-hidden="true"></span></a>`,
+		`<a href="/starred" data-station="2"><kbd>2</kbd>Starred</a>`, `<a href="/sent" data-station="3"><kbd>3</kbd>Sent</a>`,
+		`<a href="/all" data-station="4"><kbd>4</kbd>Archive</a></span><span class="q ghost" data-station="q"><a href="/search"><kbd>/</kbd>search</a></span></span>`,
+		`<span class="siding"><a href="/spam" data-station="5" data-spam="`, `<a href="/trash" data-station="6"><kbd>6</kbd>Trash</a></span>`,
+		`<button id="mark" type="button"`, `<button id="sync" type="button" title="Sync details" aria-haspopup="dialog" hidden>`,
+		`<div class="wright"><span id="ruler" class="ruler"></span><div id="status"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("inbox missing %s", want)
@@ -209,7 +215,7 @@ func TestPagination(t *testing.T) {
 	}
 	// The title says where the page sits. Nothing is counted during a
 	// render: the first look has no total and the page asks for it.
-	if body := getOK(t, s, "/?page=1"); !strings.Contains(body, `data-total="-1"`) || !strings.Contains(body, `>6–10</span>`) {
+	if body := getOK(t, s, "/?page=1"); !strings.Contains(body, `data-start="5" data-rows="5" data-total="-1" data-paged>`) {
 		t.Errorf("uncounted position: %s", body)
 	}
 	w := do(s, "GET", "/?page=1&total=1", withCookie)
@@ -217,7 +223,7 @@ func TestPagination(t *testing.T) {
 		t.Fatalf("?total=1: %d %s", w.Code, w.Body)
 	}
 	// Counted once, cached at the databases' revisions: the next render has it.
-	if body := getOK(t, s, "/?page=3"); !strings.Contains(body, `data-total="20"`) || !strings.Contains(body, `>16–20 of 20</span>`) {
+	if body := getOK(t, s, "/?page=3"); !strings.Contains(body, `data-start="15" data-rows="5" data-total="20" data-paged>`) {
 		t.Errorf("cached position: %s", body)
 	}
 	// A tag write moves the revision; the stale count is not shown.
@@ -265,8 +271,18 @@ func TestStarredAndSearch(t *testing.T) {
 
 	// Search passes notmuch syntax straight through, across both databases.
 	body := getOK(t, s, "/search?q="+url.QueryEscape("from:owen@northwind.example"))
-	if !strings.Contains(body, `data-view="search"`) || !strings.Contains(body, `value="from:owen@northwind.example"`) {
-		t.Error("search view / echoed query")
+	// The search stop is a station showing the query, with the capsule.
+	if !strings.Contains(body, `data-view="search"`) || !strings.Contains(body, `<span class="line on-q">`) ||
+		!strings.Contains(body, `<span class="q active" data-station="q"><a href="/search?q=from%3aowen%40northwind.example" aria-current="page"><kbd>/</kbd><span class="qt">from:owen@northwind.example</span></a><a class="x" href="/"`) ||
+		!strings.Contains(body, `×</a><span class="cap" aria-hidden="true"></span></span>`) {
+		t.Errorf("search view / query on the stop: %s", body)
+	}
+	if strings.Contains(body, `class="active" aria-current="page"><kbd>`) {
+		t.Error("a view's station is active on a search")
+	}
+	// An empty search leaves the stop a ghost.
+	if body := getOK(t, s, "/search"); !strings.Contains(body, `<span class="q ghost" data-station="q">`) {
+		t.Error("empty search: no ghost stop")
 	}
 	got = keys(rows(t, s, "/search?q="+url.QueryEscape("from:owen@northwind.example")))
 	if !slices.Equal(got, []string{"work: Q3 roadmap review", "work: Board deck draft"}) {
@@ -301,9 +317,9 @@ func TestStarredAndSearch(t *testing.T) {
 // says where it is, for app.js's trash no-op.
 func TestSpamTrashAll(t *testing.T) {
 	s := newServer(t)
-	for _, c := range []struct{ path, view string }{{"/sent", "sent"}, {"/spam", "spam"}, {"/trash", "trash"}, {"/all", "all"}} {
+	for _, c := range []struct{ path, view, key string }{{"/sent", "sent", "3"}, {"/spam", "spam", "5"}, {"/trash", "trash", "6"}, {"/all", "all", "4"}} {
 		body := getOK(t, s, c.path)
-		if !strings.Contains(body, `data-view="`+c.view+`"`) || !strings.Contains(body, `<a href="`+c.path+`" class="active" aria-current="page">`) {
+		if !strings.Contains(body, `data-view="`+c.view+`"`) || !strings.Contains(body, `<a href="`+c.path+`" data-station="`+c.key+`" class="active" aria-current="page"`) {
 			t.Errorf("%s: view or active nav missing", c.path)
 		}
 	}
@@ -652,7 +668,7 @@ func TestSentAndMe(t *testing.T) {
 		},
 	} {
 		body := getOK(t, s, path)
-		if !strings.Contains(body, `<main class="list" data-view="`+path[1:]+`">`) {
+		if !strings.Contains(body, `<main class="list" data-view="`+path[1:]+`" `) {
 			t.Errorf("%s: view missing", path)
 		}
 		for _, w := range want {

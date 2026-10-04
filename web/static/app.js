@@ -10,7 +10,7 @@
   var body = document.body;
   var origin = body.dataset.origin || location.origin;
   var panes = document.getElementById('panes');
-  var search = document.querySelector('form.search input[name=q]');
+  var rail = Pneu.rail || null; // rail.js, in <head>
   var lastKey = 0;
   var tri = Pneu.triage || null; // base.html loads triage.js; see `ready` below
   // Client mode's link (link.js): null on a server, whose hello has none.
@@ -20,6 +20,15 @@
   function storage(fn) {
     try { return fn(window.sessionStorage); } catch (e) { return null; }
   }
+
+  // local: the same for localStorage, which outlives the window (learned
+  // key hints, the last visit to Spam).
+  function local(fn) {
+    try { return fn(window.localStorage); } catch (e) { return null; }
+  }
+
+  var reduceMotion = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  function still() { return !!(reduceMotion && reduceMotion.matches); }
 
   // windowId names this page load to the server (X-Pneu-Window on every
   // write), which echoes it as a `view` event's from: the one event this
@@ -79,10 +88,13 @@
     var el = c.items[i];
     el.classList.add('selected');
     if (c === T) { syncMark(was); syncMark(el); syncKeybar(); } // the highlight shows on the cursor only
-    if (c === L) storage(function (s) {
-      s.setItem(selKey(), el.dataset.thread || '');
-      s.setItem(selKey() + ':i', String(i));
-    });
+    if (c === L) {
+      storage(function (s) {
+        s.setItem(selKey(), el.dataset.thread || '');
+        s.setItem(selKey() + ':i', String(i));
+      });
+      updateRuler();
+    }
     if (scroll !== false) {
       el.scrollIntoView({ block: c === L ? 'nearest' : 'start' });
     }
@@ -121,6 +133,7 @@
     var k = activeKind() || (document.querySelector('main.compose') ? 'compose' : '');
     if (k) body.dataset.keys = k;
     else delete body.dataset.keys;
+    updateRuler(false); // the list may have come into view or gone
   }
 
   // scrollThread: j/k on a thread scroll it three lines (the pane in the
@@ -186,17 +199,6 @@
   // pane (which replaced the previous element, and its listeners with it).
   // want ({thread, account, index}) places the cursor; without it the cursor
   // this list last had in this tab comes back.
-  // A list fetched beside a thread marks its view in the header nav, as the
-  // server does for a list page.
-  function markNav(url) {
-    var path = String(url || '').split('?')[0];
-    Array.prototype.forEach.call(document.querySelectorAll('body > header nav a'), function (a) {
-      var on = a.getAttribute('href') === path;
-      a.classList.toggle('active', on);
-      if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
-    });
-  }
-
   function initList(root, want, scroll) {
     L.root = root;
     L.items = Array.prototype.slice.call(root.querySelectorAll('li.row'));
@@ -208,7 +210,10 @@
       want = saved ? { thread: saved, index: slot } : { index: slot };
     }
     var start = tri ? tri.restoreIndex(L.items.map(rowKey), want) : 0;
+    rulerWas = null; // a new list: its counter appears, it doesn't roll
     select(L, start, scroll !== undefined ? scroll : start > 0);
+    updateRuler(false);
+    rememberView(L.url);
     whenReady(function () { listTotal(root); })();
     root.addEventListener('click', function (e) {
       var row = e.target.closest('li.row');
@@ -216,6 +221,313 @@
       select(L, L.items.indexOf(row), false);
       openRow(); // a click is an open, as Enter is
     });
+  }
+
+  // ---- the header rail ------------------------------------------------------
+  // The views are stations on the rail (base.html, app.css #rail); the
+  // capsule sits under the active one, and moving it between pages is
+  // rail.js's. Here: marking a view when the split fetches a list beside a
+  // thread, the search stop, the Spam station's light, and the easter egg.
+
+  var navEl = document.getElementById('rail');
+  var PRESEARCH_KEY = 'pneu:presearch'; // the last view shown before a search, where × and Esc return
+
+  // rememberView notes a list URL that isn't a search, for leaving one.
+  function rememberView(url) {
+    if (!rail || !url || rail.stationOf(url) === 'q' || !tri || tri.pathKind(url) !== 'list') return;
+    storage(function (s) { s.setItem(PRESEARCH_KEY, url); });
+    var x = navEl && navEl.querySelector('.q .x');
+    if (x) x.setAttribute('href', url);
+  }
+
+  function presearch() {
+    var v = storage(function (s) { return s.getItem(PRESEARCH_KEY); });
+    return tri ? tri.listURL(v) : '/';
+  }
+
+  function queryOf(url) {
+    try { return (new URL(url, location.origin).searchParams.get('q') || '').trim(); } catch (e) { return ''; }
+  }
+
+  function capsule() {
+    var c = navEl.querySelector('.cap');
+    if (c) return c;
+    c = document.createElement('span');
+    c.className = 'cap';
+    c.setAttribute('aria-hidden', 'true');
+    return c;
+  }
+
+  // markNav marks url's view on the rail, as the server does for a list
+  // page: a list fetched beside a thread (the thread page's rail has none)
+  // names its view this way. A search names the search stop, with its query.
+  function markNav(url) {
+    if (!navEl || !rail) return;
+    var station = rail.stationOf(url);
+    var path = String(url || '').split('?')[0];
+    var cap = capsule();
+    Array.prototype.forEach.call(navEl.querySelectorAll('a[data-station]'), function (a) {
+      var on = station !== 'q' && a.getAttribute('href') === path;
+      a.classList.toggle('active', on);
+      if (on) { a.setAttribute('aria-current', 'page'); a.appendChild(cap); } else a.removeAttribute('aria-current');
+    });
+    searchStop(station === 'q' ? queryOf(url) : '');
+    if (station === 'q') navEl.querySelector('.q').appendChild(cap);
+    else if (!station) cap.remove();
+    spamLight();
+  }
+
+  // searchStop makes the search stop a station showing q, or the ghost
+  // (q empty), as base.html renders each.
+  function searchStop(q) {
+    var stop = navEl.querySelector('.q');
+    if (!stop || stop.classList.contains('active') === !!q && (!q || (stop.querySelector('.qt') || {}).textContent === q)) return;
+    closeSearchField();
+    var line = stop.parentNode;
+    line.classList.toggle('on-q', !!q);
+    var a = el('a');
+    a.appendChild(el('kbd', null, '/'));
+    if (q) {
+      stop.className = 'q active';
+      a.href = '/search?q=' + encodeURIComponent(q);
+      a.setAttribute('aria-current', 'page');
+      a.appendChild(el('span', 'qt', q));
+      var x = el('a', 'x', '×');
+      x.href = presearch();
+      x.title = 'Close search';
+      x.setAttribute('aria-label', 'Close search');
+      stop.replaceChildren(a, x);
+    } else {
+      stop.className = 'q ghost';
+      a.href = '/search';
+      a.appendChild(document.createTextNode('search'));
+      stop.replaceChildren(a);
+    }
+  }
+
+  // The search stop turns into a field (/ or a click): Enter searches,
+  // Esc or leaving it puts the stop back. On a search page it starts
+  // with the query.
+  var searchForm = null;
+
+  function openSearch() {
+    var stop = navEl && navEl.querySelector('.q');
+    if (!stop) return;
+    if (searchForm) { searchForm.querySelector('input').focus(); return; }
+    var qt = stop.querySelector('.qt');
+    Array.prototype.forEach.call(stop.children, function (c) { if (!c.classList.contains('cap')) c.hidden = true; });
+    var f = el('form');
+    f.action = '/search';
+    f.method = 'get';
+    f.setAttribute('role', 'search');
+    f.appendChild(el('kbd', null, '/'));
+    var input = el('input');
+    input.name = 'q';
+    input.type = 'search';
+    input.autocomplete = 'off';
+    input.placeholder = 'search mail';
+    input.setAttribute('aria-label', 'Search mail');
+    input.value = qt ? qt.textContent : '';
+    f.appendChild(input);
+    stop.insertBefore(f, stop.firstChild);
+    searchForm = f;
+    f.addEventListener('submit', function (e) {
+      if (!input.value.trim()) { e.preventDefault(); closeSearchField(); return; }
+      f.dataset.sent = '';
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeSearchField();
+    });
+    input.addEventListener('blur', function () {
+      setTimeout(function () { if (searchForm === f && !('sent' in f.dataset)) closeSearchField(); }, 0);
+    });
+    input.focus();
+    input.select();
+  }
+
+  function closeSearchField() {
+    var f = searchForm;
+    if (!f) return;
+    searchForm = null;
+    var stop = f.parentNode;
+    f.remove();
+    if (stop) Array.prototype.forEach.call(stop.children, function (c) { c.hidden = false; });
+  }
+
+  function searching() { return !!searchForm; }
+
+  // leaveSearch: × or Esc on a search goes back to the view before it.
+  function leaveSearch() {
+    if (!rail || rail.stationOf(L.url) !== 'q') return false;
+    location.assign(presearch());
+    return true;
+  }
+
+  if (navEl) navEl.addEventListener('click', function (e) {
+    var a = e.target.closest('a');
+    if (!a || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    if (a.closest('.q.ghost')) { e.preventDefault(); openSearch(); return; }
+    if (a.classList.contains('x')) { e.preventDefault(); location.assign(presearch()); }
+  });
+
+  // The Spam station lights when spam has come in since the last visit to
+  // Spam (SPEC "Layout"). The server renders the newest spam's date on the
+  // link (data-spam, spam.go); the last visit is this browser's, in
+  // localStorage. A fetched page (fetchMain: the split's list, a thread
+  // refetched on a change) brings a newer date.
+  var SPAM_KEY = 'pneu:spam-seen';
+  var spamShown = false; // the light has been drawn once: a change now pops
+
+  function spamLight(newest) {
+    var a = navEl && navEl.querySelector('a[data-spam]');
+    if (!a || !rail) return;
+    if (newest != null) a.dataset.spam = String(newest);
+    var raw = local(function (s) { return s.getItem(SPAM_KEY); });
+    var seen = raw === null || raw === undefined ? null : Number(raw);
+    var d = rail.spamLight(a.dataset.spam, seen, a.classList.contains('active'), Math.floor(Date.now() / 1000));
+    if (d.seen !== null) local(function (s) { s.setItem(SPAM_KEY, String(d.seen)); });
+    var was = a.hasAttribute('data-lit');
+    a.toggleAttribute('data-lit', d.lit);
+    if (d.lit && !was && spamShown && !still() && a.animate) {
+      try {
+        a.animate([{ transform: 'scale(0)' }, { transform: 'scale(1.8)', offset: 0.6 }, { transform: 'scale(1)' }],
+          { duration: 380, easing: 'cubic-bezier(.3,.7,.3,1)', pseudoElement: '::after' });
+      } catch (e) { /* no pseudo-element animation: the light is enough */ }
+    }
+    spamShown = true;
+  }
+
+  // Another window visited Spam.
+  window.addEventListener('storage', function (e) { if (e.key === SPAM_KEY) spamLight(); });
+  spamLight();
+  (function () { var x = navEl && navEl.querySelector('.q .x'); if (x) x.setAttribute('href', presearch()); })();
+
+  // The easter egg: a click on the mark while sync is healthy winds the
+  // capsule up and shoots it off the right end of the rail; it comes back
+  // round out of the mark, which pulses as it passes, and settles at its
+  // station. The rail clips it (app.css .rail). Nothing under reduced
+  // motion; a station-to-station navigation meanwhile doesn't travel.
+  var eggOn = false;
+
+  function shoot() {
+    var cap = navEl && navEl.querySelector('.cap');
+    var mark = document.querySelector('#mark .mark');
+    if (eggOn || still() || !cap || !cap.animate) return;
+    eggOn = true;
+    var c = cap.getBoundingClientRect(), w = navEl.parentNode.getBoundingClientRect();
+    var end = Math.round(w.right - c.left + 40), start = Math.round(w.left - c.right - 40);
+    var dur = 1150;
+    navEl.classList.add('away');
+    var a = cap.animate([
+      { transform: 'translate(0, 0) scaleX(1)', easing: 'cubic-bezier(.2,.8,.3,1)' },
+      { transform: 'translate(-6px, 0) scaleX(0.6)', offset: 0.12, easing: 'cubic-bezier(.6,0,1,.6)' },
+      { transform: 'translate(' + end + 'px, 0) scaleX(4.5)', offset: 0.38 },
+      { transform: 'translate(' + start + 'px, 0) scaleX(4.5)', offset: 0.381 },
+      { transform: 'translate(' + start + 'px, 0) scaleX(4.5)', offset: 0.55, easing: 'cubic-bezier(.1,.6,.3,1)' },
+      { transform: 'translate(4px, 0) scaleX(1.6)', offset: 0.82, easing: 'ease-in-out' },
+      { transform: 'translate(0, 0) scaleX(0.8)', offset: 0.91 },
+      { transform: 'translate(0, 0) scaleX(1)' },
+    ], { duration: dur });
+    if (mark && mark.animate) {
+      var accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || 'currentColor';
+      mark.animate([
+        { transform: 'scale(1)' },
+        { transform: 'scale(1.18)', filter: 'drop-shadow(0 0 5px ' + accent + ')', offset: 0.4 },
+        { transform: 'scale(1)' },
+      ], { duration: 360, delay: dur * 0.5, easing: 'cubic-bezier(.3,.7,.3,1)' });
+    }
+    var relight = setTimeout(function () { navEl.classList.remove('away'); }, dur * 0.86);
+    var done = function () { eggOn = false; clearTimeout(relight); navEl.classList.remove('away'); };
+    a.finished.then(done, done);
+  }
+
+  // ---- key bar: hints and the position counter --------------------------
+  // A hint whose key has been used LEARNED times (rail.js) steps aside;
+  // ? always stays, and the ? overlay brings them back. Counts live in
+  // localStorage, per pane and hint (base.html data-learn: its keys).
+  var LEARN_KEY = 'pneu:hints';
+  var learnCounts = rail ? rail.parseCounts(local(function (s) { return s.getItem(LEARN_KEY); })) : {};
+  var keybarEl = document.getElementById('keybar');
+
+  function hintId(h) { return h.parentNode.dataset.for + ':' + h.dataset.learn; }
+
+  function applyLearned() {
+    if (!keybarEl || !rail) return;
+    Array.prototype.forEach.call(keybarEl.querySelectorAll('.keys .h[data-learn]'), function (h) {
+      h.classList.toggle('learned', (learnCounts[hintId(h)] || 0) >= rail.LEARNED);
+    });
+  }
+
+  function learnedCount() {
+    return Object.keys(learnCounts).filter(function (k) { return learnCounts[k] >= (rail ? rail.LEARNED : 3); }).length;
+  }
+
+  // learnKey counts key in pane kind's hints.
+  function learnKey(kind, key) {
+    if (!keybarEl || !rail || !kind) return;
+    var hints = keybarEl.querySelectorAll('.keys[data-for="' + kind + '"] .h[data-learn]');
+    for (var i = 0; i < hints.length; i++) {
+      if (hints[i].dataset.learn.split(' ').indexOf(key) < 0) continue;
+      var id = hintId(hints[i]);
+      if ((learnCounts[id] || 0) >= rail.LEARNED) return;
+      if (rail.learn(learnCounts, id)) hints[i].classList.add('learned');
+      local(function (s) { s.setItem(LEARN_KEY, JSON.stringify(learnCounts)); });
+      return;
+    }
+  }
+
+  function resetHints() {
+    learnCounts = {};
+    local(function (s) { s.removeItem(LEARN_KEY); });
+    applyLearned();
+  }
+
+  applyLearned();
+  // Transitions only after the first frames: a hint learned before this
+  // page is just absent.
+  if (keybarEl) requestAnimationFrame(function () { requestAnimationFrame(function () { keybarEl.classList.add('settled'); }); });
+
+  // The position counter (#ruler): the list cursor's place in the view,
+  // "3 of 20", "53 of 312" when paged. It rolls like an odometer when the
+  // number changes, in the direction of the change; the status line covers
+  // it while it speaks (app.css .wright).
+  var rulerEl = document.getElementById('ruler');
+  var rulerWas = null; // {root, text, pos}
+
+  function updateRuler(animate) {
+    if (!rulerEl || !rail) return;
+    var root = L.root, text = '', pos = null;
+    if (root && (split || primary === 'list')) {
+      var d = root.dataset, rows = L.items.length, paged = 'paged' in d, start = parseInt(d.start, 10) || 0;
+      var total = parseInt(d.total, 10);
+      if (isNaN(total)) total = -1;
+      // A removal takes one off the total, an undo puts it back: data-rows
+      // is the row count data-total was counted against.
+      if (total >= 0) total += rows - (parseInt(d.rows, 10) || 0);
+      text = rail.ruler(start, L.sel, rows, total, paged);
+      pos = { at: (paged ? start : 0) + L.sel + 1, total: paged ? total : rows };
+    }
+    var dir = animate !== false && rulerWas && rulerWas.root === root ? rail.rollDir(rulerWas.pos, pos) : 0;
+    if (rulerWas && rulerWas.text === text) { rulerWas.pos = pos; return; }
+    rulerWas = { root: root, text: text, pos: pos };
+    roll(rulerEl, text, dir);
+  }
+
+  // roll replaces el's number: the old one slides out and the new one in,
+  // in direction dir (1 up, -1 down, 0 at once), 260ms.
+  function roll(el, text, dir) {
+    var prev = el.lastElementChild;
+    var next = document.createElement('span');
+    next.textContent = text;
+    if (!dir || still() || !prev || !text || !next.animate) { el.replaceChildren(next); return; }
+    el.appendChild(next);
+    var opt = { duration: 260, easing: 'cubic-bezier(.2,.8,.2,1)' };
+    next.animate([{ transform: 'translateY(' + (dir > 0 ? 100 : -100) + '%)', opacity: 0 }, { transform: 'none', opacity: 1 }], opt);
+    prev.animate([{ transform: 'none', opacity: 1 }, { transform: 'translateY(' + (dir > 0 ? -100 : 100) + '%)', opacity: 0 }], opt)
+      .finished.then(function () { prev.remove(); }, function () {});
   }
 
   // ---- thread page --------------------------------------------------------
@@ -579,6 +891,9 @@
       var doc = new DOMParser().parseFromString(html, 'text/html');
       var main = doc.querySelector('main.' + kind);
       if (!main) throw new Error('no ' + kind + ' in the page');
+      // Its rail says when the newest spam is dated, as of now.
+      var spam = doc.querySelector('#rail a[data-spam]');
+      if (spam) spamLight(spam.dataset.spam);
       return { main: document.adoptNode(main), title: doc.title, label: pageLabel(doc) };
     });
   }
@@ -1052,35 +1367,28 @@
     return { unread: el.classList.contains('unread'), flagged: el.classList.contains('flagged') };
   }
 
-  // listCount keeps the list's title count (list.html) with the rows: a
-  // removal takes one off the page's range and the total, an undo puts it
-  // back. data-rows is the row count data-total was counted against.
-  function listCount() {
-    var n = L.root && L.root.querySelector('.pane-title .n');
-    if (!n || !tri) return;
-    var rows = L.items.length;
-    var total = parseInt(n.dataset.total, 10);
-    if (total >= 0) total += rows - (parseInt(n.dataset.rows, 10) || 0);
-    n.textContent = tri.position(parseInt(n.dataset.start, 10) || 0, rows, total, 'paged' in n.dataset);
-  }
+  // listCount keeps the key bar's counter with the rows: a removal takes
+  // one off the total, an undo puts it back (updateRuler).
+  function listCount() { updateRuler(); }
 
   // listTotal fills in a paged list's total when the server had none cached
-  // (read.go total): counting All Mail can take a second, so the page shows
-  // first and the count follows.
+  // (read.go total): counting Archive can take a second, so the page shows
+  // first and the count follows. The page's place (data-start, data-rows,
+  // data-total, data-paged) is on main.list (list.html).
   function listTotal(root) {
-    var n = root.querySelector('.pane-title .n');
-    if (!n || !('paged' in n.dataset) || parseInt(n.dataset.total, 10) >= 0) return;
+    var d = root.dataset;
+    if (!('paged' in d) || parseInt(d.total, 10) >= 0) return;
     var url = L.url + (L.url.indexOf('?') < 0 ? '?' : '&') + 'total=1';
     fetch(url, { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } })
       .then(function (res) { return res.ok ? res.json() : null; })
-      .then(function (d) {
-        if (!d || typeof d.total !== 'number' || L.root !== root) return;
+      .then(function (data) {
+        if (!data || typeof data.total !== 'number' || L.root !== root) return;
         // Counted now: rows triaged away since the render are already out.
-        n.dataset.total = String(d.total);
-        n.dataset.rows = String(L.items.length);
+        d.total = String(data.total);
+        d.rows = String(L.items.length);
         listCount();
       })
-      .catch(function () {}); // the range alone is still right
+      .catch(function () {}); // the place alone is still right
   }
 
   function clearSelection() {
@@ -1365,9 +1673,9 @@
       ['1', 'Inbox'],
       ['2', 'Starred'],
       ['3', 'Sent'],
-      ['4', 'Spam'],
-      ['5', 'Trash'],
-      ['6', 'All Mail'],
+      ['4', 'Archive (all mail but spam and trash)'],
+      ['5', 'Spam'],
+      ['6', 'Trash'],
     ]],
     ['Move', [
       ['j / k, ↓ / ↑', 'Next / previous row (list) · scroll 3 lines (thread)'],
@@ -1376,7 +1684,7 @@
       ['> / <', 'Older / newer page (list)'],
       ['Space, ⇧Space', 'Page down / up (thread)'],
       ['Enter, o', 'Open thread (list) · Enter folds a message (thread)'],
-      ['u, Esc', 'Back to the list (Esc first leaves a field) · Esc on the list closes the thread'],
+      ['u, Esc', 'Back to the list (Esc first leaves a field) · Esc on the list closes the thread, else leaves a search'],
     ]],
     ['Panes', [
       ['h, ←', 'Keys to the list'],
@@ -1400,7 +1708,7 @@
       ['o', "Open the message's link (shown as a chip)"],
       ['L', "Label the message's links · type a label to select, Enter opens, Esc closes"],
       ['f', 'View attachments (thread) · n/p step, d download, o open in tab, Esc closes'],
-      ['/', 'Search'],
+      ['/', 'Search · Enter searches, Esc cancels'],
       ['?', 'This help · Esc closes'],
     ]],
   ];
@@ -1434,6 +1742,18 @@
     var info = help.querySelector('.syncinfo');
     if (info) info.replaceWith(syncDetails());
     else help.prepend(syncDetails());
+    var foot = help.querySelector('.hintsfoot');
+    if (foot) foot.remove();
+    var n = learnedCount();
+    if (n) {
+      // Hints that stepped aside from the key bar come back from here.
+      foot = el('p', 'hintsfoot', n + (n === 1 ? ' hint has' : ' hints have') + ' left the key bar as you learned ' + (n === 1 ? 'its key' : 'their keys') + '. ');
+      var again = el('button', null, 'Show them again');
+      again.type = 'button';
+      again.addEventListener('click', resetHints);
+      foot.appendChild(again);
+      help.appendChild(foot);
+    }
     help.showModal();
   }
 
@@ -1566,11 +1886,11 @@
   // paneBounds is what of the thread pane shows: its rect ∩ the viewport,
   // less every piece of app chrome that is sticky or fixed and overlaps it,
   // in either layout: the page header (sticky when narrow), the split's
-  // sticky pane titles, the key bar (actions.js usable). o and L both use
+  // sticky thread title, the key bar (actions.js usable). o and L both use
   // it.
   function paneBounds(root) {
     var covers = [];
-    var chrome = document.querySelectorAll('body > *:not(#hints):not(dialog), main.thread > h1, main.list > .pane-title');
+    var chrome = document.querySelectorAll('body > *:not(#hints):not(dialog), main.thread > h1');
     Array.prototype.forEach.call(chrome, function (el) {
       var pos = getComputedStyle(el).position;
       if ((pos === 'sticky' || pos === 'fixed') && el.getClientRects().length) covers.push(el.getBoundingClientRect());
@@ -1647,10 +1967,9 @@
   // compose page, whose fields otherwise own the keyboard: Escape blurs,
   // below; Ctrl+Enter sends, compose.js).
 
-  function focusSearch() { if (search) { search.focus(); search.select(); } }
-
-  // VIEWS: 1..6, the header nav's order (server.go navViews).
-  var VIEWS = { 1: '/', 2: '/starred', 3: '/sent', 4: '/spam', 5: '/trash', 6: '/all' };
+  // VIEWS: 1..6, the rail's order (server.go navViews): the main line,
+  // then the siding.
+  var VIEWS = { 1: '/', 2: '/starred', 3: '/sent', 4: '/all', 5: '/spam', 6: '/trash' };
 
   function goView(e) { location.assign(VIEWS[e.key]); }
 
@@ -1711,7 +2030,8 @@
     list: {
       j: move(L, 1),
       k: move(L, -1),
-      Escape: closePane,
+      // Esc closes the thread pane; with none open, it leaves a search.
+      Escape: function () { if (split && (T.root || T.pending)) closePane(); else leaveSearch(); },
       Enter: openRow,
       o: openRow,
       g: function () { select(L, 0); },
@@ -1754,7 +2074,7 @@
       1: goView, 2: goView, 3: goView, 4: goView, 5: goView, 6: goView,
       R: syncNow,
       '?': toggleHelp,
-      '/': focusSearch,
+      '/': openSearch,
       z: whenReady(undo),
       c: compose,
       w: compose,
@@ -1764,7 +2084,7 @@
       '+': toggleMax,
     },
   });
-  var ANYWHERE = { 1: true, 2: true, 3: true, 4: true, 5: true, R: true, '?': true };
+  var ANYWHERE = { 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, R: true, '?': true };
   // The arrows are hjkl.
   var ARROWS = { ArrowLeft: 'h', ArrowDown: 'j', ArrowUp: 'k', ArrowRight: 'l' };
 
@@ -1808,6 +2128,7 @@
     if (e.key === 'Enter' && t && t.nodeType === 1 && t.closest('a, button')) return;
     e.preventDefault();
     fn(e, ident);
+    learnKey(kind, key); // the hint for a key used often enough steps aside
   }
 
   document.addEventListener('keydown', function (e) { onKey(e); });
@@ -1966,7 +2287,7 @@
     if (split) { refreshList(); return; }
     var wait = Math.max(lastKey, lastTag) + 2000 - Date.now();
     if (inflight > 0) wait = Math.max(wait, 500);
-    if (wait <= 0 && document.activeElement !== search) {
+    if (wait <= 0 && !searching()) {
       if (primary === 'list') { carryFlash(); location.reload(); }
       return;
     }
@@ -2141,16 +2462,19 @@
 
   renderAccounts();
 
-  // ---- status line --------------------------------------------------------
-  // The header's far right (SPEC "Sync state"): how current the view is,
-  // from each account's sync state (data-accounts at load, SSE `account`
-  // after). In order: Checking… while a sync R asked for is queued or
-  // running, or R has had no answer yet (scheduled, launch and focus
-  // syncs are quiet); an account
-  // failing; stale; how long ago the stalest account synced. Only ready
-  // accounts count: one in its first pull or waiting on setup is the
-  // #accounts strip's. Client mode adds link-down and update states here
-  // (docs/client.md). A click, or ?, shows the details.
+  // ---- sync status ----------------------------------------------------------
+  // How current the view is (SPEC "Sync state"), from each account's sync
+  // state (data-accounts at load, SSE `account` after). In order: Checking…
+  // while a sync R asked for is queued or running, or R has had no answer
+  // yet (scheduled, launch and focus syncs are quiet); an account failing;
+  // stale; how long ago the stalest account synced. Only ready accounts
+  // count: one in its first pull or waiting on setup is the #accounts
+  // strip's. Client mode adds link-down and update states here
+  // (docs/client.md). The mark shows it (breathing while checking, hot on
+  // a problem); the header's right side (#sync) says it only when it
+  // matters: a problem, persistently, or a check and "Updated just now"
+  // for a while after a sync R asked for ends or sync recovers. A click
+  // on either when hot, or ?, shows the details.
 
   // An account is failing at the bar's threshold (BarWidget.qml
   // accountSick): any failure.
@@ -2163,21 +2487,28 @@
   // stops showing Checking….
   var ASK_WAIT = 10000;
   var AGE_TICK = 30000;
-  var SPIN_FRAMES = '⣾⣽⣻⢿⡿⣟⣯⣷';
+  // How long the check and "Updated just now" stay after a sync, and the
+  // fade that ends them (app.css #sync).
+  var DONE_SHOWN = 10000;
+  var DONE_FADE = 600;
+  // The states that are a problem: the mark turns hot, the right side says
+  // so until it's over, and a click on the mark opens the details.
+  var PROBLEM = { stale: true, error: true, link: true, worker: true };
 
   var lineEl = document.getElementById('sync');
   var lineText = lineEl && lineEl.querySelector('.text');
-  var lineSpin = lineEl && lineEl.querySelector('.spin');
   var lineNudge = lineEl && lineEl.querySelector('.nudge');
+  var markEl = document.getElementById('mark');
   var lineLive = document.getElementById('sync-live');
   var syncEvery = (Number(lineEl && lineEl.dataset.every) || 120) * 1000;
   var busySince = Object.create(null); // account -> when it last said queued or running
   var askedAt = 0;    // an R the server hasn't answered with news
   var asked = Object.create(null);     // account -> 'sent' (R, no news yet) or 'busy' (R's sync seen queued or running)
   var askTimer = 0;
-  var spinTimer = 0;
-  var spinFrame = 0;
   var ageTimer = 0;
+  var lineWas = null;  // the state the last render showed (null: none yet)
+  var markHot = false; // a problem or a version nudge: the mark opens the details
+  var doneTimers = []; // the check's fade and removal
   var lineSaid = null; // the last state announced (#sync-live)
   var syncInfo = null; // dialog#syncinfo, once opened
   var workers = 0;     // service worker registrations found on this origin
@@ -2247,33 +2578,53 @@
     var st = lineState();
     lineEl.dataset.state = st.state;
     lineText.textContent = st.text;
-    // A client's version nudge, appended muted (link.js; none on a server).
+    // A client's version nudge, a muted tail (link.js; none on a server).
     var nudge = lk ? lk.nudge(linkInfo) : '';
-    if (lineNudge) lineNudge.textContent = st.text ? nudge : '';
-    if (lineNudge && !st.text) lineText.textContent = nudge;
+    if (lineNudge) lineNudge.textContent = nudge;
     lineEl.classList.toggle('nudged', !!nudge);
+    lineEl.classList.toggle('hot', !!PROBLEM[st.state]);
     lineEl.setAttribute('aria-label', (st.text || nudge || 'Sync') + (nudge && st.text ? ' · ' + nudge : '') + ' · details');
-    if (st.state === 'checking' && !spinTimer) {
-      lineSpin.textContent = SPIN_FRAMES[spinFrame];
-      spinTimer = setInterval(function () {
-        spinFrame = (spinFrame + 1) % SPIN_FRAMES.length;
-        lineSpin.textContent = SPIN_FRAMES[spinFrame];
-      }, 120);
-    } else if (st.state !== 'checking' && spinTimer) {
-      clearInterval(spinTimer);
-      spinTimer = 0;
-      lineSpin.textContent = '';
+    markHot = !!PROBLEM[st.state] || !!nudge;
+    if (markEl) {
+      markEl.dataset.state = st.state;
+      markEl.classList.toggle('hot', markHot);
+      markEl.setAttribute('aria-label', 'pneu' + (st.text ? ' · ' + st.text : '') + (nudge ? ' · ' + nudge : '') + (markHot ? ' · sync details' : ''));
     }
-    // The age ticks over only while one shows: no timer runs for nothing.
+    // The right side: a problem (or the nudge) stays; a sync R asked for
+    // that ended, or a recovery, shows the check for a while; else empty.
+    if (markHot) { lineDone(false); lineEl.hidden = false; }
+    else if (st.state === 'fresh' && lineWas !== null && lineWas !== 'fresh' && lineWas !== '') lineDone(true);
+    else if (st.state !== 'fresh' || !doneTimers.length) { lineDone(false); lineEl.hidden = true; }
+    // The age ticks over only while it can matter: fresh turns stale.
     clearTimeout(ageTimer);
     ageTimer = st.state === 'fresh' || st.state === 'stale' ? setTimeout(renderLine, AGE_TICK) : 0;
     // Announce a change of state, not the age ticking over.
     var said = st.state + (st.state === 'error' || st.state === 'link' || st.state === 'worker' ? st.text : '');
     if (lineLive && lineSaid !== null && said !== lineSaid) lineLive.textContent = st.text;
     lineSaid = said;
+    lineWas = st.state;
     if (syncInfo && syncInfo.open) syncInfo.replaceChildren(syncDetails());
     var inHelp = help && help.open && help.querySelector('.syncinfo');
     if (inHelp) inHelp.replaceWith(syncDetails());
+  }
+
+  // lineDone shows the check (on) and fades it after DONE_SHOWN, or takes
+  // it away now (off). The ring closes, then the tick draws (app.css).
+  function lineDone(on) {
+    doneTimers.forEach(clearTimeout);
+    doneTimers = [];
+    lineEl.classList.remove('done', 'drawn', 'gone');
+    if (!on) return;
+    lineEl.hidden = false;
+    lineEl.classList.add('done');
+    if (!still()) void lineEl.offsetWidth; // the undrawn ring first, so it closes
+    lineEl.classList.add('drawn');
+    doneTimers.push(setTimeout(function () { lineEl.classList.add('gone'); }, DONE_SHOWN));
+    doneTimers.push(setTimeout(function () {
+      doneTimers = [];
+      lineEl.classList.remove('done', 'drawn', 'gone');
+      if (!markHot) lineEl.hidden = true;
+    }, DONE_SHOWN + (still() ? 0 : DONE_FADE)));
   }
 
   // lineAsk: R asked every account for a sync; Checking… until each one's
@@ -2397,6 +2748,8 @@
   }
 
   if (lineEl) lineEl.addEventListener('click', showSyncInfo);
+  // The mark: the details when sync is in trouble, else the easter egg.
+  if (markEl) markEl.addEventListener('click', function () { if (markHot) showSyncInfo(); else shoot(); });
   renderLine();
 
   function openEvents() {

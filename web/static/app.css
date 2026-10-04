@@ -40,8 +40,9 @@
      Light: both below (bg is already near white). */
   --bar: light-dark(oklch(from var(--bg) calc(l - 0.07) c h), oklch(from var(--bg) calc(l - 0.10) c h));
   --raised: light-dark(oklch(from var(--bg) calc(l - 0.035) c h), oklch(from var(--bg) calc(l + 0.05) c h));
-  /* The accent with its chroma pushed up, for the one element that should
-     sing (the active pane's title). An already-vivid accent maps back into
+  /* The accent with its chroma pushed up, for the one thing that should
+     sing (the mark and the status text when sync is in trouble). An
+     already-vivid accent maps back into
      gamut and just stays put, so no theme overshoots. */
   --accent-hot: oklch(from var(--accent) l calc(c * 1.35) h);
   --keybar-h: 28px;
@@ -69,69 +70,229 @@ body > header {
   display: flex;
   gap: 1.5ch;
   align-items: center;
+  min-height: 40px;
   padding: 7px 1.5ch;
   background: var(--bar);
   border-bottom: 1px solid var(--border);
   box-shadow: 0 1px 0 light-dark(transparent, rgb(0 0 0 / 0.35));
 }
-/* The drawn cut of the mark (brand/README.md). At the app window's
+/* The mark is the sync status (SPEC "Sync state"): at rest when current,
+   breathing while a sync R asked for runs, hot when something is wrong.
+   A click opens the details when hot, else plays the rail's easter egg.
+   The drawn cut of the mark (brand/README.md): at the app window's
    fractional scales the pixel cut's walls land on uneven device pixels and
    read as rough; at 18px and up the drawn cut holds both walls. */
-body > header .mark {
+#mark {
   flex: none;
-  width: 18px;
-  height: 18px;
+  display: flex;
+  align-items: center;
+  padding: 0;
   color: var(--accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
 }
-body > header nav { white-space: nowrap; }
-body > header nav a {
-  margin-right: 1.5ch;
-  color: var(--muted);
-  text-decoration: none;
-  border-bottom: 2px solid transparent;
-}
-body > header nav a:hover { color: var(--fg); }
-body > header nav a.active { color: var(--unread); border-bottom-color: var(--accent); }
+#mark:focus-visible { outline: 1px dashed var(--accent); outline-offset: 2px; }
+#mark .mark { width: 18px; height: 18px; transition: color 300ms; }
+#mark.hot { color: var(--accent-hot); }
+#mark[data-state=checking] .mark { animation: breathe 1.4s ease-in-out infinite; }
+@keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.88); } }
+
+/* The rail: the views as stations on a hairline track, the main line
+   (with the search stop at its end) and a dimmer siding, each track ending
+   in a tick. A dot marks each station; the capsule (.cap, only inside the
+   active one) sits on the active view. CSS places all of it: the tracks are
+   each group's ::before, the dots each station's ::after. overflow-x clips
+   the easter egg's trip to the rail. */
+body > header .rail { flex: 1 1 auto; min-width: 0; overflow-x: clip; }
+#rail { display: flex; align-items: stretch; width: max-content; white-space: nowrap; }
+#rail .line, #rail .main, #rail .siding { position: relative; display: flex; align-items: stretch; }
+#rail .siding { margin-left: 5ch; }
+#rail a, #rail .q { position: relative; padding-bottom: 6px; color: var(--muted); text-decoration: none; transition: color 220ms; }
+#rail .main > a, #rail .q { margin-right: 1.5ch; }
+#rail .q { margin-right: 0; display: flex; align-items: baseline; }
+#rail .siding > a + a { margin-left: 1.5ch; }
+#rail a:hover { color: var(--fg); }
+#rail a.active { color: var(--unread); }
+#rail .siding > a { color: color-mix(in oklab, var(--muted) 72%, var(--bg)); }
+#rail .siding > a:hover, #rail .siding > a.active { color: var(--unread); }
 /* btop-style: the view's number is a superscript fused to its name (the
    template leaves no space). line-height 1 keeps the raised digit from
-   growing the header's line box. */
-body > header nav kbd {
+   growing the header's line box. Muted, but the active view's takes the
+   accent, and hovering the rail lights them all. */
+#rail kbd {
   font: inherit;
   font-size: 9px;
   line-height: 1;
   vertical-align: 4px;
   margin-right: 1px;
-  color: var(--accent);
+  color: var(--muted);
+  transition: color 200ms;
 }
-/* The status line (SPEC "Sync state"): app.js renders it from each
-   account's sync state. Fixed width so a change of state shifts nothing;
-   muted when fresh, accent while checking, hot when stale or failing. A
-   click opens the details (dialog#syncinfo). */
-body > header #sync {
-  flex: none;
-  width: 28ch;
+#rail a.active kbd, #rail:hover kbd { color: var(--accent); }
+/* Tracks: a 1px line 1px above the rail's foot, a 5px tick at each end. */
+#rail .main::before, #rail .siding::before, #rail .line.on-q::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  right: -4px;
+  bottom: -2px;
+  height: 5px;
+  border-inline: 1px solid var(--border);
+  background: linear-gradient(var(--border), var(--border)) 0 1px / 100% 1px no-repeat;
+  pointer-events: none;
+}
+#rail .line.on-q > .main::before { display: none; }
+/* The search stop's track is dashed while it is a ghost. */
+#rail .q.ghost::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  right: -4px;
+  bottom: 1px;
+  border-top: 1px dashed var(--border);
+  pointer-events: none;
+}
+/* Stations. */
+#rail .main > a::after, #rail .siding > a::after, #rail .q.active::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 3px;
+  height: 3px;
+  margin-left: -1.5px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--fg) 28%, var(--bg));
+  pointer-events: none;
+}
+/* Spam arrived since the last visit (app.js spamLight). */
+#rail a[data-lit]::after {
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  bottom: -1px;
+  background: var(--accent);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 70%, transparent);
+}
+#rail .cap {
+  position: absolute;
+  left: 50%;
+  bottom: -0.5px;
+  z-index: 1;
+  width: 16px;
+  height: 4px;
+  margin-left: -8px;
+  border-radius: 4px;
+  background: var(--accent);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 55%, transparent);
+  pointer-events: none;
+  view-transition-name: rail-cap;
+}
+/* The capsule is off on the easter egg's trip, or still travelling to a
+   new view: the label waits for it. */
+#rail.away a.active, #rail.away .q.active,
+:root.rail-hold #rail a.active, :root.rail-hold #rail .q.active { color: var(--muted); }
+#rail.away a.active kbd, :root.rail-hold #rail a.active kbd { color: var(--muted); }
+#rail.away .siding > a.active, :root.rail-hold #rail .siding > a.active { color: color-mix(in oklab, var(--muted) 72%, var(--bg)); }
+/* The search stop: a ghost at the end of the main line, a field while
+   typing (app.js openSearch), a station showing the query on a search. */
+#rail .q.ghost a { color: color-mix(in oklab, var(--muted) 60%, var(--bg)); }
+#rail .q.ghost a:hover { color: var(--muted); }
+#rail .q.active a { color: var(--unread); }
+#rail .q .qt { display: inline-block; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+#rail .q .x { margin-left: 0.7ch; padding-bottom: 0; color: var(--muted); }
+#rail .q .x:hover { color: var(--accent-hot); }
+#rail .q form { display: flex; align-items: baseline; margin: 0; }
+#rail .q form kbd { color: var(--accent); }
+#rail .q input {
+  width: 15ch;
   padding: 0;
   font: inherit;
-  text-align: right;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px dashed var(--accent);
+  border-radius: 0;
+  outline: none;
+}
+#rail .q input::placeholder { color: var(--muted); }
+#rail .q input::-webkit-search-cancel-button { display: none; }
+
+/* Switching views: only the capsule moves, the page cuts (rail.js decides
+   which navigations keep the transition and sets the trip's length, its
+   stretch and whether it hops). */
+@view-transition { navigation: auto; }
+::view-transition { pointer-events: none; }
+::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+::view-transition-group(rail-cap) {
+  animation-duration: var(--cap-dur, 420ms);
+  animation-timing-function: linear(0, 0.22 6%, 0.6 14%, 0.86 22%, 0.98 30%, 1.035 38%, 1.045 44%, 1.03 54%, 1.008 66%, 0.998 80%, 1);
+}
+::view-transition-old(rail-cap) { animation: none; opacity: 0; }
+::view-transition-new(rail-cap) { animation: none; }
+:root.rail-move::view-transition-image-pair(rail-cap) { animation: rail-stretch var(--cap-dur, 420ms) cubic-bezier(.45, 0, .25, 1) both; }
+:root.rail-move.rail-hop::view-transition-image-pair(rail-cap) { animation-name: rail-stretch-hop; }
+@keyframes rail-stretch {
+  0% { transform: none; }
+  45% { transform: scaleX(var(--cap-s, 1)); }
+  82% { transform: scaleX(0.82); }
+  100% { transform: none; }
+}
+@keyframes rail-stretch-hop {
+  0% { transform: none; }
+  45% { transform: translateY(-5px) scaleX(var(--cap-s, 1)); }
+  82% { transform: scaleX(0.82); }
+  100% { transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  @view-transition { navigation: none; }
+  #mark[data-state=checking] .mark { animation: none; }
+  #rail a, #rail kbd, #mark .mark { transition: none; }
+}
+
+/* The header's right side (SPEC "Sync state"): empty while sync is
+   healthy. A sync R asked for, or a recovery, ends with a check that
+   draws and "Updated just now", which fades; a problem stays, in the hot
+   color, and a click opens the details (dialog#syncinfo). */
+body > header #sync {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  max-width: 48ch;
+  padding: 0;
+  font: inherit;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   color: var(--muted);
   background: none;
   border: 0;
   cursor: pointer;
+  transition: opacity 600ms;
 }
-body > header #sync:hover { color: var(--fg); }
+body > header #sync[hidden] { display: none; }
+body > header #sync.gone { opacity: 0; }
+body > header #sync .text { overflow: hidden; text-overflow: ellipsis; }
+body > header #sync:hover .text { text-decoration: underline; text-underline-offset: 3px; }
 body > header #sync:focus-visible { outline: 1px dashed var(--accent); }
-body > header #sync[data-state=checking] { color: var(--accent); }
-body > header #sync[data-state=stale], body > header #sync[data-state=error], body > header #sync[data-state=link], body > header #sync[data-state=worker] { color: var(--accent-hot); }
-body > header #sync .spin:not(:empty) { margin-right: 1ch; }
+body > header #sync.hot .text { color: var(--accent-hot); }
+/* The check: a ring that closes, then the tick draws. */
+#sync .sico { display: inline-grid; width: 0; opacity: 0; overflow: hidden; }
+#sync.done .sico { width: 14px; opacity: 1; margin-right: 0.8ch; }
+#sync .sico svg { width: 14px; height: 14px; overflow: visible; }
+#sync .sico circle { fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; stroke-dasharray: 0.28 1; }
+#sync .sico path { fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; }
+#sync.done.drawn .sico circle { stroke-dasharray: 1 0; transition: stroke-dasharray 320ms cubic-bezier(.2, .8, .2, 1); }
+#sync.done.drawn .sico path { stroke-dashoffset: 0; transition: stroke-dashoffset 260ms cubic-bezier(.2, .8, .2, 1) 240ms; }
+@media (prefers-reduced-motion: reduce) {
+  #sync.done .sico circle { stroke-dasharray: 1 0; }
+  #sync.done .sico path { stroke-dashoffset: 0; }
+  body > header #sync { transition: none; }
+}
 /* The version nudge (client only): a muted tail after whatever the line
-   says, in its own colour whatever the state's. The line widens for it
-   rather than cutting the state short. */
+   says, in its own colour whatever the state's. */
 body > header #sync .nudge { color: var(--muted); }
-body > header #sync .nudge:not(:empty)::before { content: " · "; }
-body > header #sync.nudged { width: auto; min-width: 28ch; max-width: 48ch; }
+body > header #sync .text:not(:empty) + .nudge:not(:empty)::before { content: " · "; }
 /* Read to a screen reader, never drawn: #sync-live announces changes of
    state, not the ticking age. */
 .sr-only {
@@ -171,19 +332,6 @@ body > header #sync.nudged { width: auto; min-width: 28ch; max-width: 48ch; }
 }
 #accounts button:hover, #accounts button:focus-visible { color: var(--bg); background: var(--accent); outline: none; }
 #accounts .bad { color: color-mix(in srgb, #e06c75 70%, var(--fg)); }
-form.search { flex: 1; margin: 0; }
-form.search input {
-  width: 100%;
-  max-width: 60ch;
-  padding: 2px 6px;
-  font: inherit;
-  color: var(--fg);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 2px;
-}
-form.search input:focus { outline: none; border-color: var(--accent); }
-
 main { min-width: 0; }
 .error, .note { color: var(--muted); padding: 4px 1ch; }
 
@@ -458,33 +606,29 @@ body.split #panes[data-focus=thread] main.list .row.selected { border-left-color
 body.split #panes[data-focus=list] article.message.selected { border-left-color: var(--border); }
 body.split #panes[data-focus=list] article.message.selected.unread { border-left-color: var(--fg); }
 
-/* Title rows: the list's (view · count, list.html) and the thread's h1.
-   The pane with the keys has an accent title; color only, so nothing moves.
-   Sticky at the top of each pane's scroll. Narrow, the list's hides (the
-   header nav names the view) and the h1 is a plain heading again. */
-main.list .pane-title { display: none; }
-body.split main.list .pane-title,
+/* The thread's title row, its subject: sticky at the top of the pane in
+   the split, a plain heading when narrow. The list has none (the rail
+   names the view, the key bar says where the cursor is). Which pane has
+   the keys shows on its cursor's accent edge, not here. */
 body.split main.thread > h1 {
   display: block;
   position: sticky;
   top: 0;
   z-index: 1;
-  margin: 0;
+  max-width: none;
+  /* Edge to edge: these margins cancel main.thread's padding (4px 2ch). */
+  margin: -4px -2ch 8px;
   padding: 4px 1ch;
   font: inherit;
   font-weight: normal;
   line-height: 1.4;
-  color: var(--muted);
+  color: var(--unread);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  background: var(--raised);
   border-bottom: 1px solid var(--border);
 }
-body.split main.list .pane-title { background: var(--bg); }
-/* Edge to edge: these margins cancel main.thread's padding (4px 2ch). */
-body.split main.thread > h1 { max-width: none; margin: -4px -2ch 8px; background: var(--raised); }
-body.split #panes[data-focus=list] main.list .pane-title,
-body.split #panes[data-focus=thread] main.thread > h1 { color: var(--accent-hot); border-bottom-color: var(--accent-hot); }
 /* Another window changed the open thread while you were in the middle of
    something in it (app.js threadChanged): said at the title's right end,
    ahead of the subject so its ellipsis can't cut it; it re-renders when
@@ -497,8 +641,7 @@ main.thread[data-changed] > h1::before {
   font-weight: normal;
   color: var(--muted);
 }
-/* Cursor moves land below the sticky title. */
-body.split main.list .row { scroll-margin-top: 28px; }
+/* Cursor moves land below the thread's sticky title. */
 body.split article.message { scroll-margin-top: 36px; }
 
 /* Maximized (+): the narrow layout for the active pane, marked in the footer. */
@@ -524,8 +667,10 @@ body:not(.split) #panes[data-primary=list] > main.thread { display: none; }
 
 /* ---- key footer ------------------------------------------------------- */
 /* One bottom bar: the keys for the pane that has them (body[data-keys], set
-   by app.js) on the left, the status line on the right. Fixed over the page
-   when narrow (body reserves its height), the split's third row when wide. */
+   by app.js) on the left; on the right the position counter (#ruler, the
+   list cursor's place, like vim's), which the status line covers while it
+   says something. Fixed over the page when narrow (body reserves its
+   height), the split's third row when wide. */
 
 body { padding-bottom: var(--keybar-h); }
 #keybar {
@@ -553,17 +698,51 @@ body.split #keybar { position: static; }
   margin: 0;
   overflow: hidden;
   white-space: nowrap;
-  text-overflow: ellipsis;
 }
 body[data-keys=list] #keybar .keys[data-for=list],
 body[data-keys=thread] #keybar .keys[data-for=thread],
 body[data-keys=compose] #keybar .keys[data-for=compose] { display: block; }
-
-#status {
+/* A hint: the key in the accent, leaning toward fg, the label muted. A
+   hint whose key has been used enough (app.js learnHint) steps aside;
+   transitions only once the page has settled, so a learned hint is
+   simply absent on load. */
+#keybar .h {
+  display: inline-block;
+  max-width: 22ch;
+  margin-right: 2ch;
+  overflow: hidden;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+#keybar .h[hidden] { display: none; }
+#keybar .h kbd { margin-right: 0.6ch; color: color-mix(in oklab, var(--accent) 85%, var(--fg)); }
+#keybar .h.learned { max-width: 0; margin-right: 0; opacity: 0; }
+#keybar.settled .h { transition: max-width 360ms cubic-bezier(.2, .8, .2, 1), opacity 220ms, margin 360ms cubic-bezier(.2, .8, .2, 1); }
+@media (prefers-reduced-motion: reduce) {
+  #keybar.settled .h { transition: none; }
+}
+.wright {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 60ch;
   margin-left: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: end;
+}
+.wright > * { grid-area: 1 / 1; }
+#ruler {
+  display: inline-grid;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transition: opacity 120ms;
+}
+#ruler > span { grid-area: 1 / 1; text-align: right; }
+.wright:has(> #status.show) > #ruler { opacity: 0; }
+#status {
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -632,6 +811,16 @@ dialog#keys::backdrop, dialog#syncinfo::backdrop { background: rgb(0 0 0 / 0.45)
 .syncinfo .foot { margin: 10px 0 0; color: var(--muted); }
 .syncinfo code { color: var(--fg); overflow-wrap: anywhere; }
 dialog#keys .syncinfo + h2 { margin-top: 12px; }
+dialog#keys .hintsfoot { margin: 12px 0 0; color: var(--muted); }
+dialog#keys .hintsfoot button {
+  padding: 0 0.8ch;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  cursor: pointer;
+}
+dialog#keys .hintsfoot button:hover, dialog#keys .hintsfoot button:focus-visible { color: var(--bg); background: var(--accent); outline: none; }
 
 /* The unsubscribe confirmation (actions.js, docs/actions.md), dressed as the
    help overlay. Sender strings are isolated <bdi>s with their controls drawn

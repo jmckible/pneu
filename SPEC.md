@@ -13,18 +13,63 @@ them here if they're wrong.
   the exception: their sans text renders in Inter, which goes in ahead of
   Arial/Helvetica/`sans-serif` (Liberation Sans here, soft at a fractional
   device scale). Serif and mono stacks are left as sent.
-- **Layout.** Header: view nav on the left (Inbox · Starred · Sent · Spam · Trash ·
-  All, each with its key number), search on the right, the sync status line far right.
+- **Layout.** Header: pneu's mark (the sync status, below), then the
+  **rail**, then the header's right side, empty while sync is healthy
+  (2026-10-03 top-bar pass).
+  - *The rail.* The views are stations on a hairline track, each with a
+    small dot under it and its key number as a superscript fused to the
+    name (btop-style). The main line is `1` Inbox, `2` Starred, `3` Sent,
+    `4` Archive (Gmail's All Mail: everything but spam and trash; the URL
+    stays `/all`), ending in the search stop; about `5ch` on, a dimmer
+    siding with its own short track holds `5` Spam and `6` Trash. Each
+    track ends in a small vertical tick. A small accent capsule (16×4px,
+    rounded, a soft accent glow) sits under the active view. The digits
+    are muted; only the active view's takes the accent, and hovering the
+    rail lights them all. No counts on the rail.
+  - *The capsule travels.* Switching views is a page load, so the capsule
+    moves by a cross-document view transition: it is rendered only inside
+    the active station and named (`view-transition-name: rail-cap`); the
+    page itself cuts (no root animation) and only the capsule moves, on a
+    soft spring, stretching mid-flight (longer trips take longer, 300 to
+    600ms, and stretch more), hopping 5px only when it crosses between the
+    main line and the siding; the new view's label lights at about three
+    quarters of the trip. Only a station-to-station navigation animates
+    (rail.js skips the transition on the old page, before anything is
+    captured, for anything else: a thread, compose, paging, the same view
+    again), and nothing animates under reduced motion. Keys don't wait for
+    it: the next key acts on the new page at once.
+  - *New spam.* The Spam station's dot glows (5px, accent) when spam has
+    arrived since you last visited Spam, and goes dark when you do. The
+    server renders the newest spam message's date on the Spam station
+    (one notmuch search per account, cached until the view generation
+    moves); the browser compares it with the time of its last visit to
+    Spam (localStorage). A first look counts what's there as seen. It
+    follows the message's Date header, so spam dated in the past doesn't
+    light it. Fetched pages (the split's list, a refetched thread) bring a
+    newer date, so it lights without a reload.
+  - *Search is a ghost stop.* No permanent box: a dimmed `/search` station
+    (`/` its superscript) waits at the end of the main line on a dashed
+    track. `/` or a click turns it into an inline field (`15ch`, dashed
+    accent underline); Enter searches (`/search?q=`), Esc or leaving the
+    field cancels. On a results page the stop is a real station showing
+    the query, with the capsule and a small `×` that leaves the search;
+    Esc on the list (with no thread pane open) does the same. Leaving goes
+    back to the view you searched from. `/` there edits the query.
+  - *The easter egg.* Clicking the mark while sync is healthy winds the
+    capsule up, shoots it off the right end of the rail, and brings it
+    back in from the left out of the mark, which pulses as it passes,
+    to settle at its station (1150ms, clipped to the rail). Not under
+    reduced motion; in a problem state the click opens the sync details.
   Two named panes, the list and the thread, and exactly one is active: it
-  gets the keys, its title row is accent-colored, and the footer lists its
-  keys. At `140ch` and above, with a thread open, they sit side by side:
-  the list takes 40% of the window (clamped to `64ch`-`100ch`), the thread
-  the rest (at least `48ch`), each with a one-line sticky title row (the
-  list's is view and row count, the thread's is its subject). With no
-  thread open the list fills the window. The title's color is the
-  indicator; nothing shifts when focus moves. Below `140ch` the active pane
-  is the whole screen (list or thread; the list's title row hides, the nav
-  already names the view).
+  gets the keys, its cursor row or message carries the accent edge, and
+  the footer lists its keys. At `140ch` and above, with a thread open,
+  they sit side by side: the list takes 40% of the window (clamped to
+  `64ch`-`100ch`), the thread the rest (at least `48ch`). The thread has a
+  one-line sticky title row, its subject; the list has none (the rail
+  names the view, the key bar says where the cursor is). The pane without
+  the keys dims its cursor's edge; nothing shifts when focus moves. With
+  no thread open the list fills the window. Below `140ch` the active pane
+  is the whole screen (list or thread).
   Opening is explicit: `j/k` on the list only move the cursor. `Enter`,
   `o`, `l`, `Tab` or a click opens the cursor row (in the pane when split,
   as its own page when narrow), marks it read, and gives it the keys.
@@ -48,7 +93,7 @@ them here if they're wrong.
   those two ends, so a theme with a dim comment color can't dim the app:
   `--muted` is fg 65%, `--border` is fg 12%, `--unread` is fg pushed toward
   white 40%, `--accent-hot` is the accent with chroma pushed up 35% (for the
-  active pane's title and a stale or failing sync status line only). Body text is `--fg` at 14px; only dates, counts,
+  mark and the header's status text when sync is in trouble only). Body text is `--fg` at 14px; only dates, counts,
   and to/cc lines are muted. Authors are never muted. *default*
 - **Separation.** Rows are divided by a 1px `--border` line, not zebra
   stripes. Message cards are bordered with a 3px left rail. Section headers
@@ -57,34 +102,59 @@ them here if they're wrong.
 - **Keyboard-first.** A cursor row is always present in index views and is
   the primary visual state. Mouse works everywhere but nothing is mouse-only.
 - **Keys (HEY navigation, Gmail actions).**
-  Views: `1` Inbox · `2` Starred · `3` Sent · `4` Spam · `5` Trash · `6` All.
+  Views: `1` Inbox · `2` Starred · `3` Sent · `4` Archive · `5` Spam · `6` Trash.
   Move: `j/k` (or `↓/↑`) rows (list) or scroll three lines (thread) · `g/G` first
   and last row · `>`/`<` older and newer page (`<` lands on the last row) ·
   `n/p` messages · `Space`/`Shift+Space` page the thread · `Enter`/`o` open
   (list) or fold (thread) · `x` select · `u`/`Esc` back to list (Esc
-  first blurs any input).
+  first blurs any input; on a search's list with no thread pane open, Esc
+  leaves the search).
   Panes: `h` (`←`) list · `l` (`→`) thread · `Tab`/`Shift+Tab` switch · `Esc` (list) closes the thread · `+` maximize.
   Act: `e` archive · `t` or `#` trash · `!` spam · `s` star · `U` unread ·
   `z` undo · `r` reply · `a` reply all · `w` or `c` write · `v` open in
   Gmail (forward, block, RSVP live there) · `R` sync now · `/` search ·
   `?` key overlay.
   Number keys work from anywhere, including inside a thread, so getting back
-  to the inbox is `1` or `u`. The header nav fuses the number to each view
-  name as a small accent superscript (btop-style: the key lives inside the
+  to the inbox is `1` or `u`. The rail fuses the number to each view
+  name as a small superscript (btop-style: the key lives inside the
   label); the key footer and the `?` overlay render keys in accent too.
 - **Actions in index views** act on the selection if any, else the cursor row.
   After an action the cursor stays put (next row slides into it). *default*
 - **Undo.** Every destructive action shows a one-line toast with `z` to undo
   until the debounced push fires. *default*
 - **Key footer.** A bar across the bottom lists the keys for the pane that
-  has them (list, thread, or compose) on the left and holds the status line
-  (flashes, undo hint) on the right. It swaps with focus in the split.
-  It lists only the everyday keys (the rest are in `?`); the thread's adds
-  `o link`, `f files` and `X unsubscribe` only while each has something to
-  act on: a chip on the cursor message, a viewable attachment in the
-  thread, a `List-Unsubscribe` header on the cursor message.
-- **Sync state.** A short status line at the header's far right says how
-  current the view is. In priority order: `A service worker was removed
+  has them (list, thread, or compose) on the left: each hint is its key in
+  the accent (leaning toward fg) and its label muted, about `2ch` apart,
+  no separators. It swaps with focus in the split. It lists only the
+  everyday keys (the rest are in `?`); the thread's adds `o link`,
+  `f files` and `X unsubscribe` only while each has something to act on:
+  a chip on the cursor message, a viewable attachment in the thread, a
+  `List-Unsubscribe` header on the cursor message. Hints step aside once
+  learned: after a key has been used three times in that pane its hint
+  collapses out (width and opacity, 360ms); `?` always stays. The counts
+  are this browser's (localStorage); when any hint has gone, the `?`
+  overlay ends with a button that brings them all back.
+  On the right, a position counter like vim's: `3 of 20`, the list
+  cursor's place in the whole view (`53 of 312` on a later page; only
+  the place while a paged total is still being counted), muted, in
+  tabular numbers, while the list is showing. When the number changes it
+  rolls like an odometer (the old one slides out, the new one in, in the
+  direction of the change, 260ms). The status line (flashes, the undo
+  hint and its button) takes that spot while it says something, then
+  hands it back.
+- **Sync state.** The mark says how current the view is: at rest when
+  fresh, breathing (opacity and scale, 1.4s) while checking, and in
+  `--accent-hot` for every problem below (a service worker, the link
+  down, a failing account, stale) and for a client's version nudge. The
+  header's right side is empty while healthy. When a sync `R` asked for
+  ends fresh, or sync recovers from a problem, it shows a small check
+  (the ring closes, the tick draws) and `Updated just now`, which fades
+  after about 10s. A problem's line stays on the right, in
+  `--accent-hot` (the nudge muted), until it's over. Clicking that text,
+  or the mark while it is hot, opens the details; the `?` overlay leads
+  with them always. A screen reader hears changes of state through a
+  live region, as before, and the mark's label carries the current line.
+  The states, in priority order: `A service worker was removed
   from this window · Reset window data (bar menu)` in `--accent-hot`, in
   either mode, when the page finds a service worker registered on its
   origin (pneu never registers one: `worker-src 'none'`); it unregisters
@@ -93,15 +163,16 @@ them here if they're wrong.
   `Can't reach <server> · retrying` in `--accent-hot` while its link to
   the server is down (`<server>` is the SSH target it was paired with;
   the page keeps what it shows, and the line comes back when the link
-  does); `Checking…` with an accent
-  braille spinner while a sync `R` asked for is queued or running, or `R`
+  does); `Checking…` while a sync `R` asked for is queued or running, or `R`
   hasn't been answered yet (the server says queued at once; the line gives
-  up waiting after 10s): scheduled, launch and focus syncs are quiet, or
-  a 30s period would keep the line spinning; `<account>: sync failing`
+  up waiting after 10s; the mark breathes and the right side stays
+  empty): scheduled, launch and focus syncs are quiet, or
+  a 30s period would keep the mark breathing; `<account>: sync failing`
   (`+N` for more) in `--accent-hot` once an account has failed as many
   times as the bar widget calls sick (one); `Updated 14m ago` in
   `--accent-hot` when idle and older than three sync periods; otherwise
-  `Updated just now` / `Updated 3m ago`, muted. The age is the oldest
+  `Updated just now` / `Updated 3m ago` (said on the right only in the
+  check's moment, and in the mark's label and the details). The age is the oldest
   account's last successful sync: the view is only as fresh as its
   stalest account. On a client, whatever the line says gets a muted `·
   Update available` after it while the version nudge stands (this
@@ -114,7 +185,7 @@ them here if they're wrong.
   Reconnect: the consent waits on the server's lieer), and with
   no ready account synced yet the line is empty. A push (after a
   keystroke) never shows as checking either. The age refreshes every 30s while
-  shown and on focus; a screen reader hears changes of state (a live
+  it can matter and on focus; a screen reader hears changes of state (a live
   region), not the age ticking. Never a progress bar.
   `data-accounts` carries each account's `lastSync`, `queued`, `running`,
   `failures` and `error` (and, for the details only, `pollEvery` and
@@ -127,8 +198,8 @@ them here if they're wrong.
   reconnect puts the line right at once. A queued or running flag with no
   news for 11 minutes (its end lost while the stream stayed down; a sync
   is bounded at 10) is ignored.
-  Clicking the line opens its details (Esc or a click closes it), and the
-  `?` overlay leads with the same: per account, the last sync as a time
+  The details (Esc or a click closes them; the `?` overlay leads with
+  the same) give, per account, the last sync as a time
   and an age, whether it's checking now or queued, failures and the last
   error, and its instant mail (docs/push.md D7): `Instant: delivering ·
   last message 2m ago`, `Instant: listening · no message since pneu
@@ -232,11 +303,13 @@ them here if they're wrong.
 
 ## Index views
 
-Inbox (default), Starred, Sent, Spam, Trash, All Mail. Same template, different
-query. Paginated (`Newer`/`Older`, `<`/`>`). The split's title row says where
-the page sits: `Inbox · 12` on a single page, `All Mail · 51–100 of 44,095`
-when paged. The total is a thread count cached at each database's revision;
-uncached, the page shows the range first and the total follows.
+Inbox (default), Starred, Sent, Archive (All Mail), Spam, Trash. Same
+template, different query. Paginated (`Newer`/`Older`, `<`/`>`). The key
+footer's counter says where the cursor sits (`3 of 12`, `53 of 44,095`
+when paged); `main.list` carries the page's place (`data-start`,
+`data-rows`, `data-total`, `data-paged`). The total is a thread count
+cached at each database's revision; uncached, the counter shows the place
+first and the total follows.
 
 - **Merged stream.** Both accounts in one list sorted by date. No per-row
   account marker; the account shows on the thread page only.
@@ -259,7 +332,8 @@ uncached, the page shows the range first and the total follows.
   once, then the messages are removed locally and pushed; Gmail purges.
   (Engine question: verify lieer pushes a local delete, otherwise Empty is
   `-spam`/`-trash` plus Gmail's 30-day purge.)
-- **Search** is the same view with the query shown in the box.
+- **Search** is the same view with the query shown on the rail's search
+  stop.
 
 ## Thread page
 
