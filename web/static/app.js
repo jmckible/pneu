@@ -1511,6 +1511,10 @@
     else ol.appendChild(h.el);
     clearSelection();
     L.items.splice(i, 0, h.el);
+    // A refresh may have rendered the list without this row; it's back, not
+    // new mail, so the next refresh mustn't open it in.
+    var key = rowId(h.el.dataset.account, h.el.dataset.thread);
+    if (L.shown && L.shown.keys.indexOf(key) < 0) L.shown.keys.push(key);
     if (mo) mo.undraw(L.root.querySelector('.empty-mark'));
     if (moving() && L.cursor) {
       select(L, i, undefined, 'keep');
