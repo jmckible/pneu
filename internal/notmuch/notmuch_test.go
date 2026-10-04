@@ -444,3 +444,20 @@ func TestOldestSkipsUndated(t *testing.T) {
 		t.Fatalf("Oldest = %v, %v; want %v", got, err, want)
 	}
 }
+
+// Newest sees excluded tags (the query names them) and says nothing for
+// no match.
+func TestNewest(t *testing.T) {
+	a := setup(t)
+	ctx := context.Background()
+	if got, err := a.Newest(ctx, "tag:spam"); err != nil || !got.IsZero() {
+		t.Fatalf("Newest(no spam) = %v, %v", got, err)
+	}
+	if err := a.Tag(ctx, []string{"+spam"}, []string{"a1@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := a.Newest(ctx, "tag:spam")
+	if want := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC); err != nil || !got.Equal(want) {
+		t.Fatalf("Newest(spam) = %v, %v; want %v", got, err, want)
+	}
+}

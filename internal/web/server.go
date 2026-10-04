@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -66,7 +67,9 @@ type Server struct {
 	userNames sync.Map
 	// totals caches each account's thread count for a list query at the
 	// database revision it was counted at (totalKey -> totalVal).
-	totals  sync.Map
+	totals sync.Map
+	// spam caches the newest spam date at a view generation (spamNewest).
+	spam    spamCache
 	outbox  composeState
 	handler http.Handler
 	static  http.Handler // /static/ (staticHandler)
@@ -169,11 +172,11 @@ func (s *Server) account(r *http.Request) (notmuch.Account, bool) {
 type Page struct {
 	Origin string
 	Title  string
-	Query  string // echoed into the search box
-	View   string // the index view, for the header nav; "" on thread and compose pages
+	Query  string // the search stop's text on a search page
+	View   string // the index view, for the header rail; "" on thread and compose pages
 	// Accounts is the #accounts strip's data-accounts attribute: every
 	// account's onboarding and sync state, which app.js renders (the strip
-	// and the status line) and SSE keeps current.
+	// and the sync status) and SSE keeps current.
 	Accounts template.HTMLAttr
 	// SyncEvery is the sync period in seconds (0: unknown), the status
 	// line's stale threshold.
@@ -181,40 +184,62 @@ type Page struct {
 	// Label is the view generation the page was rendered at, read before
 	// its query (viewLabel); app.js compares it with hello and `view`.
 	Label viewLabel
+	// SpamAt is the newest spam message's date, unix seconds (0: none or
+	// unknown), for the Spam station's new-spam light (spamNewest).
+	SpamAt int64
 }
 
-// NavLink is one header nav entry.
+// NavLink is one station on the header rail.
 type NavLink struct {
 	Key, View, Name, Href string
+	Side                  bool // on the siding (Spam, Trash), not the main line
 	Active                bool
+	Spam                  int64 // Spam's: Page.SpamAt, for its new-spam light
 }
 
-// navViews is the header nav in key order; app.js VIEWS binds 1..6 to the
-// same hrefs.
+// navViews is the header rail in key order: the main line, then the
+// siding. app.js VIEWS binds 1..6 to the same hrefs; rail.js STATIONS
+// names their order.
 var navViews = []NavLink{
 	{Key: "1", View: "inbox", Name: "Inbox", Href: "/"},
 	{Key: "2", View: "starred", Name: "Starred", Href: "/starred"},
 	{Key: "3", View: "sent", Name: "Sent", Href: "/sent"},
-	{Key: "4", View: "spam", Name: "Spam", Href: "/spam"},
-	{Key: "5", View: "trash", Name: "Trash", Href: "/trash"},
-	{Key: "6", View: "all", Name: "All", Href: "/all"},
+	{Key: "4", View: "all", Name: "Archive", Href: "/all"},
+	{Key: "5", View: "spam", Name: "Spam", Href: "/spam", Side: true},
+	{Key: "6", View: "trash", Name: "Trash", Href: "/trash", Side: true},
 }
 
-// Nav is the header nav with the current view marked.
+// Nav is the header rail with the current view marked.
 func (p Page) Nav() []NavLink {
 	out := make([]NavLink, len(navViews))
 	for i, l := range navViews {
 		l.Active = l.View == p.View
+		if l.View == "spam" {
+			l.Spam = p.SpamAt
+		}
 		out[i] = l
 	}
 	return out
 }
 
+// MainLine and Siding are Nav's two tracks.
+func (p Page) MainLine() []NavLink {
+	return slices.DeleteFunc(p.Nav(), func(l NavLink) bool { return l.Side })
+}
+func (p Page) Siding() []NavLink {
+	return slices.DeleteFunc(p.Nav(), func(l NavLink) bool { return !l.Side })
+}
+
+// Searching: the page is a search with a query, so the search stop is a
+// station showing it.
+func (p Page) Searching() bool { return p.View == "search" && strings.TrimSpace(p.Query) != "" }
+
 // page is base.html's data for r; at is the label read before the page's
 // query. Origin is the request's (Server.origin): a peer's pages run in the
 // client's origin.
 func (s *Server) page(r *http.Request, title, query string, at viewLabel) Page {
-	return Page{Origin: s.origin(r), Title: title, Query: query, Accounts: s.accountsJSON(), SyncEvery: int(s.SyncInterval / time.Second), Label: at}
+	return Page{Origin: s.origin(r), Title: title, Query: query, Accounts: s.accountsJSON(), SyncEvery: int(s.SyncInterval / time.Second), Label: at,
+		SpamAt: s.spamNewest(r.Context(), at)}
 }
 
 func (s *Server) render(w http.ResponseWriter, status int, page string, data any) {

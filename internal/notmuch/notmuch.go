@@ -148,6 +148,21 @@ func (a Account) Oldest(ctx context.Context) (time.Time, error) {
 	return time.Unix(out[0].Timestamp, 0), nil
 }
 
+// Newest is the date of the newest message query matches, or the zero
+// time when nothing does. Excluded tags count (--exclude=false): the query
+// names what it wants. With --sort=newest-first a summary's timestamp is
+// its thread's newest date.
+func (a Account) Newest(ctx context.Context, query string) (time.Time, error) {
+	var out []ThreadSummary
+	if err := a.runJSON(ctx, &out, "search", "--format=json", "--output=summary", "--sort=newest-first", "--exclude=false", "--limit=1", "--", query); err != nil {
+		return time.Time{}, err
+	}
+	if len(out) == 0 || out[0].Timestamp <= 0 {
+		return time.Time{}, nil
+	}
+	return time.Unix(out[0].Timestamp, 0), nil
+}
+
 // Count counts messages, or threads when threads is true.
 func (a Account) Count(ctx context.Context, query string, threads bool) (int, error) {
 	output := "--output=messages"

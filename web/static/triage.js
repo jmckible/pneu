@@ -206,16 +206,6 @@
 
   function label(action) { return LABELS[action] || action; }
 
-  // position is the list title's count, as read.go positionText writes it:
-  // the row count on a single page, else "51–100 of 1,234" (no " of …"
-  // while total is unknown, i.e. negative).
-  function position(start, rows, total, paged) {
-    var n = function (v) { return Number(v).toLocaleString('en-US'); };
-    if (!paged) return n(rows);
-    if (!rows) return '0';
-    return n(start + 1) + '–' + n(start + rows) + (total >= 0 ? ' of ' + n(total) : '');
-  }
-
   var VERBS = {
     archive: 'Archive', trash: 'Trash', spam: 'Mark as spam', star: 'Star', unstar: 'Unstar', unread: 'Mark unread', read: 'Mark read',
   };
@@ -298,7 +288,7 @@
   var T = {
     UNDO_CAP: UNDO_CAP, MAX_IDS: MAX_IDS, body: body, removeArgs: removeArgs, splitIds: splitIds, decodeId: decodeId,
     nextIndex: nextIndex, push: push, pop: pop, parse: parse, removes: removes, skip: skip,
-    retryAfter: retryAfter, label: label, verb: verb, position: position,
+    retryAfter: retryAfter, label: label, verb: verb,
     SPLIT_CH: SPLIT_CH, pathKind: pathKind, listURL: listURL, historyOp: historyOp, restoreIndex: restoreIndex,
     paneView: paneView, refreshStale: refreshStale, rgbHex: rgbHex, cycle: cycle,
     viewLabel: viewLabel, behind: behind, advance: advance, names: names, appliedKey: appliedKey,

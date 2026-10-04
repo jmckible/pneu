@@ -1,5 +1,4 @@
-{{define "content"}}<main class="list" data-view="{{.View}}">
-<div class="pane-title">{{.Title}} · <span class="n" data-start="{{.Start}}" data-rows="{{len .Rows}}" data-total="{{.Total}}"{{if or .Prev .Next}} data-paged{{end}}>{{.Position}}</span></div>
+{{define "content"}}<main class="list" data-view="{{.View}}" data-start="{{.Start}}" data-rows="{{len .Rows}}" data-total="{{.Total}}"{{if or .Prev .Next}} data-paged{{end}}>
 {{- if .Err}}
 <p class="error">{{.Err}}</p>
 {{- end}}

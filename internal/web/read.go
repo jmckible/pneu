@@ -55,29 +55,11 @@ type listPage struct {
 	Next  string
 	Err   string
 	Empty bool // show the mark as a watermark once the list is empty
-	// The title row's position (positionText): Start is the page's offset,
-	// Total the query's thread count or -1 while unknown (app.js asks for
-	// it with ?total=1).
-	Start    int
-	Total    int
-	Position string
-}
-
-// positionText is the list title's count: the row count on a single page,
-// else "51–100 of 1,234" (without " of …" while the total is unknown).
-// triage.js position is the same rule; they must agree.
-func positionText(start, rows, total int, paged bool) string {
-	if !paged {
-		return commas(rows)
-	}
-	if rows == 0 {
-		return "0"
-	}
-	out := commas(start+1) + "–" + commas(start+rows)
-	if total >= 0 {
-		out += " of " + commas(total)
-	}
-	return out
+	// Where the page sits, for the key bar's position counter (app.js
+	// ruler): Start is the page's offset, Total the query's thread count
+	// or -1 while unknown (app.js asks for it with ?total=1).
+	Start int
+	Total int
 }
 
 // list serves a merged view. An empty fixed query means "use ?q=" (search).
@@ -156,7 +138,6 @@ func (s *Server) list(view, title, fixed string) http.HandlerFunc {
 				data.Total = len(data.Rows)
 			}
 		}
-		data.Position = positionText(data.Start, len(data.Rows), data.Total, data.Prev != "" || data.Next != "")
 		// Rendered with rows too: triage can empty the list in place, and
 		// app.css shows the mark only once no row is left.
 		data.Empty = data.Err == "" && strings.TrimSpace(query) != ""
