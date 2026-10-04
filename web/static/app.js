@@ -297,6 +297,11 @@
   // query.
   function markNav(url) {
     if (!navEl || !tube) return;
+    // The capsule leaving its station abandons the easter egg's trip; a
+    // refresh of the same list doesn't.
+    var on = navEl.querySelector('.cap');
+    on = on && on.closest('[data-station]');
+    if (!on || on.dataset.station !== tube.stationOf(url)) stopEgg();
     tube.place(url, presearch());
     spamLight();
   }
@@ -427,7 +432,7 @@
   function relayout() {
     if (!tube) return;
     var now = tube.layout();
-    if (now.fold !== lay.fold) tube.fold(now.fold);
+    if (now.fold !== lay.fold) { stopEgg(); tube.fold(now.fold); }
     var crossed = now.split !== lay.split;
     lay = now;
     if (crossed && onSplitChange) onSplitChange();
@@ -436,32 +441,171 @@
   window.addEventListener('resize', relayout);
   requestAnimationFrame(function () { requestAnimationFrame(function () { document.documentElement.classList.add('tube-anim'); }); });
 
-  // The easter egg: a click on the mark while sync is healthy winds the
-  // capsule down, shoots it up out through the top of the column, pulses
-  // the mark as it goes, and drops it back onto its station with a bounce
-  // (the approved mock's timings). A stand-in pill flies it, in a layer
-  // the size of the column that clips it (app.css .egg), while the capsule
-  // waits unseen: the stations' own scroller would clip the trip below the
-  // mark. Nothing under reduced motion; a station-to-station navigation
-  // meanwhile doesn't travel (tube.js).
-  var eggOn = false;
+  // ---- the easter egg -----------------------------------------------------
+  // A click on the mark while sync is healthy (SPEC "Layout"). The mark is a
+  // valve: it turns a quarter open, the capsule falls down the tube to the
+  // floor (the foot's rule, or folded the stations' end), rattling each
+  // label it passes, lands in a puff of dust, bounces twice, rests, is
+  // sucked home, and the valve closes with a blink of the mark's bowl. One
+  // click in eight (tube.js eggKind) plays the older egg, the cork: up out
+  // through the mark, which wobbles, and back with a bounce. The timings are
+  // tube.js eggPlan's. A stand-in pill flies either, in a layer the size of
+  // the column that clips it (app.css .egg), while the capsule waits unseen:
+  // the stations' own scroller would clip the trip. Nothing under reduced
+  // motion; a click meanwhile is ignored; keys and navigation don't wait for
+  // it: a station-to-station navigation doesn't travel (tube.js), and one
+  // that stays on the page (the split's list, a fold) abandons it.
+  var egg = null; // the running egg's stop
+  var EGG_KEY = 'pneu:egg'; // sessionStorage, 'drop' or 'cork': forces the egg, for testing
 
-  function shoot() {
+  function playEgg() {
     var cap = navEl && navEl.querySelector('.cap');
     var mark = document.querySelector('#mark .mark');
-    if (eggOn || still() || !cap || !cap.animate) return;
-    eggOn = true;
+    if (egg || still() || !tube || !cap || !cap.animate || !mark) return;
+    var kind = tube.eggKind(Math.random(), storage(function (s) { return s.getItem(EGG_KEY); }));
+    egg = (kind === 'cork' ? cork : drop)(cap, mark);
+  }
+
+  function stopEgg() { if (egg) egg(); }
+  window.addEventListener('pagehide', stopEgg);
+
+  // eggRun holds one egg's animations and timers; stop ends them all and
+  // cleans up, once.
+  function eggRun(kind, cleanup) {
+    var r = { anims: [], timers: [], over: false };
+    navEl.dataset.egg = kind;
+    r.add = function (a) { r.anims.push(a); return a; };
+    r.at = function (ms, fn) { r.timers.push(setTimeout(fn, ms)); };
+    r.stop = function () {
+      if (r.over) return;
+      r.over = true;
+      r.timers.forEach(clearTimeout);
+      r.anims.forEach(function (a) { a.cancel(); });
+      cleanup();
+      navEl.classList.remove('away', 'egging');
+      delete navEl.dataset.egg;
+      if (egg === r.stop) egg = null;
+    };
+    return r;
+  }
+
+  // eggLayer puts the stand-in pill over the capsule, in its clipping layer.
+  function eggLayer(cap) {
     var t = navEl.getBoundingClientRect(), c = cap.getBoundingClientRect();
-    var top = -Math.round(c.top - t.top) - 30;
-    var dur = 1150;
-    var layer = el('div', 'egg'), pill = el('span');
+    var layer = el('div', 'egg'), pill = el('span', 'pill');
     layer.setAttribute('aria-hidden', 'true');
-    pill.style.left = (c.left - t.left - navEl.clientLeft) + 'px';
-    pill.style.top = (c.top - t.top - navEl.clientTop) + 'px';
+    var x = c.left - t.left - navEl.clientLeft, y = c.top - t.top - navEl.clientTop;
+    pill.style.left = x + 'px';
+    pill.style.top = y + 'px';
     layer.appendChild(pill);
     navEl.appendChild(layer);
+    return { layer: layer, pill: pill, x: x, y: y, t: t, c: c };
+  }
+
+  // keyed turns [ms, props, easing] stops into keyframes over total ms.
+  function keyed(stops, total) {
+    return stops.map(function (s) {
+      var k = { offset: Math.min(1, Math.max(0, s[0] / total)) };
+      Object.keys(s[1]).forEach(function (p) { k[p] = s[1][p]; });
+      if (s[2]) k.easing = s[2];
+      return k;
+    });
+  }
+
+  // The valve's spring: a small overshoot past the quarter turn.
+  var VALVE = 'linear(0, 0.45 14%, 0.88 30%, 1.07 46%, 1.08 54%, 1.03 70%, 0.995 86%, 1)';
+  var UP = 'cubic-bezier(.33,.66,.66,1)', DOWN = 'cubic-bezier(.33,0,.66,.33)';
+
+  function drop(cap, mark) {
+    var L = eggLayer(cap), c = L.c, t = L.t;
+    // The floor: the foot's rule, or, folded (no foot), the stations' end.
+    var foot = navEl.querySelector('.foot'), line = navEl.querySelector('.line');
+    var floor = foot && foot.getClientRects().length ? foot.getBoundingClientRect().top
+      : line ? line.getBoundingClientRect().bottom : t.bottom;
+    floor = Math.min(floor, t.bottom - navEl.clientTop);
+    var p = tube.eggPlan(floor - c.bottom), D = p.drop;
+    var r = eggRun('drop', function () { L.layer.remove(); });
+    navEl.classList.add('egging');
+    var FALL = 'cubic-bezier(' + tube.FALL.join(',') + ')';
+    var at = function (y) { return { translate: '0px ' + y + 'px' }; };
+    var sc = function (sx, sy, top) { return { scale: sx + ' ' + sy, transformOrigin: top ? '50% 0%' : '50% 100%' }; };
+
+    // The capsule: where (translate) and its squash and stretch (scale,
+    // from its foot on the floor, from its head going home).
+    var move = [[0, at(0), 'cubic-bezier(.3,.7,.4,1)'], [90, at(-2), 'ease-in'], [p.valve, at(0), FALL], [p.impact, at(D)]];
+    var form = [[0, sc(1, 1), 'cubic-bezier(.3,.7,.4,1)'], [90, sc(1.06, 0.82), 'ease-in'], [p.valve, sc(1, 1), FALL],
+      [p.impact, sc(1, p.stretch)], [p.impact + 20, sc(1.6, 0.5)], [p.impact + p.squash, sc(1.6, 0.5), 'ease-out']];
+    p.hops.forEach(function (h, i) {
+      move.push([h.at, at(D), UP], [h.at + h.dur / 2, at(D - h.h), DOWN], [h.at + h.dur, at(D)]);
+      var land = i ? sc(1.15, 0.85) : sc(1.3, 0.7);
+      form.push([h.at + Math.min(60, h.dur * 0.3), sc(0.9, 1.15)], [h.at + h.dur * 0.5, sc(1, 1)],
+        [h.at + h.dur, sc(1, 1)], [h.at + h.dur + 18, land, 'ease-out'], [h.at + h.dur + p.land, sc(1, 1)]);
+    });
+    if (!p.hops.length) form.push([p.impact + p.squash + 80, sc(1, 1)]);
+    var whole = p.dock + p.settle;
+    move.push([p.whoosh, at(D), 'cubic-bezier(.65,0,.35,1)'], [p.dock, at(0)], [whole, at(0)]);
+    form.push([p.whoosh, sc(1, 1)], [p.whoosh, sc(1, 1, true), 'cubic-bezier(.45,0,.55,1)'],
+      [p.whoosh + p.home * 0.5, sc(0.85, p.homeStretch, true)], [p.dock, sc(1.2, 0.75, true), 'ease-out'], [whole, sc(1, 1, true)]);
+    r.add(L.pill.animate(keyed(move, whole), { duration: whole }));
+    r.add(L.pill.animate(keyed(form, whole), { duration: whole }));
+
+    // The valve opens, and closes as the capsule docks; then the bowl blinks.
+    var close = p.dock - 40;
+    r.add(mark.animate(keyed([[0, { rotate: '0deg' }, VALVE], [p.valve, { rotate: '90deg' }], [close, { rotate: '90deg' }, VALVE],
+      [close + p.valve, { rotate: '0deg' }]], close + p.valve), { duration: close + p.valve }));
+    var bowl = mark.querySelectorAll('path')[1];
+    if (bowl) {
+      r.add(bowl.animate([{ scale: '1 1', easing: 'ease-in' }, { scale: '1 0.1', offset: 0.4, easing: 'ease-out' }, { scale: '1 1' }],
+        { duration: 180, delay: p.blink }));
+    }
+
+    // Each label the capsule passes rattles as it crosses its dot (14px
+    // down the station, app.css).
+    var y0 = c.top + c.height / 2;
+    var folded = document.documentElement.classList.contains('tube-fold');
+    Array.prototype.forEach.call(navEl.querySelectorAll('[data-station]'), function (st) {
+      var share = D > 0 ? (st.getBoundingClientRect().top + 14 - y0) / D : 0;
+      if (!(share > 0.02 && share <= 1)) return;
+      var when = p.valve + p.fall * tube.fallTime(share);
+      var labels = st.matches('.q') ? st.querySelectorAll(':scope > a') : st.querySelectorAll(folded ? ':scope > kbd' : ':scope > kbd, :scope > .nm');
+      Array.prototype.forEach.call(labels, function (lab) {
+        r.add(lab.animate([{ left: '0px', easing: 'ease-out' }, { left: '1.5px', offset: 0.3, easing: 'ease-in-out' },
+          { left: '-0.5px', offset: 0.65, easing: 'ease-in-out' }, { left: '0px' }], { duration: 160, delay: when }));
+      });
+    });
+
+    // Impact: the dust puffs out sideways from the capsule's foot.
+    r.at(p.impact, function () {
+      var x = L.x + c.width / 2, y = floor - t.top - navEl.clientTop - 2;
+      [[-1, 10, 12], [-1, 32, 8], [1, 14, 11], [1, 30, 9]].forEach(function (d) {
+        var a = d[1] * Math.PI / 180, s = el('span', 'dust');
+        s.style.left = (x + d[0] * 3) + 'px';
+        s.style.top = y + 'px';
+        L.layer.appendChild(s);
+        r.add(s.animate([
+          { translate: '0px 0px', scale: '1', easing: 'cubic-bezier(.2,.8,.3,1)' },
+          { translate: (d[0] * Math.cos(a) * d[2]).toFixed(1) + 'px ' + (-Math.sin(a) * d[2]).toFixed(1) + 'px', scale: '0.5' },
+        ], { duration: 350 }));
+        r.add(s.animate([{ opacity: 1 }, { opacity: 0.85, offset: 0.45 }, { opacity: 0 }], { duration: 350, fill: 'forwards' }));
+      });
+    });
+    r.at(p.valve, function () { navEl.classList.add('away'); });
+    r.at(p.dock, function () { navEl.classList.remove('away'); });
+    r.at(whole, function () { navEl.classList.remove('egging'); L.layer.remove(); });
+    r.at(p.end, r.stop);
+    return r.stop;
+  }
+
+  // The cork: the older egg (the approved mock's timings). The capsule
+  // winds down, shoots up out through the mark, which wobbles as it goes
+  // and pulses, and drops back onto its station with a bounce.
+  function cork(cap, mark) {
+    var L = eggLayer(cap);
+    var top = -Math.round(L.c.top - L.t.top) - 30;
+    var dur = 1150;
+    var r = eggRun('cork', function () { L.layer.remove(); });
     navEl.classList.add('away', 'egging');
-    var a = pill.animate([
+    r.add(L.pill.animate([
       { transform: 'translateY(0) scaleY(1)', easing: 'cubic-bezier(.2,.8,.3,1)' },
       { transform: 'translateY(6px) scaleY(0.6)', offset: 0.12, easing: 'cubic-bezier(.6,0,1,.6)' },
       { transform: 'translateY(' + top + 'px) scaleY(4.5)', offset: 0.38 },
@@ -469,25 +613,21 @@
       { transform: 'translateY(5px) scaleY(1.6)', offset: 0.84, easing: 'ease-out' },
       { transform: 'translateY(0) scaleY(0.8)', offset: 0.92 },
       { transform: 'translateY(0) scaleY(1)' },
-    ], { duration: dur });
-    var pulse = setTimeout(function () {
-      if (!mark || !mark.animate) return;
+    ], { duration: dur }));
+    r.add(mark.animate([
+      { rotate: '0deg' }, { rotate: '8deg', offset: 0.22 }, { rotate: '-8deg', offset: 0.55 }, { rotate: '3deg', offset: 0.82 }, { rotate: '0deg' },
+    ], { duration: 420, delay: dur * 0.14, easing: 'ease-in-out' }));
+    r.at(dur * 0.3, function () {
       var accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || 'currentColor';
-      mark.animate([
+      r.add(mark.animate([
         { transform: 'scale(1)' },
         { transform: 'scale(1.2)', filter: 'drop-shadow(0 0 5px ' + accent + ')', offset: 0.4 },
         { transform: 'scale(1)' },
-      ], { duration: 380, easing: 'cubic-bezier(.3,.7,.3,1)' });
-    }, dur * 0.3);
-    var relight = setTimeout(function () { navEl.classList.remove('away'); }, dur * 0.88);
-    var done = function () {
-      eggOn = false;
-      clearTimeout(pulse);
-      clearTimeout(relight);
-      navEl.classList.remove('away', 'egging');
-      layer.remove();
-    };
-    a.finished.then(done, done);
+      ], { duration: 380, easing: 'cubic-bezier(.3,.7,.3,1)' }));
+    });
+    r.at(dur * 0.88, function () { navEl.classList.remove('away'); });
+    r.at(dur, r.stop);
+    return r.stop;
   }
 
   // ---- key bar: hints -----------------------------------------------------
@@ -2816,7 +2956,7 @@
 
   if (lineEl) lineEl.addEventListener('click', showSyncInfo);
   // The mark: the details when sync is in trouble, else the easter egg.
-  if (markEl) markEl.addEventListener('click', function () { if (markHot) showSyncInfo(); else shoot(); });
+  if (markEl) markEl.addEventListener('click', function () { if (markHot) showSyncInfo(); else playEgg(); });
   renderLine();
 
   function openEvents() {

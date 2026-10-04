@@ -81,12 +81,25 @@ them here if they're wrong.
     at least `100ch`), and folded below that. It goes by the width alone,
     never by whether a thread is open, and is decided before the first
     paint. The thresholds live together in triage.js (`layout`).
-  - *The easter egg.* Clicking the mark while sync is healthy winds the
-    capsule down, shoots it up out through the top of the column, pulses
-    the mark, and drops the capsule back onto its station with a bounce
-    (1150ms; a stand-in flies it, clipped to the column, while the
-    capsule waits unseen). Not under reduced motion; in a
-    problem state the click opens the sync details.
+  - *The easter egg.* Clicking the mark while sync is healthy opens it
+    like a valve: the mark turns a quarter on a small spring (160ms) as
+    the capsule winds up (a 2px lift, a squash); the capsule falls down
+    the tube, accelerating and stretching, to the floor (the foot's rule;
+    folded, with no foot, the end of the stations), each label it passes
+    nudging 1.5px aside as it crosses that station's dot; it lands
+    squashed in a puff of four accent dots, bounces twice (28px, then
+    9px, scaled down for a drop under 40px and gone when too small to
+    see), rests, and is sucked back up to its station, stretched, docking
+    with a squash; the valve turns shut and the mark blinks (its bowl
+    squashes and reopens). About 1.9s for a full drop, less for a short
+    one (tube.js `eggPlan`). One click in eight plays the older egg
+    instead: up out through the top of the column like a cork, the mark
+    wobbling as it goes and pulsing, then back onto the station with a
+    bounce (1150ms). A stand-in flies either, clipped to the column,
+    while the capsule waits unseen. Not under reduced motion; a click
+    during it is ignored; keys and navigation never wait for it, and the
+    capsule leaving its station abandons it. In a problem state the click
+    opens the sync details.
   Two named panes, the list and the thread, and exactly one is active: it
   gets the keys, its cursor row or message carries the accent edge, and
   the footer lists its keys. At `140ch` of panes and above (beside the

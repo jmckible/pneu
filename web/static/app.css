@@ -152,10 +152,14 @@ body:not(.split) #tube {
   scrollbar-width: none;
 }
 #tube .line::-webkit-scrollbar { display: none; }
-/* The easter egg's trip (app.js shoot): a stand-in pill in a layer the
-   size of the column, which clips it, while the capsule waits unseen. */
+/* The easter egg (app.js drop, cork): a stand-in pill in a layer the
+   size of the column, which clips it, while the capsule waits unseen; the
+   dust its landing puffs; the labels it passes rattle (their `left`, so
+   they're positioned while it runs). The mark turns as a valve and its
+   bowl (the second path) blinks about its own centre: only the column's
+   mark, so the empty list's and the bar's are untouched. */
 #tube .egg { position: absolute; inset: 0; z-index: 4; overflow: hidden; pointer-events: none; }
-#tube .egg > span {
+#tube .egg > .pill {
   position: absolute;
   width: 4px;
   height: 16px;
@@ -163,6 +167,17 @@ body:not(.split) #tube {
   background: var(--accent);
   box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 55%, transparent);
 }
+#tube .egg > .dust {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+#tube.egging a[data-station] > kbd, #tube.egging .q > a { position: relative; }
+:root:not(.tube-fold) #tube.egging a[data-station] > .nm { position: relative; }
+#mark .mark path + path { transform-box: fill-box; transform-origin: center; }
 #tube.egging .cap { visibility: hidden; }
 #tube .main, #tube .bins, #tube .drop { position: relative; display: block; }
 #tube .drop { height: 22px; }

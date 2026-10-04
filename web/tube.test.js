@@ -128,3 +128,49 @@ test('parseCounts: anything malformed is no count', () => {
   assert.deepEqual(X.parseCounts('[1,2]'), {});
   assert.deepEqual(X.parseCounts(null), {});
 });
+
+test('eggKind: forced wins; else the cork about one click in eight', () => {
+  assert.equal(X.eggKind(0.01, 'drop'), 'drop');
+  assert.equal(X.eggKind(0.99, 'cork'), 'cork');
+  assert.equal(X.eggKind(0.01, 'nonsense'), 'cork');
+  assert.equal(X.eggKind(0.124, null), 'cork');
+  assert.equal(X.eggKind(0.126, null), 'drop');
+  let corks = 0;
+  for (let i = 0; i < 8000; i++) if (X.eggKind(i / 8000, null) === 'cork') corks++;
+  assert.equal(corks, 1000);
+});
+
+test('fallTime: the fall eased in, inverted', () => {
+  assert.equal(X.fallTime(0), 0);
+  assert.equal(X.fallTime(-1), 0);
+  assert.equal(X.fallTime(1), 1);
+  // Accelerating: half the drop takes well over half the time, and the
+  // time only grows with the distance.
+  assert.ok(X.fallTime(0.5) > 0.6);
+  let last = 0;
+  for (let p = 0.05; p < 1; p += 0.05) { const t = X.fallTime(p); assert.ok(t > last); last = t; }
+  // Against the curve itself, sampled forward.
+  const [x1, y1, x2, y2] = X.FALL;
+  const b = (a1, a2, s) => 3 * (1 - s) ** 2 * s * a1 + 3 * (1 - s) * s * s * a2 + s ** 3;
+  for (const s of [0.2, 0.5, 0.8]) assert.ok(Math.abs(X.fallTime(b(y1, y2, s)) - b(x1, x2, s)) < 1e-6);
+});
+
+test('eggPlan: about 1.8s for a full drop, the bounces scaled under 40px', () => {
+  const p = X.eggPlan(500);
+  assert.equal(p.valve, 160);
+  assert.ok(p.fall >= 450 && p.fall <= 480);
+  assert.deepEqual(p.hops.map(h => [h.h, h.dur]), [[28, 220], [9, 140]]);
+  assert.equal(p.hops[0].at, p.impact + p.squash);
+  assert.equal(p.home, 380);
+  assert.equal(p.homeStretch, 3);
+  assert.equal(p.blink, p.dock + 80);
+  assert.ok(p.end > 1700 && p.end < 2000, String(p.end));
+  // A short drop: smaller hops, the second gone when too small to see.
+  const s = X.eggPlan(20);
+  assert.deepEqual(s.hops.map(h => h.h), [14, 4.5]);
+  assert.deepEqual(X.eggPlan(12).hops.map(h => h.h), [8.4]);
+  assert.deepEqual(X.eggPlan(3).hops, []);
+  assert.equal(X.eggPlan(3).whoosh, X.eggPlan(3).impact + 60 + 150);
+  assert.ok(X.eggPlan(12).end < p.end);
+  assert.equal(X.eggPlan(-4).drop, 0);
+});
