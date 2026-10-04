@@ -2511,16 +2511,6 @@
     if (!was) acctOrder.push(a.name);
     accounts[a.name] = a;
     renderAccounts();
-
-  // The strip's height (--acc-h): narrow, the strip stays at the top and
-  // the tube and the pager row stick below it (app.css).
-  (function () {
-    var strip = document.getElementById('accounts');
-    if (!strip || !window.ResizeObserver) return;
-    new ResizeObserver(function () {
-      document.documentElement.style.setProperty('--acc-h', strip.getBoundingClientRect().height + 'px');
-    }).observe(strip);
-  })();
     lineNews(a);
     // New mail lands newest first while a pull downloads: show it now and then.
     if (a.state === 'pulling' && a.progress && a.progress.phase === 'content' && Date.now() - pullRefreshAt > PULL_REFRESH) {
@@ -2530,6 +2520,19 @@
   }
 
   renderAccounts();
+
+  // The strip's height (--acc-h): narrow, the strip stays at the top and
+  // the tube and the pager row stick below it (app.css). One observer for
+  // the page, set at once and kept as the strip changes.
+  (function () {
+    var strip = document.getElementById('accounts');
+    if (!strip) return;
+    function measure() {
+      document.documentElement.style.setProperty('--acc-h', strip.getBoundingClientRect().height + 'px');
+    }
+    measure();
+    if (window.ResizeObserver) new ResizeObserver(measure).observe(strip);
+  })();
 
   // ---- sync status ----------------------------------------------------------
   // How current the view is (SPEC "Sync state"), from each account's sync
