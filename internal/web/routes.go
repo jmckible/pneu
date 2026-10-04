@@ -137,9 +137,9 @@ var Routes = []Route{
 	listRoute("/sent", "sent", "Sent", "tag:sent"),
 	listRoute("/spam", "spam", "Spam", "tag:spam"),
 	listRoute("/trash", "trash", "Trash", "tag:trash"),
-	// Archive is Gmail's All Mail: everything but spam and trash. Fixed queries run
+	// Gmail's All Mail: everything but spam and trash. Fixed queries run
 	// verbatim (list never combines them with ?q=), so no outer parens.
-	listRoute("/all", "all", "Archive", "not tag:spam and not tag:trash"),
+	listRoute("/all", "all", "All Mail", "not tag:spam and not tag:trash"),
 	listRoute("/search", "search", "Search", ""),
 	{Method: "GET", Pattern: "/t/{account}/{thread}", Types: pageTypes, Cache: CacheNoStore, Handler: handler((*Server).thread)},
 	{Method: "GET", Pattern: "/gmail/{account}/{thread}", Types: redirectTypes, Location: LocGmail, Cache: CacheNoStore, Handler: handler((*Server).gmail)},
