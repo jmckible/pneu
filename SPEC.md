@@ -25,7 +25,10 @@ them here if they're wrong.
     track ends in a small vertical tick. A small accent capsule (16×4px,
     rounded, a soft accent glow) sits under the active view. The digits
     are muted; only the active view's takes the accent, and hovering the
-    rail lights them all. No counts on the rail.
+    rail lights them all. No counts on the rail. A window too narrow for
+    it (or a long status on the right, which gives way first and ends in
+    an ellipsis) scrolls the rail sideways, scrollbar hidden; the active
+    station, one taking focus and the search field are kept in view.
   - *The capsule travels.* Switching views is a page load, so the capsule
     moves by a cross-document view transition: it is rendered only inside
     the active station and named (`view-transition-name: rail-cap`); the
@@ -36,8 +39,9 @@ them here if they're wrong.
     quarters of the trip. Only a station-to-station navigation animates
     (rail.js skips the transition on the old page, before anything is
     captured, for anything else: a thread, compose, paging, the same view
-    again), and nothing animates under reduced motion. Keys don't wait for
-    it: the next key acts on the new page at once.
+    again), and nothing animates under reduced motion. Keys and clicks
+    don't wait for it: only the capsule is captured, so the new page is
+    live under it from its first frame.
   - *New spam.* The Spam station's dot glows (5px, accent) when spam has
     arrived since you last visited Spam, and goes dark when you do. The
     server renders the newest spam message's date on the Spam station

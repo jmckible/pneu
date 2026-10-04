@@ -102,9 +102,22 @@ body > header {
    (with the search stop at its end) and a dimmer siding, each track ending
    in a tick. A dot marks each station; the capsule (.cap, only inside the
    active one) sits on the active view. CSS places all of it: the tracks are
-   each group's ::before, the dots each station's ::after. overflow-x clips
-   the easter egg's trip to the rail. */
-body > header .rail { flex: 1 1 auto; min-width: 0; overflow-x: clip; }
+   each group's ::before, the dots each station's ::after. Too narrow a
+   window (or a long status on the right) and the rail scrolls sideways,
+   its scrollbar hidden: app.js keeps the active or focused station in
+   view (revealStation). The scroller also clips the easter egg's trip;
+   its padding-block, cancelled by the margin, leaves the superscripts
+   and the capsule's glow room inside it. */
+body > header .rail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  padding-block: 6px;
+  margin-block: -6px;
+}
+body > header .rail::-webkit-scrollbar { display: none; }
 #rail { display: flex; align-items: stretch; width: max-content; white-space: nowrap; }
 #rail .line, #rail .main, #rail .siding { position: relative; display: flex; align-items: stretch; }
 #rail .siding { margin-left: 5ch; }
@@ -258,7 +271,10 @@ body > header .rail { flex: 1 1 auto; min-width: 0; overflow-x: clip; }
    draws and "Updated just now", which fades; a problem stays, in the hot
    color, and a click opens the details (dialog#syncinfo). */
 body > header #sync {
-  flex: none;
+  /* Gives way to the rail before the rail scrolls much; its text ends in
+     an ellipsis, all of it in the details. */
+  flex: 0 2 auto;
+  min-width: 12ch;
   display: inline-flex;
   align-items: center;
   max-width: 48ch;

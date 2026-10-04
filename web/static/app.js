@@ -275,6 +275,23 @@
     if (station === 'q') navEl.querySelector('.q').appendChild(cap);
     else if (!station) cap.remove();
     spamLight();
+    revealActive();
+  }
+
+  // revealStation scrolls the rail (app.css .rail, scrollable when the
+  // window is narrow) just enough to show el, a station or the search
+  // field. Only the rail moves, never the page.
+  function revealStation(el) {
+    var sc = navEl && navEl.parentNode;
+    if (!el || !sc || sc.scrollWidth <= sc.clientWidth) return;
+    var r = el.getBoundingClientRect(), b = sc.getBoundingClientRect(), pad = 12;
+    if (r.left < b.left + pad) sc.scrollLeft -= b.left + pad - r.left;
+    else if (r.right > b.right - pad) sc.scrollLeft += r.right - (b.right - pad);
+  }
+
+  function revealActive() {
+    var cap = navEl && navEl.querySelector('.cap');
+    revealStation(cap && cap.closest('[data-station]'));
   }
 
   // searchStop makes the search stop a station showing q, or the ghost
@@ -346,6 +363,7 @@
     });
     input.focus();
     input.select();
+    revealStation(f);
   }
 
   function closeSearchField() {
@@ -364,6 +382,14 @@
     if (!rail || rail.stationOf(L.url) !== 'q') return false;
     location.assign(presearch());
     return true;
+  }
+
+  // Tab onto a station the rail has scrolled away: show it. On load, and
+  // as the window narrows, the active one.
+  if (navEl) {
+    navEl.addEventListener('focusin', function (e) { revealStation(e.target.closest('[data-station]') || e.target); });
+    revealActive();
+    window.addEventListener('resize', revealActive);
   }
 
   if (navEl) navEl.addEventListener('click', function (e) {
