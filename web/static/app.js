@@ -10,7 +10,7 @@
   var body = document.body;
   var origin = body.dataset.origin || location.origin;
   var panes = document.getElementById('panes');
-  var rail = Pneu.rail || null; // rail.js, in <head>
+  var tube = Pneu.tube || null; // tube.js, in <head>
   var lastKey = 0;
   var tri = Pneu.triage || null; // base.html loads triage.js; see `ready` below
   // The list's motion (motion.js); without it every change is instant.
@@ -100,7 +100,7 @@
         s.setItem(selKey(), el.dataset.thread || '');
         s.setItem(selKey() + ':i', String(i));
       });
-      updateRuler();
+      updatePager();
     }
     if (scroll !== false) {
       el.scrollIntoView({ block: c === L ? 'nearest' : 'start' });
@@ -140,7 +140,6 @@
     var k = activeKind() || (document.querySelector('main.compose') ? 'compose' : '');
     if (k) body.dataset.keys = k;
     else delete body.dataset.keys;
-    updateRuler(false); // the list may have come into view or gone
   }
 
   // scrollThread: j/k on a thread scroll it three lines (the pane in the
@@ -221,12 +220,20 @@
       want = saved ? { thread: saved, index: slot } : { index: slot };
     }
     var start = tri ? tri.restoreIndex(L.items.map(rowKey), want) : 0;
-    rulerWas = null; // a new list: its counter appears, it doesn't roll
+    pagerWas = null; // a new list: its place appears, it doesn't roll
     select(L, start, scroll !== undefined ? scroll : start > 0);
-    updateRuler(false);
+    updatePager(false);
     rememberView(L.url);
     whenReady(function () { listTotal(root); })();
     root.addEventListener('click', function (e) {
+      // The pager row's < and > are the keys: the split swaps the pane.
+      var pg = e.target.closest('.pager a[rel]');
+      if (pg) {
+        if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        whenReady(page(pg.rel === 'next' ? 1 : -1))();
+        return;
+      }
       var row = e.target.closest('li.row');
       if (!row || e.target.closest('a')) return;
       if (L.cursor) L.cursor.settle();
@@ -235,13 +242,15 @@
     });
   }
 
-  // ---- the header rail ------------------------------------------------------
-  // The views are stations on the rail (base.html, app.css #rail); the
-  // capsule sits under the active one, and moving it between pages is
-  // rail.js's. Here: marking a view when the split fetches a list beside a
-  // thread, the search stop, the Spam station's light, and the easter egg.
+  // ---- the tube ------------------------------------------------------------
+  // The views are stations down the tube, the left column (base.html,
+  // app.css #tube); the capsule sits on the active one. Moving it between
+  // pages, lighting a station and the fold before the first render are
+  // tube.js's. Here: the view a list fetched beside a thread names, the
+  // search station, the Spam station's light, the fold as the window
+  // changes, and the easter egg.
 
-  var navEl = document.getElementById('rail');
+  var navEl = document.getElementById('tube');
   // Where leaving a search (× or Esc) goes: the view it was started from.
   // Every other list notes itself in the tab (PRESEARCH_KEY); a search
   // takes the note once, as its page loads, into its own history entry
@@ -258,8 +267,8 @@
   // rememberView notes a list URL that isn't a search, for leaving one;
   // a search's page takes the note into its history entry.
   function rememberView(url) {
-    if (!rail || !url || !tri || tri.pathKind(url) !== 'list') return;
-    if (rail.stationOf(url) !== 'q') {
+    if (!tube || !url || !tri || tri.pathKind(url) !== 'list') return;
+    if (tube.stationOf(url) !== 'q') {
       storage(function (s) { s.setItem(PRESEARCH_KEY, url); });
       return;
     }
@@ -280,90 +289,24 @@
   // withSearchFrom adds the search's return view to a history state the
   // split writes while its list is a search.
   function withSearchFrom(st) {
-    if (searchFrom && rail && rail.stationOf(L.url) === 'q') st.presearch = searchFrom;
+    if (searchFrom && tube && tube.stationOf(L.url) === 'q') st.presearch = searchFrom;
     return st;
   }
 
-  function queryOf(url) {
-    try { return (new URL(url, location.origin).searchParams.get('q') || '').trim(); } catch (e) { return ''; }
-  }
-
-  function capsule() {
-    var c = navEl.querySelector('.cap');
-    if (c) return c;
-    c = document.createElement('span');
-    c.className = 'cap';
-    c.setAttribute('aria-hidden', 'true');
-    return c;
-  }
-
-  // markNav marks url's view on the rail, as the server does for a list
-  // page: a list fetched beside a thread (the thread page's rail has none)
-  // names its view this way. A search names the search stop, with its query.
+  // markNav lights url's station, as the server does for a list page: a
+  // list fetched beside a thread (the thread page has no view of its own)
+  // names its view this way. A search lights the search station, with its
+  // query.
   function markNav(url) {
-    if (!navEl || !rail) return;
-    var station = rail.stationOf(url);
-    var path = String(url || '').split('?')[0];
-    var cap = capsule();
-    Array.prototype.forEach.call(navEl.querySelectorAll('a[data-station]'), function (a) {
-      var on = station !== 'q' && a.getAttribute('href') === path;
-      a.classList.toggle('active', on);
-      if (on) { a.setAttribute('aria-current', 'page'); a.appendChild(cap); } else a.removeAttribute('aria-current');
-    });
-    searchStop(station === 'q' ? queryOf(url) : '');
-    if (station === 'q') navEl.querySelector('.q').appendChild(cap);
-    else if (!station) cap.remove();
+    if (!navEl || !tube) return;
+    tube.place(url, presearch());
     spamLight();
-    revealActive();
   }
 
-  // revealStation scrolls the rail (app.css .rail, scrollable when the
-  // window is narrow) just enough to show el, a station or the search
-  // field. Only the rail moves, never the page.
-  function revealStation(el) {
-    var sc = navEl && navEl.parentNode;
-    if (!el || !sc || sc.scrollWidth <= sc.clientWidth) return;
-    var r = el.getBoundingClientRect(), b = sc.getBoundingClientRect(), pad = 12;
-    if (r.left < b.left + pad) sc.scrollLeft -= b.left + pad - r.left;
-    else if (r.right > b.right - pad) sc.scrollLeft += r.right - (b.right - pad);
-  }
-
-  function revealActive() {
-    var cap = navEl && navEl.querySelector('.cap');
-    revealStation(cap && cap.closest('[data-station]'));
-  }
-
-  // searchStop makes the search stop a station showing q, or the ghost
-  // (q empty), as base.html renders each.
-  function searchStop(q) {
-    var stop = navEl.querySelector('.q');
-    if (!stop || stop.classList.contains('active') === !!q && (!q || (stop.querySelector('.qt') || {}).textContent === q)) return;
-    closeSearchField();
-    var line = stop.parentNode;
-    line.classList.toggle('on-q', !!q);
-    var a = el('a');
-    a.appendChild(el('kbd', null, '/'));
-    if (q) {
-      stop.className = 'q active';
-      a.href = '/search?q=' + encodeURIComponent(q);
-      a.setAttribute('aria-current', 'page');
-      a.appendChild(el('span', 'qt', q));
-      var x = el('a', 'x', '×');
-      x.href = presearch();
-      x.title = 'Close search';
-      x.setAttribute('aria-label', 'Close search');
-      stop.replaceChildren(a, x);
-    } else {
-      stop.className = 'q ghost';
-      a.href = '/search';
-      a.appendChild(document.createTextNode('search'));
-      stop.replaceChildren(a);
-    }
-  }
-
-  // The search stop turns into a field (/ or a click): Enter searches,
-  // Esc or leaving it puts the stop back. On a search page it starts
-  // with the query.
+  // The search station turns into a field (/ or a click): Enter searches,
+  // Esc or leaving it puts the station back. On a search page it starts
+  // with the query. With the tube folded the field floats beside it
+  // (app.css).
   var searchForm = null;
 
   function openSearch() {
@@ -402,7 +345,6 @@
     });
     input.focus();
     input.select();
-    revealStation(f);
   }
 
   function closeSearchField() {
@@ -418,17 +360,9 @@
 
   // leaveSearch: × or Esc on a search goes back to the view before it.
   function leaveSearch() {
-    if (!rail || rail.stationOf(L.url) !== 'q') return false;
+    if (!tube || tube.stationOf(L.url) !== 'q') return false;
     location.assign(presearch());
     return true;
-  }
-
-  // Tab onto a station the rail has scrolled away: show it. On load, and
-  // as the window narrows, the active one.
-  if (navEl) {
-    navEl.addEventListener('focusin', function (e) { revealStation(e.target.closest('[data-station]') || e.target); });
-    revealActive();
-    window.addEventListener('resize', revealActive);
   }
 
   if (navEl) navEl.addEventListener('click', function (e) {
@@ -438,21 +372,21 @@
     if (a.classList.contains('x')) { e.preventDefault(); location.assign(presearch()); }
   });
 
-  // The Spam station lights when spam has come in since the last visit to
-  // Spam (SPEC "Layout"). The server renders the newest spam's date on the
-  // link (data-spam, spam.go); the last visit is this browser's, in
-  // localStorage. A fetched page (fetchMain: the split's list, a thread
-  // refetched on a change) brings a newer date.
+  // The Spam station's dot lights when spam has come in since the last
+  // visit to Spam (SPEC "Layout"). The server renders the newest spam's
+  // date on the link (data-spam, spam.go); the last visit is this
+  // browser's, in localStorage. A fetched page (fetchMain: the split's
+  // list, a thread refetched on a change) brings a newer date.
   var SPAM_KEY = 'pneu:spam-seen';
   var spamShown = false; // the light has been drawn once: a change now pops
 
   function spamLight(newest) {
     var a = navEl && navEl.querySelector('a[data-spam]');
-    if (!a || !rail) return;
+    if (!a || !tube) return;
     if (newest != null) a.dataset.spam = String(newest);
     var raw = local(function (s) { return s.getItem(SPAM_KEY); });
     var seen = raw === null || raw === undefined ? null : Number(raw);
-    var d = rail.spamLight(a.dataset.spam, seen, a.classList.contains('active'), Math.floor(Date.now() / 1000));
+    var d = tube.spamLight(a.dataset.spam, seen, a.classList.contains('active'), Math.floor(Date.now() / 1000));
     if (d.seen !== null) local(function (s) { s.setItem(SPAM_KEY, String(d.seen)); });
     var was = a.hasAttribute('data-lit');
     a.toggleAttribute('data-lit', d.lit);
@@ -470,11 +404,32 @@
   spamLight();
   (function () { var x = navEl && navEl.querySelector('.q .x'); if (x) x.setAttribute('href', presearch()); })();
 
+  // The fold: the window's layout (triage.js layout, tube.js measured it
+  // before the first render) kept as the window changes. The tube's width
+  // animates (app.css, 260ms) once the page has settled; the capsule rides
+  // inside its station, so it stays on it throughout. A crossing of the
+  // split width is initSplit's.
+  var lay = tube ? tube.layout() : { split: false, fold: false };
+  var onSplitChange = null;
+
+  function relayout() {
+    if (!tube) return;
+    var now = tube.layout();
+    if (now.fold !== lay.fold) tube.fold(now.fold);
+    var crossed = now.split !== lay.split;
+    lay = now;
+    if (crossed && onSplitChange) onSplitChange();
+  }
+
+  window.addEventListener('resize', relayout);
+  requestAnimationFrame(function () { requestAnimationFrame(function () { document.documentElement.classList.add('tube-anim'); }); });
+
   // The easter egg: a click on the mark while sync is healthy winds the
-  // capsule up and shoots it off the right end of the rail; it comes back
-  // round out of the mark, which pulses as it passes, and settles at its
-  // station. The rail clips it (app.css .rail). Nothing under reduced
-  // motion; a station-to-station navigation meanwhile doesn't travel.
+  // capsule down, shoots it up out through the top of the column (which
+  // clips it), pulses the mark as it goes, and drops it back onto its
+  // station with a bounce (the approved mock's timings). Nothing under
+  // reduced motion; a station-to-station navigation meanwhile doesn't
+  // travel (tube.js).
   var eggOn = false;
 
   function shoot() {
@@ -482,63 +437,62 @@
     var mark = document.querySelector('#mark .mark');
     if (eggOn || still() || !cap || !cap.animate) return;
     eggOn = true;
-    var c = cap.getBoundingClientRect(), w = navEl.parentNode.getBoundingClientRect();
-    var end = Math.round(w.right - c.left + 40), start = Math.round(w.left - c.right - 40);
+    var top = -Math.round(cap.getBoundingClientRect().top - navEl.getBoundingClientRect().top) - 30;
     var dur = 1150;
     navEl.classList.add('away');
     var a = cap.animate([
-      { transform: 'translate(0, 0) scaleX(1)', easing: 'cubic-bezier(.2,.8,.3,1)' },
-      { transform: 'translate(-6px, 0) scaleX(0.6)', offset: 0.12, easing: 'cubic-bezier(.6,0,1,.6)' },
-      { transform: 'translate(' + end + 'px, 0) scaleX(4.5)', offset: 0.38 },
-      { transform: 'translate(' + start + 'px, 0) scaleX(4.5)', offset: 0.381 },
-      { transform: 'translate(' + start + 'px, 0) scaleX(4.5)', offset: 0.55, easing: 'cubic-bezier(.1,.6,.3,1)' },
-      { transform: 'translate(4px, 0) scaleX(1.6)', offset: 0.82, easing: 'ease-in-out' },
-      { transform: 'translate(0, 0) scaleX(0.8)', offset: 0.91 },
-      { transform: 'translate(0, 0) scaleX(1)' },
+      { transform: 'translateY(0) scaleY(1)', easing: 'cubic-bezier(.2,.8,.3,1)' },
+      { transform: 'translateY(6px) scaleY(0.6)', offset: 0.12, easing: 'cubic-bezier(.6,0,1,.6)' },
+      { transform: 'translateY(' + top + 'px) scaleY(4.5)', offset: 0.38 },
+      { transform: 'translateY(' + top + 'px) scaleY(4.5)', offset: 0.55, easing: 'cubic-bezier(.3,0,.6,1)' },
+      { transform: 'translateY(5px) scaleY(1.6)', offset: 0.84, easing: 'ease-out' },
+      { transform: 'translateY(0) scaleY(0.8)', offset: 0.92 },
+      { transform: 'translateY(0) scaleY(1)' },
     ], { duration: dur });
-    if (mark && mark.animate) {
+    var pulse = setTimeout(function () {
+      if (!mark || !mark.animate) return;
       var accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || 'currentColor';
       mark.animate([
         { transform: 'scale(1)' },
-        { transform: 'scale(1.18)', filter: 'drop-shadow(0 0 5px ' + accent + ')', offset: 0.4 },
+        { transform: 'scale(1.2)', filter: 'drop-shadow(0 0 5px ' + accent + ')', offset: 0.4 },
         { transform: 'scale(1)' },
-      ], { duration: 360, delay: dur * 0.5, easing: 'cubic-bezier(.3,.7,.3,1)' });
-    }
-    var relight = setTimeout(function () { navEl.classList.remove('away'); }, dur * 0.86);
-    var done = function () { eggOn = false; clearTimeout(relight); navEl.classList.remove('away'); };
+      ], { duration: 380, easing: 'cubic-bezier(.3,.7,.3,1)' });
+    }, dur * 0.3);
+    var relight = setTimeout(function () { navEl.classList.remove('away'); }, dur * 0.88);
+    var done = function () { eggOn = false; clearTimeout(pulse); clearTimeout(relight); navEl.classList.remove('away'); };
     a.finished.then(done, done);
   }
 
-  // ---- key bar: hints and the position counter --------------------------
-  // A hint whose key has been used LEARNED times (rail.js) steps aside;
+  // ---- key bar: hints -----------------------------------------------------
+  // A hint whose key has been used LEARNED times (tube.js) steps aside;
   // ? always stays, and the ? overlay brings them back. Counts live in
   // localStorage, per pane and hint (base.html data-learn: its keys).
   var LEARN_KEY = 'pneu:hints';
-  var learnCounts = rail ? rail.parseCounts(local(function (s) { return s.getItem(LEARN_KEY); })) : {};
+  var learnCounts = tube ? tube.parseCounts(local(function (s) { return s.getItem(LEARN_KEY); })) : {};
   var keybarEl = document.getElementById('keybar');
 
   function hintId(h) { return h.parentNode.dataset.for + ':' + h.dataset.learn; }
 
   function applyLearned() {
-    if (!keybarEl || !rail) return;
+    if (!keybarEl || !tube) return;
     Array.prototype.forEach.call(keybarEl.querySelectorAll('.keys .h[data-learn]'), function (h) {
-      h.classList.toggle('learned', (learnCounts[hintId(h)] || 0) >= rail.LEARNED);
+      h.classList.toggle('learned', (learnCounts[hintId(h)] || 0) >= tube.LEARNED);
     });
   }
 
   function learnedCount() {
-    return Object.keys(learnCounts).filter(function (k) { return learnCounts[k] >= (rail ? rail.LEARNED : 3); }).length;
+    return Object.keys(learnCounts).filter(function (k) { return learnCounts[k] >= (tube ? tube.LEARNED : 3); }).length;
   }
 
   // learnKey counts key in pane kind's hints.
   function learnKey(kind, key) {
-    if (!keybarEl || !rail || !kind) return;
+    if (!keybarEl || !tube || !kind) return;
     var hints = keybarEl.querySelectorAll('.keys[data-for="' + kind + '"] .h[data-learn]');
     for (var i = 0; i < hints.length; i++) {
       if (hints[i].dataset.learn.split(' ').indexOf(key) < 0) continue;
       var id = hintId(hints[i]);
-      if ((learnCounts[id] || 0) >= rail.LEARNED) return;
-      if (rail.learn(learnCounts, id)) hints[i].classList.add('learned');
+      if ((learnCounts[id] || 0) >= tube.LEARNED) return;
+      if (tube.learn(learnCounts, id)) hints[i].classList.add('learned');
       local(function (s) { s.setItem(LEARN_KEY, JSON.stringify(learnCounts)); });
       return;
     }
@@ -555,30 +509,40 @@
   // page is just absent.
   if (keybarEl) requestAnimationFrame(function () { requestAnimationFrame(function () { keybarEl.classList.add('settled'); }); });
 
-  // The position counter (#ruler): the list cursor's place in the view,
-  // "3 of 20", "53 of 312" when paged. It rolls like an odometer when the
-  // number changes, in the direction of the change; the status line covers
-  // it while it speaks (app.css .wright).
-  var rulerEl = document.getElementById('ruler');
-  var rulerWas = null; // {root, text, pos}
+  // ---- the pager row --------------------------------------------------------
+  // A paged list's top row (list.html .pager): < newer and older >, the
+  // list cursor's place in the whole view ("53 of 2,318"), a track with
+  // this page's slice and the cursor on it, and the page's range. The place
+  // rolls like an odometer when it changes, in the direction of the
+  // change. An unpaged list shows no position at all.
+  var pagerWas = null; // {root, at, pos}
 
-  function updateRuler(animate) {
-    if (!rulerEl || !rail) return;
-    var root = L.root, text = '', pos = null;
-    if (root && (split || primary === 'list')) {
-      var d = root.dataset, rows = L.items.length, paged = 'paged' in d, start = parseInt(d.start, 10) || 0;
-      var total = parseInt(d.total, 10);
-      if (isNaN(total)) total = -1;
-      // A removal takes one off the total, an undo puts it back: data-rows
-      // is the row count data-total was counted against.
-      if (total >= 0) total += rows - (parseInt(d.rows, 10) || 0);
-      text = rail.ruler(start, L.sel, rows, total, paged);
-      pos = { at: (paged ? start : 0) + L.sel + 1, total: paged ? total : rows };
+  function updatePager(animate) {
+    var root = L.root, pg = root && root.querySelector(':scope > .pager');
+    if (!pg || !tube) { pagerWas = null; return; }
+    var d = root.dataset, rows = L.items.length, start = parseInt(d.start, 10) || 0;
+    var total = parseInt(d.total, 10);
+    if (isNaN(total)) total = -1;
+    // A removal takes one off the total, an undo puts it back: data-rows
+    // is the row count data-total was counted against.
+    if (total >= 0) total += rows - (parseInt(d.rows, 10) || 0);
+    var p = tube.pager(start, L.sel, rows, total);
+    var odo = pg.querySelector('.odo'), of = pg.querySelector('.of'), range = pg.querySelector('.range');
+    var seg = pg.querySelector('.pseg'), dot = pg.querySelector('.pdot');
+    if (of) of.textContent = p.of;
+    if (range) range.textContent = p.range;
+    if (seg) {
+      seg.hidden = !p.seg;
+      if (p.seg) { seg.style.left = p.seg.left + '%'; seg.style.width = 'max(4px, ' + p.seg.width + '%)'; }
     }
-    var dir = animate !== false && rulerWas && rulerWas.root === root ? rail.rollDir(rulerWas.pos, pos) : 0;
-    if (rulerWas && rulerWas.text === text) { rulerWas.pos = pos; return; }
-    rulerWas = { root: root, text: text, pos: pos };
-    roll(rulerEl, text, dir);
+    if (dot) {
+      dot.hidden = p.dot === null;
+      if (p.dot !== null) dot.style.left = p.dot + '%';
+    }
+    var same = pagerWas && pagerWas.root === root;
+    if (!odo || (same && pagerWas.pos === p.pos)) { if (same) pagerWas.at = p.at; return; }
+    roll(odo, p.pos, animate !== false && same ? tube.rollDir(pagerWas.at, p.at) : 0);
+    pagerWas = { root: root, at: p.at, pos: p.pos };
   }
 
   // roll replaces el's number: the old one slides out and the new one in,
@@ -956,8 +920,8 @@
       var doc = new DOMParser().parseFromString(html, 'text/html');
       var main = doc.querySelector('main.' + kind);
       if (!main) throw new Error('no ' + kind + ' in the page');
-      // Its rail says when the newest spam is dated, as of now.
-      var spam = doc.querySelector('#rail a[data-spam]');
+      // Its tube says when the newest spam is dated, as of now.
+      var spam = doc.querySelector('#tube a[data-spam]');
       if (spam) spamLight(spam.dataset.spam);
       return { main: document.adoptNode(main), title: doc.title, label: pageLabel(doc) };
     });
@@ -1133,7 +1097,7 @@
   // loads with its cursor stored where initList looks for it.
   function page(dir) {
     return function () {
-      var a = L.root && L.root.querySelector('nav.pages a[rel=' + (dir > 0 ? 'next' : 'prev') + ']');
+      var a = L.root && L.root.querySelector(':scope > .pager a[rel=' + (dir > 0 ? 'next' : 'prev') + ']');
       if (!a) { flash(dir > 0 ? 'No older mail' : 'No newer mail'); return; }
       var u = new URL(a.href);
       var url = u.pathname + u.search;
@@ -1158,24 +1122,15 @@
     return T.root ? { thread: T.root.dataset.thread, account: T.root.dataset.account, index: 0 } : null;
   }
 
-  // The split width is SPLIT_CH of the app font's ch, measured once: CSS
-  // media queries resolve ch against the browser's default font, not ours.
-  function measureCh() {
-    var s = document.createElement('span');
-    s.textContent = new Array(101).join('0');
-    s.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;left:-9999px;top:0';
-    document.body.appendChild(s);
-    var w = s.getBoundingClientRect().width / 100;
-    s.remove();
-    return w > 0 ? w : 8.4;
-  }
-
+  // The split: at the width triage.js layout gives (the panes at
+  // SPLIT_CH of the app font's ch beside the tube, folded if it must be;
+  // tube.js measured ch), list and thread side by side. relayout calls
+  // change as the window crosses it.
   function initSplit() {
-    if (!panes || !primary || !window.matchMedia) return;
-    var mq = window.matchMedia('(min-width: ' + Math.ceil(tri.SPLIT_CH * measureCh()) + 'px)');
+    if (!panes || !primary) return;
     function apply() {
       var was = split;
-      split = mq.matches && !maxed;
+      split = lay.split && !maxed;
       body.classList.toggle('split', split);
       if (!split) {
         showSeq++; // an in-flight open must not land on the narrow page
@@ -1199,8 +1154,7 @@
       apply();
     }
     applySplit = apply;
-    if (mq.addEventListener) mq.addEventListener('change', change);
-    else mq.addListener(change);
+    onSplitChange = change;
     apply();
   }
 
@@ -1436,8 +1390,8 @@
   }
 
   // listCount keeps the key bar's counter with the rows: a removal takes
-  // one off the total, an undo puts it back (updateRuler).
-  function listCount() { updateRuler(); }
+  // one off the total, an undo puts it back (updatePager).
+  function listCount() { updatePager(); }
 
   // listTotal fills in a paged list's total when the server had none cached
   // (read.go total): counting Archive can take a second, so the page shows
@@ -1985,7 +1939,7 @@
 
   // paneBounds is what of the thread pane shows: its rect ∩ the viewport,
   // less every piece of app chrome that is sticky or fixed and overlaps it,
-  // in either layout: the page header (sticky when narrow), the split's
+  // in either layout: the #accounts strip (sticky when narrow), the split's
   // sticky thread title, the key bar (actions.js usable). o and L both use
   // it.
   function paneBounds(root) {
@@ -2067,8 +2021,8 @@
   // compose page, whose fields otherwise own the keyboard: Escape blurs,
   // below; Ctrl+Enter sends, compose.js).
 
-  // VIEWS: 1..6, the rail's order (server.go navViews): the main line,
-  // then the siding.
+  // VIEWS: 1..6, the tube's order (server.go navViews): the main line,
+  // then the bins below the drop.
   var VIEWS = { 1: '/', 2: '/starred', 3: '/sent', 4: '/all', 5: '/spam', 6: '/trash' };
 
   function goView(e) { location.assign(VIEWS[e.key]); }
@@ -2400,7 +2354,7 @@
   }
 
   // ---- accounts -----------------------------------------------------------
-  // The #accounts strip under the header: a line for each account that isn't
+  // The #accounts strip above the panes: a line for each account that isn't
   // simply working (docs/onboarding.md). data-accounts has every account at
   // load; SSE `account` replaces one as it changes. While an account's first
   // pull runs, the list refreshes every so often as mail lands (newest
@@ -2557,6 +2511,16 @@
     if (!was) acctOrder.push(a.name);
     accounts[a.name] = a;
     renderAccounts();
+
+  // The strip's height (--acc-h): narrow, the strip stays at the top and
+  // the tube and the pager row stick below it (app.css).
+  (function () {
+    var strip = document.getElementById('accounts');
+    if (!strip || !window.ResizeObserver) return;
+    new ResizeObserver(function () {
+      document.documentElement.style.setProperty('--acc-h', strip.getBoundingClientRect().height + 'px');
+    }).observe(strip);
+  })();
     lineNews(a);
     // New mail lands newest first while a pull downloads: show it now and then.
     if (a.state === 'pulling' && a.progress && a.progress.phase === 'content' && Date.now() - pullRefreshAt > PULL_REFRESH) {
@@ -2576,10 +2540,11 @@
   // count: one in its first pull or waiting on setup is the #accounts
   // strip's. Client mode adds link-down and update states here
   // (docs/client.md). The mark shows it (breathing while checking, hot on
-  // a problem); the header's right side (#sync) says it only when it
+  // a problem); the foot of the tube (#sync) says it only when it
   // matters: a problem, persistently, or a check and "Updated just now"
   // for a while after a sync R asked for ends or sync recovers. A click
-  // on either when hot, or ?, shows the details.
+  // on either when hot, or ?, shows the details. With the tube folded the
+  // foot is hidden and the mark's colour says it alone.
 
   // An account is failing at the bar's threshold (BarWidget.qml
   // accountSick): any failure.
@@ -2596,8 +2561,8 @@
   // fade that ends them (app.css #sync).
   var DONE_SHOWN = 10000;
   var DONE_FADE = 600;
-  // The states that are a problem: the mark turns hot, the right side says
-  // so until it's over, and a click on the mark opens the details.
+  // The states that are a problem: the mark turns hot, the foot says so
+  // until it's over, and a click on the mark opens the details.
   var PROBLEM = { stale: true, error: true, link: true, worker: true };
 
   var lineEl = document.getElementById('sync');
@@ -2695,7 +2660,7 @@
       markEl.classList.toggle('hot', markHot);
       markEl.setAttribute('aria-label', 'pneu' + (st.text ? ' · ' + st.text : '') + (nudge ? ' · ' + nudge : '') + (markHot ? ' · sync details' : ''));
     }
-    // The right side: a problem (or the nudge) stays; a sync R asked for
+    // The foot: a problem (or the nudge) stays; a sync R asked for
     // that ended, or a recovery, shows the check for a while; else empty.
     if (markHot) { lineDone(false); lineEl.hidden = false; }
     else if (st.state === 'fresh' && lineWas !== null && lineWas !== 'fresh' && lineWas !== '') lineDone(true);
@@ -2924,6 +2889,7 @@
     if (stashed && moving()) mo.arrive(L.items, mo.freshRows(stashed, L.shown.keys), L.sel, L.cursor);
   }
   if (T.root) {
+    if (tube) tube.placeThread(); // as pagereveal did, where it didn't run
     T.label = pageLabel(document);
     T.url = location.pathname;
     initThread(T.root);

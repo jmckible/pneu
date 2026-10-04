@@ -115,10 +115,31 @@
 
   // ---- split pane (SPEC.md Layout) ----------------------------------------
 
-  // SPLIT_CH is the viewport width, in the app font's ch, at which the list
-  // and the thread sit side by side. app.js measures ch and builds the media
-  // query from it.
+  // The window's widths, in the app font's ch (tube.js measures it; CSS
+  // media queries would measure ch in the browser's default font). Every
+  // layout threshold is here.
+  // SPLIT_CH is the panes' width (the window less the tube) at which the
+  // list and the thread sit side by side. TUBE_CH and TUBE_FOLD_CH are the
+  // tube's widths, open and folded to its digits (tube.js hands them to
+  // app.css as --tube-w and --tube-fold-w). LIST_MIN_CH: a single pane
+  // narrower than this with the tube open folds the tube.
   var SPLIT_CH = 140;
+  var TUBE_CH = 18;
+  var TUBE_FOLD_CH = 6;
+  var LIST_MIN_CH = 100;
+
+  // layout decides the window at width ch: {split, fold}. The split
+  // outranks the tube's labels: it folds the tube before it gives up the
+  // split. A single pane folds it when the list would be narrower than
+  // LIST_MIN_CH. So, open widths: split from SPLIT_CH + TUBE_CH (158), split
+  // folded from SPLIT_CH + TUBE_FOLD_CH (146), one pane from LIST_MIN_CH +
+  // TUBE_CH (118), folded below that. It depends on the width alone, never
+  // on whether a thread is open, so opening one never moves the tube.
+  function layout(ch) {
+    if (ch - TUBE_CH >= SPLIT_CH) return { split: true, fold: false };
+    if (ch - TUBE_FOLD_CH >= SPLIT_CH) return { split: true, fold: true };
+    return { split: false, fold: ch - TUBE_CH < LIST_MIN_CH };
+  }
 
   // The index views' paths (server.go); search keeps its ?q=.
   var LIST_PATHS = { '/': true, '/starred': true, '/sent': true, '/spam': true, '/trash': true, '/all': true, '/search': true };
@@ -289,7 +310,7 @@
     UNDO_CAP: UNDO_CAP, MAX_IDS: MAX_IDS, body: body, removeArgs: removeArgs, splitIds: splitIds, decodeId: decodeId,
     nextIndex: nextIndex, push: push, pop: pop, parse: parse, removes: removes, skip: skip,
     retryAfter: retryAfter, label: label, verb: verb,
-    SPLIT_CH: SPLIT_CH, pathKind: pathKind, listURL: listURL, historyOp: historyOp, restoreIndex: restoreIndex,
+    SPLIT_CH: SPLIT_CH, TUBE_CH: TUBE_CH, TUBE_FOLD_CH: TUBE_FOLD_CH, LIST_MIN_CH: LIST_MIN_CH, layout: layout, pathKind: pathKind, listURL: listURL, historyOp: historyOp, restoreIndex: restoreIndex,
     paneView: paneView, refreshStale: refreshStale, rgbHex: rgbHex, cycle: cycle,
     viewLabel: viewLabel, behind: behind, advance: advance, names: names, appliedKey: appliedKey,
     viewDecision: viewDecision, undoConflicts: undoConflicts,

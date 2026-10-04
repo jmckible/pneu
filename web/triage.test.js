@@ -158,6 +158,17 @@ test('restoreIndex: same thread if still listed, else same slot', () => {
   assert.equal(T.SPLIT_CH, 140);
 });
 
+test('layout: the split folds the tube before giving up; one pane folds it under 100ch of list', () => {
+  assert.deepEqual(T.layout(200), { split: true, fold: false });
+  assert.deepEqual(T.layout(158), { split: true, fold: false }, '140 of panes beside the open tube');
+  assert.deepEqual(T.layout(157.9), { split: true, fold: true });
+  assert.deepEqual(T.layout(146), { split: true, fold: true }, '140 of panes beside the folded tube');
+  assert.deepEqual(T.layout(145.9), { split: false, fold: false });
+  assert.deepEqual(T.layout(118), { split: false, fold: false }, 'a 100ch list beside the open tube');
+  assert.deepEqual(T.layout(117.9), { split: false, fold: true });
+  assert.deepEqual(T.layout(40), { split: false, fold: true });
+});
+
 test('paneView: the entry\'s own list first, then the tab\'s last list, vetted', () => {
   assert.equal(T.paneView({ view: '/starred' }, '/'), '/starred');
   assert.equal(T.paneView({ view: '/' }, '/trash'), '/'); // the entry says inbox: inbox

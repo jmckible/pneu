@@ -55,37 +55,80 @@ html, body {
   background: var(--bg);
   color: var(--fg);
   font: 14px/1.4 var(--font);
-  overflow-x: hidden;
+  /* clip, not hidden: hidden would make the body a scroll container that
+     never scrolls, and the narrow layout's sticky strip, tube and pager
+     row would stick to it instead of the window. */
+  overflow-x: clip;
 }
+/* Narrow, the window scrolls under the fixed key bar: a row scrolled into
+   view clears it. */
+html { scroll-padding-bottom: var(--keybar-h); }
 
 a { color: var(--accent); }
 button { font: inherit; }
 
 /* ---- chrome ------------------------------------------------------------ */
 
-body > header {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  gap: 1.5ch;
-  align-items: center;
-  min-height: 40px;
-  padding: 7px 1.5ch;
-  background: var(--bar);
-  border-bottom: 1px solid var(--border);
-  box-shadow: 0 1px 0 light-dark(transparent, rgb(0 0 0 / 0.35));
+/* The window: the #accounts strip across the top while it has something
+   to say, then the tube (the left column of views) beside the panes, and
+   the key bar along the bottom. Narrow, the page scrolls and the strip and
+   the tube stay put (sticky; app.js keeps --acc-h, the strip's height);
+   split, the window is a fixed grid whose panes scroll ("split pane"
+   below). The tube is --tube-w wide, or --tube-fold-w folded to its digits
+   (html.tube-fold): tube.js sets both from triage.js and decides the fold
+   before the first render, and app.js keeps it with the window, the width
+   animating once the page has settled (html.tube-anim). */
+:root { --tube-w: 18ch; --tube-fold-w: 6ch; --acc-h: 0px; }
+body {
+  display: grid;
+  grid-template-columns: var(--tube-w) minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  min-height: 100vh;
 }
+:root.tube-fold body { grid-template-columns: var(--tube-fold-w) minmax(0, 1fr); }
+:root.tube-anim body { transition: grid-template-columns 260ms cubic-bezier(.2, .8, .2, 1); }
+#accounts { grid-column: 1 / -1; grid-row: 1; }
+#tube { grid-column: 1; grid-row: 2; }
+#panes { grid-column: 2; grid-row: 2; min-width: 0; }
+body:not(.split) #accounts { position: sticky; top: 0; z-index: 3; background: var(--bg); }
+body:not(.split) #tube {
+  position: sticky;
+  top: var(--acc-h);
+  align-self: start;
+  height: calc(100vh - var(--keybar-h) - var(--acc-h));
+}
+
+/* The tube (SPEC "Layout"): the mark, the stations down a hairline line
+   (the search station, the main line, a dashed drop, the bins), the foot.
+   Each station is 28px tall with its dot 14px down, 1.8ch in; the line
+   runs dot to dot in each group (its ::before), dashed across the drop.
+   The capsule (.cap, only inside the active station) sits on its dot, so
+   it stays there whatever the column's width does. The clip takes the
+   easter egg's trip out through the top (and a window too short for the
+   column), never the sides: a folded column's search field floats beside
+   it. */
+#tube {
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bar);
+  border-right: 1px solid var(--border);
+  clip-path: inset(0 -100vw 0 0);
+}
+#tube a { color: inherit; text-decoration: none; }
 /* The mark is the sync status (SPEC "Sync state"): at rest when current,
    breathing while a sync R asked for runs, hot when something is wrong.
-   A click opens the details when hot, else plays the rail's easter egg.
-   The drawn cut of the mark (brand/README.md): at the app window's
-   fractional scales the pixel cut's walls land on uneven device pixels and
-   read as rough; at 18px and up the drawn cut holds both walls. */
+   A click opens the details when hot, else plays the easter egg. The
+   drawn cut of the mark (brand/README.md): at the app window's fractional
+   scales the pixel cut's walls land on uneven device pixels and read as
+   rough; at 18px and up the drawn cut holds both walls. */
 #mark {
   flex: none;
+  align-self: flex-start;
   display: flex;
   align-items: center;
+  margin: 10px 0 4px 1.05ch;
   padding: 0;
   color: var(--accent);
   background: none;
@@ -98,128 +141,99 @@ body > header {
 #mark[data-state=checking] .mark { animation: breathe 1.4s ease-in-out infinite; }
 @keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.88); } }
 
-/* The rail: the views as stations on a hairline track, the main line
-   (with the search stop at its end) and a dimmer siding, each track ending
-   in a tick. A dot marks each station; the capsule (.cap, only inside the
-   active one) sits on the active view. CSS places all of it: the tracks are
-   each group's ::before, the dots each station's ::after. Too narrow a
-   window (or a long status on the right) and the rail scrolls sideways,
-   its scrollbar hidden: app.js keeps the active or focused station in
-   view (revealStation). The scroller also clips the easter egg's trip;
-   its padding-block, cancelled by the margin, leaves the superscripts
-   and the capsule's glow room inside it. */
-body > header .rail {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-  padding-block: 6px;
-  margin-block: -6px;
+#tube .line { position: relative; flex: none; padding: 6px 0; }
+#tube .main, #tube .bins, #tube .drop { position: relative; display: block; }
+#tube .drop { height: 22px; }
+#tube .main::before, #tube .bins::before, #tube .drop::before {
+  content: "";
+  position: absolute;
+  left: 1.8ch;
+  top: 14px;
+  bottom: 14px;
+  width: 1px;
+  background: var(--border);
+  pointer-events: none;
 }
-body > header .rail::-webkit-scrollbar { display: none; }
-#rail { display: flex; align-items: stretch; width: max-content; white-space: nowrap; }
-#rail .line, #rail .main, #rail .siding { position: relative; display: flex; align-items: stretch; }
-#rail .siding { margin-left: 5ch; }
-#rail a, #rail .q { position: relative; padding-bottom: 6px; color: var(--muted); text-decoration: none; transition: color 220ms; }
-#rail .main > a, #rail .q { margin-right: 1.5ch; }
-#rail .q { margin-right: 0; display: flex; align-items: baseline; }
-#rail .siding > a + a { margin-left: 1.5ch; }
-#rail a:hover { color: var(--fg); }
-#rail a.active { color: var(--unread); }
-#rail .siding > a { color: color-mix(in oklab, var(--muted) 72%, var(--bg)); }
-#rail .siding > a:hover, #rail .siding > a.active { color: var(--unread); }
+#tube .drop::before { top: -14px; bottom: -14px; width: 0; background: none; border-left: 1px dashed var(--border); }
+/* Stations. */
+#tube [data-station] {
+  position: relative;
+  z-index: 1;
+  display: block;
+  padding: 4px 1ch 4px 3.6ch;
+  line-height: 20px;
+  white-space: nowrap;
+  color: var(--muted);
+  transition: color 220ms;
+}
+#tube [data-station]:hover { color: var(--fg); }
+#tube a.active, #tube .q.active > a:first-child { color: var(--unread); }
+#tube .bins > a { color: color-mix(in oklab, var(--muted) 78%, var(--bar)); }
+#tube .bins > a:hover, #tube .bins > a.active { color: var(--unread); }
+#tube [data-station]::after {
+  content: "";
+  position: absolute;
+  left: calc(1.8ch - 2px);
+  top: 11.5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--fg) 28%, var(--bar));
+  pointer-events: none;
+}
+/* Spam arrived since the last visit (app.js spamLight). */
+#tube a[data-lit]::after {
+  background: var(--accent);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 70%, transparent);
+}
 /* btop-style: the view's number is a superscript fused to its name (the
-   template leaves no space). line-height 1 keeps the raised digit from
-   growing the header's line box. Muted, but the active view's takes the
-   accent, and hovering the rail lights them all. */
-#rail kbd {
+   template leaves no space). Muted, but the active view's takes the
+   accent, and hovering the tube lights them all. */
+#tube a[data-station] > kbd {
   font: inherit;
   font-size: 9px;
   line-height: 1;
   vertical-align: 4px;
   margin-right: 1px;
   color: var(--muted);
-  transition: color 200ms;
+  transition: color 220ms;
 }
-#rail a.active kbd, #rail:hover kbd { color: var(--accent); }
-/* Tracks: a 1px line 1px above the rail's foot, a 5px tick at each end. */
-#rail .main::before, #rail .siding::before, #rail .line.on-q::before {
-  content: "";
+#tube a.active > kbd, #tube .line:hover a[data-station] > kbd { color: var(--accent); }
+#tube .cap {
   position: absolute;
-  left: -4px;
-  right: -4px;
-  bottom: -2px;
-  height: 5px;
-  border-inline: 1px solid var(--border);
-  background: linear-gradient(var(--border), var(--border)) 0 1px / 100% 1px no-repeat;
-  pointer-events: none;
-}
-#rail .line.on-q > .main::before { display: none; }
-/* The search stop's track is dashed while it is a ghost. */
-#rail .q.ghost::before {
-  content: "";
-  position: absolute;
-  left: -4px;
-  right: -4px;
-  bottom: 1px;
-  border-top: 1px dashed var(--border);
-  pointer-events: none;
-}
-/* Stations. */
-#rail .main > a::after, #rail .siding > a::after, #rail .q.active::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: 0;
-  width: 3px;
-  height: 3px;
-  margin-left: -1.5px;
-  border-radius: 50%;
-  background: color-mix(in oklab, var(--fg) 28%, var(--bg));
-  pointer-events: none;
-}
-/* Spam arrived since the last visit (app.js spamLight). */
-#rail a[data-lit]::after {
-  width: 5px;
-  height: 5px;
-  margin-left: -2.5px;
-  bottom: -1px;
-  background: var(--accent);
-  box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 70%, transparent);
-}
-#rail .cap {
-  position: absolute;
-  left: 50%;
-  bottom: -0.5px;
-  z-index: 1;
-  width: 16px;
-  height: 4px;
-  margin-left: -8px;
+  z-index: 2;
+  left: calc(1.8ch - 1.5px);
+  top: 6px;
+  width: 4px;
+  height: 16px;
   border-radius: 4px;
   background: var(--accent);
   box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 55%, transparent);
   pointer-events: none;
-  view-transition-name: rail-cap;
+  view-transition-name: tube-cap;
 }
 /* The capsule is off on the easter egg's trip, or still travelling to a
    new view: the label waits for it. */
-#rail.away a.active, #rail.away .q.active,
-:root.rail-hold #rail a.active, :root.rail-hold #rail .q.active { color: var(--muted); }
-#rail.away a.active kbd, :root.rail-hold #rail a.active kbd { color: var(--muted); }
-#rail.away .siding > a.active, :root.rail-hold #rail .siding > a.active { color: color-mix(in oklab, var(--muted) 72%, var(--bg)); }
-/* The search stop: a ghost at the end of the main line, a field while
-   typing (app.js openSearch), a station showing the query on a search. */
-#rail .q.ghost a { color: color-mix(in oklab, var(--muted) 60%, var(--bg)); }
-#rail .q.ghost a:hover { color: var(--muted); }
-#rail .q.active a { color: var(--unread); }
-#rail .q .qt { display: inline-block; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
-#rail .q .x { margin-left: 0.7ch; padding-bottom: 0; color: var(--muted); }
-#rail .q .x:hover { color: var(--accent-hot); }
-#rail .q form { display: flex; align-items: baseline; margin: 0; }
-#rail .q form kbd { color: var(--accent); }
-#rail .q input {
-  width: 15ch;
+#tube.away a.active, #tube.away .q.active > a:first-child,
+:root.tube-hold #tube a.active, :root.tube-hold #tube .q.active > a:first-child { color: var(--muted); }
+#tube.away a.active > kbd, :root.tube-hold #tube a.active > kbd { color: var(--muted); }
+#tube.away .q.active kbd, :root.tube-hold #tube .q.active kbd { color: color-mix(in oklab, var(--accent) 60%, var(--bar)); }
+#tube.away .bins > a.active, :root.tube-hold #tube .bins > a.active { color: color-mix(in oklab, var(--muted) 78%, var(--bar)); }
+/* The search station, at the top: a ghost that / or a click turns into a
+   field (app.js openSearch), a station showing the query, ellipsized, and
+   a × on a search. */
+#tube .q { display: flex; align-items: baseline; }
+#tube .q > [hidden] { display: none !important; }
+#tube .q > a:first-child { display: flex; min-width: 0; }
+#tube .q kbd { flex: none; font: inherit; margin-right: 0.2ch; color: color-mix(in oklab, var(--accent) 60%, var(--bar)); transition: color 220ms; }
+#tube .q.active kbd, #tube .q form kbd { color: var(--accent); }
+#tube .q .qt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#tube .q .x { flex: none; margin-left: 0.8ch; color: var(--muted); }
+#tube .q .x:hover { color: var(--accent-hot); }
+#tube .q form { display: flex; align-items: baseline; min-width: 0; margin: 0; }
+#tube .q input {
+  width: 100%;
+  min-width: 0;
   padding: 0;
   font: inherit;
   color: var(--fg);
@@ -229,74 +243,98 @@ body > header .rail::-webkit-scrollbar { display: none; }
   border-radius: 0;
   outline: none;
 }
-#rail .q input::placeholder { color: var(--muted); }
-#rail .q input::-webkit-search-cancel-button { display: none; }
+#tube .q input::placeholder { color: var(--muted); }
+#tube .q input::-webkit-search-cancel-button { display: none; }
 
-/* Switching views: only the capsule moves, the page cuts (rail.js decides
-   which navigations keep the transition and sets the trip's length, its
-   stretch and whether it hops). */
+/* Folded to its digits: the mark, the /, the digits, on the same line with
+   the capsule and the drop; the names are titles; the foot hides, so the
+   mark's colour carries the sync status alone; the search field floats
+   beside the column. */
+:root.tube-fold #tube [data-station] { padding-left: 3.4ch; }
+:root.tube-fold #tube .nm, :root.tube-fold #tube .qt, :root.tube-fold #tube .x, :root.tube-fold #tube .foot { display: none; }
+:root.tube-fold #tube a[data-station] > kbd { font-size: 12px; vertical-align: baseline; margin: 0; }
+:root.tube-fold #tube .q input {
+  position: absolute;
+  z-index: 5;
+  left: 5.5ch;
+  top: 0;
+  width: 24ch;
+  padding: 3px 1ch;
+  line-height: 20px;
+  background: var(--raised);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+}
+
+/* Switching views: only the capsule moves, the page cuts (tube.js decides
+   which navigations keep the transition and sets the trip's length and
+   its stretch). */
 @view-transition { navigation: auto; }
 /* The page itself isn't captured: the new page is live and takes clicks
    and keys from its first frame, and only the capsule rides above it. */
 :root { view-transition-name: none; }
 ::view-transition { pointer-events: none; }
-::view-transition-group(rail-cap) {
+::view-transition-group(tube-cap) {
   animation-duration: var(--cap-dur, 420ms);
   animation-timing-function: linear(0, 0.22 6%, 0.6 14%, 0.86 22%, 0.98 30%, 1.035 38%, 1.045 44%, 1.03 54%, 1.008 66%, 0.998 80%, 1);
 }
-::view-transition-old(rail-cap) { animation: none; opacity: 0; }
-::view-transition-new(rail-cap) { animation: none; }
-:root.rail-move::view-transition-image-pair(rail-cap) { animation: rail-stretch var(--cap-dur, 420ms) cubic-bezier(.45, 0, .25, 1) both; }
-:root.rail-move.rail-hop::view-transition-image-pair(rail-cap) { animation-name: rail-stretch-hop; }
-@keyframes rail-stretch {
+::view-transition-old(tube-cap) { animation: none; opacity: 0; }
+::view-transition-new(tube-cap) { animation: none; }
+:root.tube-move::view-transition-image-pair(tube-cap) { animation: tube-stretch var(--cap-dur, 420ms) cubic-bezier(.45, 0, .25, 1) both; }
+@keyframes tube-stretch {
   0% { transform: none; }
-  45% { transform: scaleX(var(--cap-s, 1)); }
-  82% { transform: scaleX(0.82); }
-  100% { transform: none; }
-}
-@keyframes rail-stretch-hop {
-  0% { transform: none; }
-  45% { transform: translateY(-5px) scaleX(var(--cap-s, 1)); }
-  82% { transform: scaleX(0.82); }
+  45% { transform: scaleY(var(--cap-s, 1)); }
+  82% { transform: scaleY(0.82); }
   100% { transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   @view-transition { navigation: none; }
   #mark[data-state=checking] .mark { animation: none; }
-  #rail a, #rail kbd, #mark .mark { transition: none; }
+  #tube [data-station], #tube kbd, #mark .mark { transition: none; }
+  :root.tube-anim body { transition: none; }
 }
 
-/* The header's right side (SPEC "Sync state"): empty while sync is
-   healthy. A sync R asked for, or a recovery, ends with a check that
-   draws and "Updated just now", which fades; a problem stays, in the hot
-   color, and a click opens the details (dialog#syncinfo). */
-body > header #sync {
-  /* Gives way to the rail before the rail scrolls much; its text ends in
-     an ellipsis, all of it in the details. */
-  flex: 0 2 auto;
-  min-width: 12ch;
-  display: inline-flex;
+/* The tube's foot (SPEC "Sync state"): empty while sync is healthy. A
+   sync R asked for, or a recovery, ends with a check that draws and
+   "Updated just now", which fades; a problem stays, in the hot colour,
+   and a click opens the details (dialog#syncinfo). Its text wraps, three
+   lines at most; all of it is in the details. */
+#tube .foot {
+  flex: none;
+  margin-top: auto;
+  min-height: 2.6em;
+  display: flex;
   align-items: center;
-  max-width: 48ch;
+  padding: 8px 0.6ch 10px 1ch;
+  font-size: 12px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+}
+#sync {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  max-width: 100%;
+  overflow: hidden;
   padding: 0;
   font: inherit;
-  white-space: nowrap;
-  overflow: hidden;
+  line-height: 1.35;
+  text-align: left;
+  overflow-wrap: anywhere;
   color: var(--muted);
   background: none;
   border: 0;
   cursor: pointer;
   transition: opacity 600ms;
 }
-body > header #sync[hidden] { display: none; }
-body > header #sync.gone { opacity: 0; }
-body > header #sync .text { overflow: hidden; text-overflow: ellipsis; }
-body > header #sync:hover .text { text-decoration: underline; text-underline-offset: 3px; }
-body > header #sync:focus-visible { outline: 1px dashed var(--accent); }
-body > header #sync.hot .text { color: var(--accent-hot); }
+#sync[hidden] { display: none; }
+#sync.gone { opacity: 0; }
+#sync:hover .text { text-decoration: underline; text-underline-offset: 3px; }
+#sync:focus-visible { outline: 1px dashed var(--accent); }
+#sync.hot .text { color: var(--accent-hot); }
 /* The check: a ring that closes, then the tick draws. */
-#sync .sico { display: inline-grid; width: 0; opacity: 0; overflow: hidden; }
-#sync.done .sico { width: 14px; opacity: 1; margin-right: 0.8ch; }
+#sync .sico { display: inline-grid; width: 0; opacity: 0; overflow: hidden; vertical-align: -3px; }
+#sync.done .sico { width: 14px; opacity: 1; margin-right: 0.6ch; }
 #sync .sico svg { width: 14px; height: 14px; overflow: visible; }
 #sync .sico circle { fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; stroke-dasharray: 0.28 1; }
 #sync .sico path { fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; }
@@ -305,12 +343,12 @@ body > header #sync.hot .text { color: var(--accent-hot); }
 @media (prefers-reduced-motion: reduce) {
   #sync.done .sico circle { stroke-dasharray: 1 0; }
   #sync.done .sico path { stroke-dashoffset: 0; }
-  body > header #sync { transition: none; }
+  #sync { transition: none; }
 }
 /* The version nudge (client only): a muted tail after whatever the line
    says, in its own colour whatever the state's. */
-body > header #sync .nudge { color: var(--muted); }
-body > header #sync .text:not(:empty) + .nudge:not(:empty)::before { content: " · "; }
+#sync .nudge { color: var(--muted); }
+#sync .text:not(:empty) + .nudge:not(:empty)::before { content: " · "; }
 /* Read to a screen reader, never drawn: #sync-live announces changes of
    state, not the ticking age. */
 .sr-only {
@@ -407,12 +445,79 @@ main.list ol { list-style: none; margin: 0; padding: 0; }
   border-left-color: var(--accent);
 }
 
-nav.pages { padding: 6px 1ch; display: flex; gap: 2ch; }
+/* The pager row (list.html .pager), only on a paged list: < newer and
+   older > as keycapped buttons, dimmed at either end; between them the
+   cursor's place in the whole view, rolling (app.js updatePager), a track
+   with this page's slice and the cursor's dot, and the page's range.
+   Sticky at the top of the list (under the #accounts strip when narrow);
+   the list's scroll padding keeps the cursor row out from under it. */
+main.list > .pager {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 1.5ch;
+  height: var(--pager-h);
+  padding: 0 1.5ch;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  background: color-mix(in oklab, var(--bar) 50%, var(--bg));
+  border-bottom: 1px solid var(--border);
+}
+:root { --pager-h: 28px; }
+body:not(.split) main.list > .pager { top: var(--acc-h); }
+html:has(body:not(.split) main.list > .pager) { scroll-padding-top: calc(var(--acc-h) + var(--pager-h)); }
+body.split main.list:has(> .pager) { scroll-padding-top: var(--pager-h); }
+.pager .pg { flex: none; display: inline-flex; align-items: center; color: var(--muted); text-decoration: none; transition: color 160ms, opacity 160ms; }
+.pager a.pg:hover { color: var(--fg); }
+.pager .pg[aria-disabled] { opacity: 0.35; }
+.pager kbd {
+  font: inherit;
+  line-height: 1.25;
+  padding: 0 0.5ch;
+  color: var(--accent);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+}
+.pager .prev kbd { margin-right: 0.8ch; }
+.pager .next kbd { margin-left: 0.8ch; }
+.pager .pmid { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 1.2ch; }
+.pager .pos { display: inline-flex; color: var(--unread); font-variant-numeric: tabular-nums; }
+.pager .odo { display: inline-grid; overflow: hidden; }
+.pager .odo > span { grid-area: 1 / 1; text-align: right; }
+.pager .range { font-variant-numeric: tabular-nums; }
+.pager .ptrack { position: relative; flex: 0 1 14ch; min-width: 6ch; height: 3px; border-radius: 3px; background: var(--border); }
+.pager .pseg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--accent) 45%, var(--border));
+}
+.pager .pdot {
+  position: absolute;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 5px color-mix(in oklab, var(--accent) 60%, transparent);
+  transition: left 160ms cubic-bezier(.2, .8, .2, 1);
+}
+.pager .pseg[hidden], .pager .pdot[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .pager .pdot, .pager .pg { transition: none; }
+}
 
 /* ---- thread ------------------------------------------------------------ */
 
 /* Everything in a thread wraps, unbreakable tokens included (a URL for a
-   subject, a long address): body{overflow-x:hidden} would otherwise clip it
+   subject, a long address): body{overflow-x:clip} would otherwise clip it
    at the right edge with no way to scroll to it. */
 main.thread { padding: 4px 2ch 50vh; max-width: 110ch; overflow-x: hidden; overflow-wrap: anywhere; }
 main.thread:focus { outline: none; }
@@ -426,7 +531,7 @@ article.message {
   background: var(--raised);
   border: 1px solid var(--border);
   border-left: 3px solid var(--border);
-  scroll-margin-top: 40px;
+  scroll-margin-top: calc(var(--acc-h) + 8px);
 }
 /* Rail: border at rest, fg when unread, accent under the cursor (wins). */
 article.message.unread { border-left-color: var(--fg); }
@@ -594,18 +699,18 @@ a.drive:hover { border-color: var(--accent); }
 a.drive .kind { color: var(--muted); font-size: 12px; }
 
 /* ---- split pane --------------------------------------------------------- */
-/* app.js sets body.split at 140ch of this font (tri.SPLIT_CH × a measured
-   ch; a CSS media query would measure ch in the browser's default font).
+/* app.js sets body.split once the panes beside the tube are 140ch of
+   this font (triage.js layout, on a ch tube.js measured; a CSS media query
+   would measure ch in the browser's default font). The window is then a
+   fixed grid: the strip, the tube beside the panes, the key bar.
    #panes holds main.list and/or main.thread; data-primary is the one the URL
    names, data-focus the one the keys drive. */
 
-body.split { height: 100vh; display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0; }
-body.split > header, body.split > #keybar { flex: none; }
+body.split { height: 100vh; overflow: hidden; grid-template-rows: auto minmax(0, 1fr) auto; padding-bottom: 0; }
 body.split #panes {
-  flex: 1;
   min-height: 0;
   display: grid;
-  /* The list takes ~40% of the window, never narrower than 64ch nor wider
+  /* The list takes ~40% of the panes, never narrower than 64ch nor wider
      than 100ch; with nothing open it takes the whole width. The thread
      column has a floor so a wide list can't squeeze it below readable. */
   grid-template-columns: clamp(64ch, 40%, 100ch) minmax(48ch, 1fr);
@@ -625,8 +730,8 @@ body.split #panes[data-focus=list] article.message.selected { border-left-color:
 body.split #panes[data-focus=list] article.message.selected.unread { border-left-color: var(--fg); }
 
 /* The thread's title row, its subject: sticky at the top of the pane in
-   the split, a plain heading when narrow. The list has none (the rail
-   names the view, the key bar says where the cursor is). Which pane has
+   the split, a plain heading when narrow. The list has none (the tube
+   names the view; a paged list has its pager row). Which pane has
    the keys shows on its cursor's accent edge, not here. */
 body.split main.thread > h1 {
   display: block;
@@ -684,11 +789,11 @@ body:not(.split) #panes[data-primary=list] > main.thread { display: none; }
 }
 
 /* ---- key footer ------------------------------------------------------- */
-/* One bottom bar: the keys for the pane that has them (body[data-keys], set
-   by app.js) on the left; on the right the position counter (#ruler, the
-   list cursor's place, like vim's), which the status line covers while it
-   says something. Fixed over the page when narrow (body reserves its
-   height), the split's third row when wide. */
+/* One bottom bar across the window, under the tube too: the keys for the
+   pane that has them (body[data-keys], set by app.js) on the left, the
+   status line (flashes, the undo hint) on the right while it says
+   something. Fixed over the page when narrow (body reserves its height),
+   the split's third row when wide. */
 
 body { padding-bottom: var(--keybar-h); }
 #keybar {
@@ -707,7 +812,7 @@ body { padding-bottom: var(--keybar-h); }
   background: var(--bar);
   border-top: 1px solid var(--border);
 }
-body.split #keybar { position: static; }
+body.split #keybar { position: static; grid-row: 3; grid-column: 1 / -1; }
 #keybar kbd { font: inherit; color: var(--accent); }
 #keybar .keys {
   display: none;
@@ -748,16 +853,6 @@ body[data-keys=compose] #keybar .keys[data-for=compose] { display: block; }
   grid-template-columns: minmax(0, 1fr);
   justify-items: end;
 }
-.wright > * { grid-area: 1 / 1; }
-#ruler {
-  display: inline-grid;
-  overflow: hidden;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  transition: opacity 120ms;
-}
-#ruler > span { grid-area: 1 / 1; text-align: right; }
-.wright:has(> #status.show) > #ruler { opacity: 0; }
 #status {
   min-width: 0;
   max-width: 100%;
@@ -1135,11 +1230,12 @@ ul.suggest li.active { background: var(--selection); }
   user-select: none;
 }
 /* Centered in the list pane. Split, the pane's grid row gives it a height
-   and the mark takes the auto margins below the title; narrow, the list is
-   the only pane, so the window's center is the pane's. */
+   and the mark takes the auto margins; narrow, the list is the only pane,
+   so it is fixed over the window less the strip, the tube and the key bar. */
 main.list:not(:has(.row:not(.removing, .leaving))) { display: flex; flex-direction: column; }
 main.list:not(:has(.row:not(.removing, .leaving))) .empty-mark { display: block; }
-body:not(.split) .empty-mark { position: fixed; inset: 0; }
+body:not(.split) .empty-mark { position: fixed; inset: var(--acc-h) 0 var(--keybar-h) var(--tube-w); }
+:root.tube-fold body:not(.split) .empty-mark { left: var(--tube-fold-w); }
 
 /* ---- motion (motion.js) ------------------------------------------------ */
 /* The list's small motions, SPEC.md "Index views". motion.js runs them with

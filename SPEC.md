@@ -13,66 +13,85 @@ them here if they're wrong.
   the exception: their sans text renders in Inter, which goes in ahead of
   Arial/Helvetica/`sans-serif` (Liberation Sans here, soft at a fractional
   device scale). Serif and mono stacks are left as sent.
-- **Layout.** Header: pneu's mark (the sync status, below), then the
-  **rail**, then the header's right side, empty while sync is healthy
-  (2026-10-03 top-bar pass).
-  - *The rail.* The views are stations on a hairline track, each with a
-    small dot under it and its key number as a superscript fused to the
-    name (btop-style). The main line is `1` Inbox, `2` Starred, `3` Sent,
-    `4` Archive (Gmail's All Mail: everything but spam and trash; the URL
-    stays `/all`), ending in the search stop; about `5ch` on, a dimmer
-    siding with its own short track holds `5` Spam and `6` Trash. Each
-    track ends in a small vertical tick. A small accent capsule (16×4px,
-    rounded, a soft accent glow) sits under the active view. The digits
-    are muted; only the active view's takes the accent, and hovering the
-    rail lights them all. No counts on the rail. A window too narrow for
-    it (or a long status on the right, which gives way first and ends in
-    an ellipsis) scrolls the rail sideways, scrollbar hidden; the active
-    station, one taking focus and the search field are kept in view.
-  - *The capsule travels.* Switching views is a page load, so the capsule
-    moves by a cross-document view transition: it is rendered only inside
-    the active station and named (`view-transition-name: rail-cap`); the
-    page itself cuts (no root animation) and only the capsule moves, on a
-    soft spring, stretching mid-flight (longer trips take longer, 300 to
-    600ms, and stretch more), hopping 5px only when it crosses between the
-    main line and the siding; the new view's label lights at about three
-    quarters of the trip. Only a station-to-station navigation animates
-    (rail.js skips the transition on the old page, before anything is
-    captured, for anything else: a thread, compose, paging, the same view
-    again), and nothing animates under reduced motion. Keys and clicks
-    don't wait for it: only the capsule is captured, so the new page is
-    live under it from its first frame.
-  - *New spam.* The Spam station's dot glows (5px, accent) when spam has
-    arrived since you last visited Spam, and goes dark when you do. The
-    server renders the newest spam message's date on the Spam station
-    (one notmuch search per account, cached until the view generation
-    moves); the browser compares it with the time of its last visit to
-    Spam (localStorage). A first look counts what's there as seen. It
-    follows the message's Date header, so spam dated in the past doesn't
-    light it. Fetched pages (the split's list, a refetched thread) bring a
-    newer date, so it lights without a reload.
-  - *Search is a ghost stop.* No permanent box: a dimmed `/search` station
-    (`/` its superscript) waits at the end of the main line on a dashed
-    track. `/` or a click turns it into an inline field (`15ch`, dashed
-    accent underline); Enter searches (`/search?q=`), Esc or leaving the
-    field cancels. On a results page the stop is a real station showing
-    the query, with the capsule and a small `×` that leaves the search;
-    Esc on the list (with no thread pane open) does the same. Leaving goes
-    back to the view that search was started from, kept in its own
-    history entry, so Back to an older search or a reload still returns
-    there. `/` there edits the query.
+- **Layout.** No header: the window is the **tube**, a left column of
+  views, beside the panes, with the `#accounts` strip a full-width banner
+  above both while it has something to say, and the key bar across the
+  bottom (2026-10-04 left-nav pass, which replaced the 2026-10-03 top rail).
+  The tube is `18ch` wide in the `--bar` surface with a 1px `--border` on
+  its right; narrow, the page scrolls and the strip and the tube stay put.
+  - *The tube, top to bottom.* pneu's mark (18px; the sync status, below),
+    then the stations down a 1px vertical line: the search station `/`,
+    then `1` Inbox, `2` Starred, `3` Sent, `4` All (Gmail's All Mail:
+    everything but spam and trash; `/all`), then a dashed stretch of the
+    line (the drop, 22px of extra room), then `5` Spam and `6` Trash in a
+    slightly dimmer label colour. Each station has a 5px dot on the line;
+    its key number is a superscript fused to the name (btop-style), muted,
+    the accent on the active station, and all of them accent while the
+    tube is hovered. Every station's name is also its `title`. No counts.
+    Pushed to the bottom, under a rule, the foot: the sync status's words
+    (below).
+  - *The capsule.* A 4×16px accent pill with a soft accent glow sits on
+    the active station's dot. Switching views is a page load, so it moves
+    by a cross-document view transition: it is rendered only inside the
+    active station and named (`view-transition-name: tube-cap`); the page
+    itself cuts (no root animation) and only the capsule moves, on a soft
+    spring, stretching vertically mid-flight (longer trips take longer,
+    `300 + 0.9·dy` ms up to 600, and stretch more, `1 + dy/70` up to 2.8);
+    the new view's label lights at about three quarters of the trip. Only
+    a station-to-station navigation animates (tube.js skips the transition
+    on the old page, before anything is captured, for anything else: a
+    thread, compose, paging, the same view again), and nothing animates
+    under reduced motion. Keys and clicks don't wait for it: only the
+    capsule is captured, so the new page is live under it from its first
+    frame.
+  - *A thread keeps its station.* A thread page (narrow, or split before
+    its list arrives) lights the station it was opened from, with the
+    capsule: the list that opened it, else the tab's last list, else
+    Inbox. Another view's key there is a station-to-station trip. Esc and
+    Back work as ever.
+  - *New spam.* The Spam station's dot glows (accent, with a glow) when
+    spam has arrived since you last visited Spam, and goes dark when you
+    do. The server renders the newest spam message's date on the Spam
+    station (one notmuch search per account, cached until the view
+    generation moves); the browser compares it with the time of its last
+    visit to Spam (localStorage). A first look counts what's there as
+    seen. It follows the message's Date header, so spam dated in the past
+    doesn't light it. Fetched pages (the split's list, a refetched thread)
+    bring a newer date, so it lights without a reload.
+  - *Search is a station.* No permanent box: the search station (`/`
+    search) heads the tube. `/` or a click turns it into an inline field
+    (dashed accent underline); Enter searches (`/search?q=`), Esc or
+    leaving the field cancels. On a results page the station shows the
+    query, ellipsized, with the capsule and a small `×` that leaves the
+    search; Esc on the list (with no thread pane open) does the same.
+    Leaving goes back to the view that search was started from, kept in
+    its own history entry, so Back to an older search or a reload still
+    returns there. `/` there edits the query.
+  - *Folded.* When there isn't room the tube folds to `6ch`: only the
+    mark, the `/` and the digits stay, on the same line with the capsule
+    and the drop; the names are the stations' titles; the foot hides, so
+    the mark's colour carries the sync status alone; the search field
+    floats beside the column (`--raised`, an accent border). The width
+    animates (260ms), the capsule staying on its dot throughout. The split
+    outranks the tube's labels: the split needs `140ch` of panes, so the
+    tube is open with the split from `158ch` of window, folded with the
+    split from `146ch`, open again with one pane from `118ch` (a list of
+    at least `100ch`), and folded below that. It goes by the width alone,
+    never by whether a thread is open, and is decided before the first
+    paint. The thresholds live together in triage.js (`layout`).
   - *The easter egg.* Clicking the mark while sync is healthy winds the
-    capsule up, shoots it off the right end of the rail, and brings it
-    back in from the left out of the mark, which pulses as it passes,
-    to settle at its station (1150ms, clipped to the rail). Not under
-    reduced motion; in a problem state the click opens the sync details.
+    capsule down, shoots it up out through the top of the column, pulses
+    the mark, and drops the capsule back onto its station with a bounce
+    (1150ms, clipped to the column). Not under reduced motion; in a
+    problem state the click opens the sync details.
   Two named panes, the list and the thread, and exactly one is active: it
   gets the keys, its cursor row or message carries the accent edge, and
-  the footer lists its keys. At `140ch` and above, with a thread open,
-  they sit side by side: the list takes 40% of the window (clamped to
+  the footer lists its keys. At `140ch` of panes and above (beside the
+  tube), with a thread open, they sit side by side: the list takes 40%
+  of the panes (clamped to
   `64ch`-`100ch`), the thread the rest (at least `48ch`). The thread has a
-  one-line sticky title row, its subject; the list has none (the rail
-  names the view, the key bar says where the cursor is). The pane without
+  one-line sticky title row, its subject; the list has none (the tube
+  names the view; a paged list has its pager row). The pane without
   the keys dims its cursor's edge; nothing shifts when focus moves. With
   no thread open the list fills the window. Below `140ch` the active pane
   is the whole screen (list or thread).
@@ -83,7 +102,7 @@ them here if they're wrong.
   pane open; `Esc` on the list closes the pane (the list fills the window
   again). `Tab`/`Shift+Tab` switch panes, except inside a mail body, where
   Tab walks its links. `+` maximizes the active pane (the narrow layout)
-  until `+` again or the window crosses `140ch`. The one time a thread
+  until `+` again or the window crosses the split width. The one time a thread
   opens without being asked: archiving, trashing or spamming the open
   thread (`e`, `t`, `#`, `!`, from either pane) moves the cursor to the next row and opens it,
   keys staying put; an emptied list closes the pane.
@@ -99,7 +118,7 @@ them here if they're wrong.
   those two ends, so a theme with a dim comment color can't dim the app:
   `--muted` is fg 65%, `--border` is fg 12%, `--unread` is fg pushed toward
   white 40%, `--accent-hot` is the accent with chroma pushed up 35% (for the
-  mark and the header's status text when sync is in trouble only). Body text is `--fg` at 14px; only dates, counts,
+  mark and the tube's status text when sync is in trouble only). Body text is `--fg` at 14px; only dates, counts,
   and to/cc lines are muted. Authors are never muted. *default*
 - **Separation.** Rows are divided by a 1px `--border` line, not zebra
   stripes. Message cards are bordered with a 3px left rail. Section headers
@@ -108,7 +127,7 @@ them here if they're wrong.
 - **Keyboard-first.** A cursor row is always present in index views and is
   the primary visual state. Mouse works everywhere but nothing is mouse-only.
 - **Keys (HEY navigation, Gmail actions).**
-  Views: `1` Inbox · `2` Starred · `3` Sent · `4` Archive · `5` Spam · `6` Trash.
+  Views: `1` Inbox · `2` Starred · `3` Sent · `4` All · `5` Spam · `6` Trash.
   Move: `j/k` (or `↓/↑`) rows (list) or scroll three lines (thread) · `g/G` first
   and last row · `>`/`<` older and newer page (`<` lands on the last row) ·
   `n/p` messages · `Space`/`Shift+Space` page the thread · `Enter`/`o` open
@@ -121,7 +140,7 @@ them here if they're wrong.
   Gmail (forward, block, RSVP live there) · `R` sync now · `/` search ·
   `?` key overlay.
   Number keys work from anywhere, including inside a thread, so getting back
-  to the inbox is `1` or `u`. The rail fuses the number to each view
+  to the inbox is `1` or `u`. The tube fuses the number to each view
   name as a small superscript (btop-style: the key lives inside the
   label); the key footer and the `?` overlay render keys in accent too.
 - **Actions in index views** act on the selection if any, else the cursor row.
@@ -140,22 +159,18 @@ them here if they're wrong.
   collapses out (width and opacity, 360ms); `?` always stays. The counts
   are this browser's (localStorage); when any hint has gone, the `?`
   overlay ends with a button that brings them all back.
-  On the right, a position counter like vim's: `3 of 20`, the list
-  cursor's place in the whole view (`53 of 312` on a later page; only
-  the place while a paged total is still being counted), muted, in
-  tabular numbers, while the list is showing. When the number changes it
-  rolls like an odometer (the old one slides out, the new one in, in the
-  direction of the change, 260ms). The status line (flashes, the undo
-  hint and its button) takes that spot while it says something, then
-  hands it back.
+  On the right, the status line (flashes, the undo hint and its button)
+  while it says something. The bar runs under the tube too. The list's
+  position is the pager row's (Index views), never the key bar's.
 - **Sync state.** The mark says how current the view is: at rest when
   fresh, breathing (opacity and scale, 1.4s) while checking, and in
   `--accent-hot` for every problem below (a service worker, the link
   down, a failing account, stale) and for a client's version nudge. The
-  header's right side is empty while healthy. When a sync `R` asked for
+  tube's foot is empty while healthy. When a sync `R` asked for
   ends fresh, or sync recovers from a problem, it shows a small check
   (the ring closes, the tick draws) and `Updated just now`, which fades
-  after about 10s. A problem's line stays on the right, in
+  after about 10s. A problem's line stays in the foot (wrapping, three
+  lines at most), in
   `--accent-hot` (the nudge muted), until it's over. Clicking that text,
   or the mark while it is hot, opens the details; the `?` overlay leads
   with them always. A screen reader hears changes of state through a
@@ -171,13 +186,13 @@ them here if they're wrong.
   the page keeps what it shows, and the line comes back when the link
   does); `Checking…` while a sync `R` asked for is queued or running, or `R`
   hasn't been answered yet (the server says queued at once; the line gives
-  up waiting after 10s; the mark breathes and the right side stays
+  up waiting after 10s; the mark breathes and the foot stays
   empty): scheduled, launch and focus syncs are quiet, or
   a 30s period would keep the mark breathing; `<account>: sync failing`
   (`+N` for more) in `--accent-hot` once an account has failed as many
   times as the bar widget calls sick (one); `Updated 14m ago` in
   `--accent-hot` when idle and older than three sync periods; otherwise
-  `Updated just now` / `Updated 3m ago` (said on the right only in the
+  `Updated just now` / `Updated 3m ago` (said in the foot only in the
   check's moment, and in the mark's label and the details). The age is the oldest
   account's last successful sync: the view is only as fresh as its
   stalest account. On a client, whatever the line says gets a muted `·
@@ -309,13 +324,22 @@ them here if they're wrong.
 
 ## Index views
 
-Inbox (default), Starred, Sent, Archive (All Mail), Spam, Trash. Same
-template, different query. Paginated (`Newer`/`Older`, `<`/`>`). The key
-footer's counter says where the cursor sits (`3 of 12`, `53 of 44,095`
-when paged); `main.list` carries the page's place (`data-start`,
-`data-rows`, `data-total`, `data-paged`). The total is a thread count
-cached at each database's revision; uncached, the counter shows the place
-first and the total follows.
+Inbox (default), Starred, Sent, All (All Mail), Spam, Trash. Same
+template, different query. Paginated (`<`/`>`, 50 threads a page).
+`main.list` carries the page's place (`data-start`, `data-rows`,
+`data-total`, `data-paged`). The total is a thread count cached at each
+database's revision; uncached, the place shows first and the total
+follows.
+
+- **The pager row**, only on a list with more than one page, at the top
+  of the list pane (sticky): `<` newer on the left and older `>` on the
+  right, each with its key drawn as a small keycap, dimmed at either end;
+  between them the list cursor's place in the whole view, `53 of 2,318`
+  (the number rolls like an odometer when it changes: the old one slides
+  out and the new one in, in the direction of the change, 260ms), a thin
+  track with an accent segment for this page's slice and a dot for the
+  cursor, and the page's range, `51–100`. A click is the key (the split
+  swaps the pane). An unpaged list shows no position at all.
 
 - **Merged stream.** Both accounts in one list sorted by date. No per-row
   account marker; the account shows on the thread page only.
@@ -338,8 +362,8 @@ first and the total follows.
   once, then the messages are removed locally and pushed; Gmail purges.
   (Engine question: verify lieer pushes a local delete, otherwise Empty is
   `-spam`/`-trash` plus Gmail's 30-day purge.)
-- **Search** is the same view with the query shown on the rail's search
-  stop.
+- **Search** is the same view with the query shown on the tube's search
+  station.
 - **Motion** (`web/static/motion.js`; the timings are the approved
   mock's). Small, quick, and never in the way: the state changes on the
   key and motion only catches up; the next key ends any row still

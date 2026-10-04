@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-// The Spam station's light (SPEC.md "Layout"): the rail shows no counts,
+// The Spam station's light (SPEC.md "Layout"): the tube shows no counts,
 // but the Spam stop glows when spam has arrived since the user last
 // looked. The server says only when the newest spam is dated (Page.SpamAt,
 // the Spam link's data-spam); app.js compares that with the last visit it

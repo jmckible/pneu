@@ -55,9 +55,11 @@ type listPage struct {
 	Next  string
 	Err   string
 	Empty bool // show the mark as a watermark once the list is empty
-	// Where the page sits, for the key bar's position counter (app.js
-	// ruler): Start is the page's offset, Total the query's thread count
-	// or -1 while unknown (app.js asks for it with ?total=1).
+	// Where the page sits, for the pager row (app.js updatePager):
+	// Start is the page's offset, Total the query's thread count or -1
+	// while unknown (app.js asks for it with ?total=1). Range is this
+	// page's slice, "51–100", as first rendered.
+	Range string
 	Start int
 	Total int
 }
@@ -128,6 +130,9 @@ func (s *Server) list(view, title, fixed string) http.HandlerFunc {
 				data.Next = pageURL(page + 1)
 			}
 			data.Start = page * s.PerPage
+			if len(data.Rows) > 0 {
+				data.Range = commas(data.Start+1) + "–" + commas(data.Start+len(data.Rows))
+			}
 			if data.Prev != "" || data.Next != "" {
 				// Only a cached count here: an uncached one can take a
 				// second, and the page asks for it once it is showing.

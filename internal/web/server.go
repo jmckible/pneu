@@ -173,7 +173,7 @@ type Page struct {
 	Origin string
 	Title  string
 	Query  string // the search stop's text on a search page
-	View   string // the index view, for the header rail; "" on thread and compose pages
+	View   string // the index view, for the tube; "" on thread and compose pages
 	// Accounts is the #accounts strip's data-accounts attribute: every
 	// account's onboarding and sync state, which app.js renders (the strip
 	// and the sync status) and SSE keeps current.
@@ -189,27 +189,27 @@ type Page struct {
 	SpamAt int64
 }
 
-// NavLink is one station on the header rail.
+// NavLink is one station on the tube, the left column.
 type NavLink struct {
 	Key, View, Name, Href string
-	Side                  bool // on the siding (Spam, Trash), not the main line
+	Bin                   bool // below the drop (Spam, Trash), not the main line
 	Active                bool
 	Spam                  int64 // Spam's: Page.SpamAt, for its new-spam light
 }
 
-// navViews is the header rail in key order: the main line, then the
-// siding. app.js VIEWS binds 1..6 to the same hrefs; rail.js STATIONS
+// navViews is the tube in key order: the main line, then the bins below
+// the drop. app.js VIEWS binds 1..6 to the same hrefs; tube.js STATIONS
 // names their order.
 var navViews = []NavLink{
 	{Key: "1", View: "inbox", Name: "Inbox", Href: "/"},
 	{Key: "2", View: "starred", Name: "Starred", Href: "/starred"},
 	{Key: "3", View: "sent", Name: "Sent", Href: "/sent"},
-	{Key: "4", View: "all", Name: "Archive", Href: "/all"},
-	{Key: "5", View: "spam", Name: "Spam", Href: "/spam", Side: true},
-	{Key: "6", View: "trash", Name: "Trash", Href: "/trash", Side: true},
+	{Key: "4", View: "all", Name: "All", Href: "/all"},
+	{Key: "5", View: "spam", Name: "Spam", Href: "/spam", Bin: true},
+	{Key: "6", View: "trash", Name: "Trash", Href: "/trash", Bin: true},
 }
 
-// Nav is the header rail with the current view marked.
+// Nav is the tube with the current view marked.
 func (p Page) Nav() []NavLink {
 	out := make([]NavLink, len(navViews))
 	for i, l := range navViews {
@@ -222,16 +222,16 @@ func (p Page) Nav() []NavLink {
 	return out
 }
 
-// MainLine and Siding are Nav's two tracks.
+// MainLine and Bins are Nav above and below the drop.
 func (p Page) MainLine() []NavLink {
-	return slices.DeleteFunc(p.Nav(), func(l NavLink) bool { return l.Side })
+	return slices.DeleteFunc(p.Nav(), func(l NavLink) bool { return l.Bin })
 }
-func (p Page) Siding() []NavLink {
-	return slices.DeleteFunc(p.Nav(), func(l NavLink) bool { return !l.Side })
+func (p Page) Bins() []NavLink {
+	return slices.DeleteFunc(p.Nav(), func(l NavLink) bool { return !l.Bin })
 }
 
-// Searching: the page is a search with a query, so the search stop is a
-// station showing it.
+// Searching: the page is a search with a query, so the search station
+// shows it.
 func (p Page) Searching() bool { return p.View == "search" && strings.TrimSpace(p.Query) != "" }
 
 // page is base.html's data for r; at is the label read before the page's
