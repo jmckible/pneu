@@ -260,6 +260,22 @@ uncached, the page shows the range first and the total follows.
   (Engine question: verify lieer pushes a local delete, otherwise Empty is
   `-spam`/`-trash` plus Gmail's 30-day purge.)
 - **Search** is the same view with the query shown in the box.
+- **Motion** (`web/static/motion.js`; the timings are the approved
+  mock's). Small, quick, and never in the way: the state changes on the
+  key and motion only catches up; the next key ends any row still
+  opening or closing (and the cursor moving with it) and acts on the end
+  state, while a glide is retargeted. With
+  `prefers-reduced-motion` none of it runs: every change is what it was
+  before (the cursor jumps; a removed row keeps its 120ms fade). Colours
+  are the theme's tokens.
+  - *The cursor glides.* One element under the rows carries the cursor
+    row's look (selection background, accent rail, muted rail in the pane
+    without the keys) and moves to the cursor row, measured (rows needn't
+    share a height): 110ms, `cubic-bezier(.2,.7,.3,1)`, on `j/k`, `g/G`
+    and a click. A press mid-glide retargets from where it is, so holding
+    `j` never lags. A list rendered or re-rendered (a load, paging, a
+    refresh, a resize) places it still. At rest it looks exactly as the
+    row's own `.selected` look did.
 
 ## Thread page
 

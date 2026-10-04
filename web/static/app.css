@@ -932,3 +932,34 @@ ul.suggest li.active { background: var(--selection); }
 main.list:not(:has(.row:not(.removing))) { display: flex; flex-direction: column; }
 main.list:not(:has(.row:not(.removing))) .empty-mark { display: block; }
 body:not(.split) .empty-mark { position: fixed; inset: 0; }
+
+/* ---- motion (motion.js) ------------------------------------------------ */
+/* The list's small motions, SPEC.md "Index views". motion.js runs them with
+   the Web Animations API after app.js has changed the state; under
+   prefers-reduced-motion it runs none and every change is what it was
+   before. Colours are the theme's tokens only. */
+
+/* The cursor row's look rides one element under the rows (motion.js
+   Cursor), moved to the cursor row's offset, so j/k glide. The row itself
+   stays .selected (its state) but drops the look. isolation keeps the
+   cursor under the rows and the sticky title over all of it; clip keeps a
+   row sliding out from scrolling the pane sideways. */
+main.list ol.cursored { position: relative; isolation: isolate; overflow-x: clip; }
+main.list ol.cursored > .cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: -1;
+  background: var(--selection);
+  border-left: 3px solid var(--accent);
+  pointer-events: none;
+}
+/* !important: whatever else styles the cursor row (hover, the unfocused
+   pane's rail) now styles the cursor element instead. */
+main.list ol.cursored > .row.selected { background: transparent !important; border-left-color: transparent !important; }
+body.split #panes[data-focus=thread] main.list ol.cursored > .cursor { border-left-color: var(--muted); }
+
+@media (prefers-reduced-motion: reduce) {
+  main.list ol.cursored > .cursor { transition: none !important; }
+}
