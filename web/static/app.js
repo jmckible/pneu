@@ -13,6 +13,9 @@
   var rail = Pneu.rail || null; // rail.js, in <head>
   var lastKey = 0;
   var tri = Pneu.triage || null; // base.html loads triage.js; see `ready` below
+  // The list's motion (motion.js); without it every change is instant.
+  var mo = Pneu.motion || null;
+  function moving() { return !!(mo && !mo.still()); }
   // Client mode's link (link.js): null on a server, whose hello has none.
   var lk = Pneu.link || null;
   var linkInfo = null;
@@ -78,7 +81,10 @@
 
   function selKey() { return 'pneu:sel:' + L.url; }
 
-  function select(c, i, scroll) {
+  // how places the list's cursor (motion.js Cursor.to): absent, at once;
+  // 'glide' for a key or a click; 'keep' when the caller moves it in step
+  // with rows closing or opening.
+  function select(c, i, scroll, how) {
     if (!c.items.length) return;
     i = Math.max(0, Math.min(c.items.length - 1, i));
     if (c === T && i !== c.sel) cancelActions(); // the cursor moved
@@ -87,6 +93,7 @@
     c.sel = i;
     var el = c.items[i];
     el.classList.add('selected');
+    if (c === L && L.cursor && how !== 'keep') L.cursor.to(el, how);
     if (c === T) { syncMark(was); syncMark(el); syncKeybar(); } // the highlight shows on the cursor only
     if (c === L) {
       storage(function (s) {
@@ -102,7 +109,7 @@
 
   function move(c, delta, then) {
     return function () {
-      select(c, c.sel < 0 ? 0 : c.sel + delta);
+      select(c, c.sel < 0 ? 0 : c.sel + delta, undefined, 'glide');
       if (then) then();
     };
   }
@@ -203,6 +210,10 @@
     L.root = root;
     L.items = Array.prototype.slice.call(root.querySelectorAll('li.row'));
     L.sel = -1;
+    var ol = root.querySelector('ol');
+    L.cursor = mo && ol ? new mo.Cursor(ol) : null;
+    // What this render showed, for telling new mail in the next (loadList).
+    L.shown = { url: L.url, keys: L.items.map(function (r) { return rowId(r.dataset.account, r.dataset.thread); }) };
     if (!want) {
       // A thread triaged away from its own page is gone: keep its slot.
       var saved = storage(function (s) { return s.getItem(selKey()); });
@@ -218,7 +229,8 @@
     root.addEventListener('click', function (e) {
       var row = e.target.closest('li.row');
       if (!row || e.target.closest('a')) return;
-      select(L, L.items.indexOf(row), false);
+      if (L.cursor) L.cursor.settle();
+      select(L, L.items.indexOf(row), false, 'glide');
       openRow(); // a click is an open, as Enter is
     });
   }
@@ -1074,6 +1086,8 @@
       if (seq !== listSeq) return;
       if (sent && tri.refreshStale(sent, quiet())) { if (onStale) onStale(); return; }
       if (typeof want === 'function') want = want();
+      // A refresh of the same list: rows it didn't have are new mail.
+      var before = sent && L.shown && L.shown.url === url ? L.shown.keys : null;
       var top = L.root ? L.root.scrollTop : 0;
       if (L.root) L.root.replaceWith(got.main);
       else panes.insertBefore(got.main, panes.firstChild);
@@ -1085,6 +1099,7 @@
       got.main.scrollTop = top;
       var row = cur(L);
       if (row) row.scrollIntoView({ block: 'nearest' });
+      if (before && moving()) mo.arrive(L.items, mo.freshRows(before, L.shown.keys), L.sel, L.cursor);
       // Rendered before a change this window has since heard of: again.
       if (tri.behind(L.label, L.need)) refreshList();
     }).catch(function (err) {
@@ -1451,16 +1466,30 @@
 
   // takeRow pulls row i out of the list (animated) and selects its successor.
   // In the split, a row that was the open thread hands the pane to the new
-  // cursor row, or empties it with the list.
+  // cursor row, or empties it with the list. With motion (motion.js leave)
+  // the row slides out and its gap closes, the next row moving up into the
+  // cursor, which stays put (or follows up from the last row); the
+  // selection changes now and the next key acts on it while that runs.
+  // An emptied list draws its mark.
   function takeRow(i) {
     var el = L.items[i];
     var wasShown = split && shown(el);
+    var anim = moving() && L.cursor;
+    if (anim) L.cursor.settle();
     clearSelection();
     L.items.splice(i, 1);
-    el.classList.add('removing');
-    setTimeout(function () { if (el.classList.contains('removing')) el.remove(); }, 150);
     var n = tri.nextIndex(i, L.items.length);
-    if (n >= 0) select(L, n);
+    if (anim) {
+      if (n === i) el.scrollIntoView({ block: 'nearest' }); // the slot the next row moves into
+      if (n >= 0) select(L, n, n !== i, 'keep');
+      mo.leave(el, L.cursor, n >= 0 ? { row: L.items[n], stay: n === i } : null);
+      if (n < 0) mo.draw(L.root.querySelector('.empty-mark'));
+    } else {
+      el.classList.add('removing');
+      setTimeout(function () { if (el.classList.contains('removing')) el.remove(); }, 150);
+      if (n >= 0) select(L, n);
+      else if (L.cursor) L.cursor.to(null);
+    }
     listCount();
     if (wasShown) {
       leaving = true; // the pane's thread is gone: its keys wait for the next one
@@ -1473,15 +1502,22 @@
   // putRow re-inserts a row taken by takeRow at its old position and selects
   // it; if it was the open thread, it opens again.
   function putRow(h) {
+    if (L.cursor) L.cursor.settle(); // a leave still running ends first
     var i = Math.min(h.index, L.items.length);
-    h.el.classList.remove('removing');
+    h.el.classList.remove('removing', 'leaving');
     var before = L.items[i] || null;
     var ol = L.root.querySelector('ol');
     if (before) before.parentNode.insertBefore(h.el, before);
     else ol.appendChild(h.el);
     clearSelection();
     L.items.splice(i, 0, h.el);
-    select(L, i);
+    if (mo) mo.undraw(L.root.querySelector('.empty-mark'));
+    if (moving() && L.cursor) {
+      select(L, i, undefined, 'keep');
+      mo.enter(h.el, L.cursor);
+    } else {
+      select(L, i);
+    }
     listCount();
     if (h.shown && split) show(h.el.dataset.url, { history: 'replace' });
   }
@@ -1526,13 +1562,20 @@
       action = pick(row);
       return tag(action, rowArgs(row)).then(function (resp) {
         var prev = classes(row);
-        if (action === 'star') row.classList.add('flagged');
-        if (action === 'unstar') row.classList.remove('flagged');
+        if (action === 'star') setFlag(row, true);
+        if (action === 'unstar') setFlag(row, false);
         if (action === 'unread') row.classList.add('unread');
         if (inPane(row)) applyChanges(resp.ids, resp.changes, T.items);
         done(action, remember(resp, row.dataset.account, row.dataset.thread, prev));
       });
     }).catch(function (err) { fail(tri.verb(action || 'star'), err); });
+  }
+
+  // setFlag stars or unstars a row; a change pops the star (motion.js).
+  function setFlag(row, on) {
+    if (row.classList.contains('flagged') === on) return;
+    row.classList.toggle('flagged', on);
+    if (mo) mo.star(row, on);
   }
 
   function rowFor(e) {
@@ -1548,7 +1591,7 @@
     var row = rowFor(e);
     if (row && e.prev) {
       row.classList.toggle('unread', !!e.prev.unread);
-      row.classList.toggle('flagged', !!e.prev.flagged);
+      setFlag(row, !!e.prev.flagged);
       return;
     }
     // Taken on a thread page, or before a reload: the row isn't here to put back.
@@ -1589,7 +1632,7 @@
     if (!row) return;
     var st = threadState(arts);
     row.classList.toggle('unread', st.unread);
-    row.classList.toggle('flagged', st.flagged);
+    setFlag(row, st.flagged);
   }
 
   // applyChanges mirrors a response's tag changes onto the articles it named.
@@ -2087,8 +2130,8 @@
       Escape: function () { if (split && (T.root || T.pending)) closePane(); else leaveSearch(); },
       Enter: openRow,
       o: openRow,
-      g: function () { select(L, 0); },
-      G: function () { select(L, L.items.length - 1); },
+      g: function () { select(L, 0, undefined, 'glide'); },
+      G: function () { select(L, L.items.length - 1, undefined, 'glide'); },
       '>': whenReady(page(1)),
       '<': whenReady(page(-1)),
       e: whenReady(function () { listRemove('archive'); }),
@@ -2180,6 +2223,7 @@
     // Enter on a focused link or button keeps its native meaning.
     if (e.key === 'Enter' && t && t.nodeType === 1 && t.closest('a, button')) return;
     e.preventDefault();
+    if (L.cursor) L.cursor.settle(); // a new key finishes the list's motion: it acts on the end state
     fn(e, ident);
     learnKey(kind, key); // the hint for a key used often enough steps aside
   }
@@ -2341,7 +2385,11 @@
     var wait = Math.max(lastKey, lastTag) + 2000 - Date.now();
     if (inflight > 0) wait = Math.max(wait, 500);
     if (wait <= 0 && !searching()) {
-      if (primary === 'list') { carryFlash(); location.reload(); }
+      if (primary === 'list') {
+        carryFlash();
+        if (mo && L.shown) mo.stash(L.shown.url, L.shown.keys); // the reload tells new mail by it
+        location.reload();
+      }
       return;
     }
     reloadTimer = setTimeout(reloadWhenQuiet, Math.max(wait, 500));
@@ -2864,7 +2912,13 @@
 
   setPrimary(primary); // also shows the footer's keys
   if (primary === 'list') storage(function (s) { s.setItem(VIEW_KEY, L.url); });
-  if (L.root) { L.label = pageLabel(document); initList(L.root); }
+  if (L.root) {
+    L.label = pageLabel(document);
+    initList(L.root);
+    // Reloaded for new mail (narrow; reloadWhenQuiet): it opens in.
+    var stashed = mo && mo.unstash(L.url);
+    if (stashed && moving()) mo.arrive(L.items, mo.freshRows(stashed, L.shown.keys), L.sel, L.cursor);
+  }
   if (T.root) {
     T.label = pageLabel(document);
     T.url = location.pathname;

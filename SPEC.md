@@ -340,6 +340,48 @@ first and the total follows.
   `-spam`/`-trash` plus Gmail's 30-day purge.)
 - **Search** is the same view with the query shown on the rail's search
   stop.
+- **Motion** (`web/static/motion.js`; the timings are the approved
+  mock's). Small, quick, and never in the way: the state changes on the
+  key and motion only catches up; the next key ends any row still
+  opening or closing (and the cursor moving with it) and acts on the end
+  state, while a glide is retargeted and a star or a wash plays out. With
+  `prefers-reduced-motion` none of it runs: every change is what it was
+  before (the cursor jumps; a removed row keeps its 120ms fade). Colours
+  are the theme's tokens.
+  - *The cursor glides.* One element under the rows carries the cursor
+    row's look (selection background, accent rail, muted rail in the pane
+    without the keys) and moves to the cursor row, measured (rows needn't
+    share a height): 110ms, `cubic-bezier(.2,.7,.3,1)`, on `j/k`, `g/G`
+    and a click. A press mid-glide retargets from where it is, so holding
+    `j` never lags. A list rendered or re-rendered (a load, paging, a
+    refresh, a resize) places it still. At rest it looks exactly as the
+    row's own `.selected` look did.
+  - *A removed row closes its gap.* Archive, trash or spam slides the row
+    28px right as it fades, then its height closes (280ms in all); the
+    rows below move up, so the next row moves into the cursor, which stays
+    put. From the last row the cursor moves up in step. Undo is the
+    reverse, shorter (240ms): the gap opens, the row fades in from the
+    right.
+  - *The star pops.* Starring (`s`, the thread pane's `s` on its row, an
+    undo) scales the star 0 → 1.35 → 1 while it turns −30° → 8° → 0
+    (360ms), six 3px accent sparks burst about 11px from it and fade
+    (420ms after 70ms), and the subject slides over as the star's width
+    opens (150ms). Unstarring shrinks it out (160ms). At rest the star is
+    the same glyph as before. The thread page's stars (one per message)
+    don't pop.
+  - *New mail opens in.* A refresh of the same list (a `view` or `hello`;
+    not a first load, another view or page) opens each row it didn't have
+    before, by account and thread, from nothing to its height (240ms,
+    `cubic-bezier(.2,.8,.2,1)`), then washes it with the accent at 20%,
+    fading over 1.6s after 240ms. The cursor stays on its thread and moves
+    down in step. More than ten new rows at once (a first pull filling the
+    list) is a bulk change and renders still. A narrow list refreshes by
+    reloading, so it keeps the rows it showed across the reload
+    (sessionStorage, for 15s) to tell what's new.
+  - *An emptied list draws its mark.* Triaging the last row away draws
+    the watermark's stroke (1.3s, `cubic-bezier(.45,0,.2,1)`), a little
+    brighter than at rest; a list that loads empty shows it still. No
+    words with it.
 
 ## Thread page
 
