@@ -445,6 +445,48 @@ func TestOldestSkipsUndated(t *testing.T) {
 	}
 }
 
+// OldestMatch is the oldest message the query matches, skips an undated
+// one, and says nothing for no match.
+func TestOldestMatch(t *testing.T) {
+	a := setup(t)
+	ctx := context.Background()
+	if got, err := a.OldestMatch(ctx, "tag:spam"); err != nil || !got.IsZero() {
+		t.Fatalf("OldestMatch(no spam) = %v, %v", got, err)
+	}
+	all, err := a.Oldest(ctx)
+	if err != nil || all.IsZero() {
+		t.Fatalf("Oldest = %v, %v", all, err)
+	}
+	if got, err := a.OldestMatch(ctx, "*"); err != nil || !got.Equal(all) {
+		t.Fatalf("OldestMatch(*) = %v, %v; want %v", got, err, all)
+	}
+	if err := a.Tag(ctx, []string{"+late"}, []string{"a1@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := a.OldestMatch(ctx, "tag:late")
+	if want := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC); err != nil || !got.Equal(want) {
+		t.Fatalf("OldestMatch(tag:late) = %v, %v; want %v", got, err, want)
+	}
+	cfg, err := os.ReadFile(a.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mail := strings.TrimPrefix(strings.SplitN(string(cfg), "\n", 3)[1], "path=")
+	undated := "From: Spam <spam@example.com>\nSubject: no date\nMessage-ID: <undated@example.com>\n\nbody\n"
+	if err := os.WriteFile(filepath.Join(mail, "cur", "9:2,"), []byte(undated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.run(ctx, nil, "new", "--quiet"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := a.OldestMatch(ctx, "*"); err != nil || !got.Equal(all) {
+		t.Fatalf("OldestMatch(*) with an undated message = %v, %v; want %v", got, err, all)
+	}
+	if _, err := a.OldestMatch(ctx, "date:notadate"); err == nil {
+		t.Error("a bad query isn't an error")
+	}
+}
+
 // Newest sees excluded tags (the query names them) and says nothing for
 // no match.
 func TestNewest(t *testing.T) {

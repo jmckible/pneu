@@ -114,8 +114,10 @@ func TestInbox(t *testing.T) {
 		`<link rel="stylesheet" href="/static/app.css">`,
 		`<script src="/static/purify.min.js"></script>`,
 		`<script src="/static/app.js" defer></script>`,
-		// The page's place, for the key bar's counter; one page, so not paged.
-		`<main class="list" data-view="inbox" data-start="0" data-rows="20" data-total="20">`,
+		// One page, so not paged: no oldest date, and the pager row is
+		// there but empty, so a paged list's rows sit where these do.
+		`<main class="list" data-view="inbox">
+<div class="pager" aria-hidden="true"></div>`,
 		`<link rel="expect" href="#tube" blocking="render">`, // tube.js's pagereveal sees the tube
 		`<script src="/static/triage.js"></script>
 <script src="/static/tube.js"></script>`, // the layout thresholds before the fold
@@ -135,8 +137,9 @@ func TestInbox(t *testing.T) {
 			t.Errorf("inbox missing %s", want)
 		}
 	}
-	// No header, no ruler, and an unpaged list has no pager row.
-	for _, gone := range []string{"<header>", `id="ruler"`, `class="pager"`, `class="pages"`} {
+	// No header, no ruler, and an unpaged list's pager row is empty: no
+	// buttons, no timeline, no oldest date.
+	for _, gone := range []string{"<header>", `id="ruler"`, `<nav class="pager"`, `class="pages"`, `rel="next"`, `class="ptrack"`, `data-oldest`} {
 		if strings.Contains(body, gone) {
 			t.Errorf("inbox has %s", gone)
 		}
@@ -223,17 +226,16 @@ func TestPagination(t *testing.T) {
 	if !slices.Equal(all, inboxOrder) {
 		t.Fatalf("pages concatenated:\n got %q\nwant %q", all, inboxOrder)
 	}
-	// main.list says where the page sits. Nothing is counted during a
-	// render: the first look has no total and the page asks for it.
-	if body := getOK(t, s, "/?page=1"); !strings.Contains(body, `data-start="5" data-rows="5" data-total="-1" data-paged>`) {
-		t.Errorf("uncounted position: %s", body)
+	// A paged list carries the view's oldest date for the timeline.
+	if body := getOK(t, s, "/?page=1"); !regexp.MustCompile(`<main class="list" data-view="inbox" data-paged data-oldest="[1-9]\d*">`).MatchString(body) {
+		t.Errorf("paged list's oldest date: %s", body)
 	}
 	// The pager row: both ends live in the middle, the first page's newer
 	// end dimmed, the last's older; the old bottom links are gone.
 	mid := getOK(t, s, "/?page=1")
 	for _, want := range []string{
 		`<nav class="pager" aria-label="Pages"><a class="pg prev" rel="prev" href="/"><kbd>&lt;</kbd>newer</a>`,
-		`<span class="range">6–10</span>`,
+		`<span class="pmid"><span class="pspan"></span><span class="tl" aria-hidden="true" hidden><span class="tnow">now</span>`,
 		`<a class="pg next" rel="next" href="/?page=2">older<kbd>&gt;</kbd></a></nav>`,
 	} {
 		if !strings.Contains(mid, want) {
@@ -245,23 +247,6 @@ func TestPagination(t *testing.T) {
 	}
 	if last := getOK(t, s, "/?page=3"); !strings.Contains(last, `<span class="pg next" aria-disabled="true">older<kbd>&gt;</kbd></span>`) {
 		t.Error("last page's older end isn't dimmed")
-	}
-	w := do(s, "GET", "/?page=1&total=1", withCookie)
-	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"total":20}` {
-		t.Fatalf("?total=1: %d %s", w.Code, w.Body)
-	}
-	// Counted once, cached at the databases' revisions: the next render has it.
-	if body := getOK(t, s, "/?page=3"); !strings.Contains(body, `data-start="15" data-rows="5" data-total="20" data-paged>`) {
-		t.Errorf("cached position: %s", body)
-	}
-	// A tag write moves the revision; the stale count is not shown.
-	first := rows(t, s, "/")[0]
-	tagOK(t, s, form("action", "archive", "account", first.Account, "ids", esc(first.MsgIDs...)))
-	if body := getOK(t, s, "/?page=1"); !strings.Contains(body, `data-total="-1"`) {
-		t.Error("stale total survived a tag write")
-	}
-	if w := do(s, "GET", "/?total=1", withCookie); strings.TrimSpace(w.Body.String()) != `{"total":19}` {
-		t.Errorf("recount after archive: %s", w.Body)
 	}
 	// Search pages keep the query.
 	s.PerPage = 1
@@ -697,7 +682,7 @@ func TestSentAndMe(t *testing.T) {
 		},
 	} {
 		body := getOK(t, s, path)
-		if !strings.Contains(body, `<main class="list" data-view="`+path[1:]+`" `) {
+		if !strings.Contains(body, `<main class="list" data-view="`+path[1:]+`"`) {
 			t.Errorf("%s: view missing", path)
 		}
 		for _, w := range want {

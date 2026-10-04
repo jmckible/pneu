@@ -1,6 +1,8 @@
-{{define "content"}}<main class="list" data-view="{{.View}}" data-start="{{.Start}}" data-rows="{{len .Rows}}" data-total="{{.Total}}"{{if or .Prev .Next}} data-paged{{end}}>
-{{- if or .Prev .Next}}
-<nav class="pager" aria-label="Pages">{{if .Prev}}<a class="pg prev" rel="prev" href="{{.Prev}}"><kbd>&lt;</kbd>newer</a>{{else}}<span class="pg prev" aria-disabled="true"><kbd>&lt;</kbd>newer</span>{{end}}<span class="pmid"><span class="pos"><span class="odo"></span><span class="of"></span></span><span class="ptrack" aria-hidden="true"><span class="pseg"></span><span class="pdot"></span></span><span class="range">{{.Range}}</span></span>{{if .Next}}<a class="pg next" rel="next" href="{{.Next}}">older<kbd>&gt;</kbd></a>{{else}}<span class="pg next" aria-disabled="true">older<kbd>&gt;</kbd></span>{{end}}</nav>
+{{define "content"}}<main class="list" data-view="{{.View}}"{{if .Paged}} data-paged data-oldest="{{.Oldest}}"{{end}}>
+{{- if .Paged}}
+<nav class="pager" aria-label="Pages">{{if .Prev}}<a class="pg prev" rel="prev" href="{{.Prev}}"><kbd>&lt;</kbd>newer</a>{{else}}<span class="pg prev" aria-disabled="true"><kbd>&lt;</kbd>newer</span>{{end}}<span class="pmid"><span class="pspan"></span><span class="tl" aria-hidden="true" hidden><span class="tnow">now</span><span class="ptrack"><span class="pseg"></span><span class="pdot"></span></span><span class="tend"></span></span></span>{{if .Next}}<a class="pg next" rel="next" href="{{.Next}}">older<kbd>&gt;</kbd></a>{{else}}<span class="pg next" aria-disabled="true">older<kbd>&gt;</kbd></span>{{end}}</nav>
+{{- else}}
+<div class="pager" aria-hidden="true"></div>
 {{- end}}
 {{- if .Err}}
 <p class="error">{{.Err}}</p>

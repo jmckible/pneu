@@ -163,6 +163,37 @@ func (a Account) Newest(ctx context.Context, query string) (time.Time, error) {
 	return time.Unix(out[0].Timestamp, 0), nil
 }
 
+// OldestMatch is the date of the oldest message query matches, as the
+// list counts them (search.exclude_tags applies unless the query names the
+// tag, --exclude=all as Search), or the zero time when nothing does. With
+// --sort=oldest-first a summary's timestamp is its thread's oldest matched
+// date. An undated message (indexed at timestamp 0) is skipped by asking
+// again past it, so the query runs verbatim in the usual case.
+func (a Account) OldestMatch(ctx context.Context, query string) (time.Time, error) {
+	first := func(q string) (int64, error) {
+		var out []ThreadSummary
+		if err := a.runJSON(ctx, &out, "search", "--format=json", "--output=summary", "--sort=oldest-first", "--exclude=all", "--limit=1", "--", q); err != nil {
+			return 0, err
+		}
+		if len(out) == 0 {
+			return 0, nil
+		}
+		return out[0].Timestamp, nil
+	}
+	ts, err := first(query)
+	if err == nil && ts <= 0 {
+		past := "date:@1.. and (" + query + ")"
+		if strings.TrimSpace(query) == "*" {
+			past = "date:@1.." // notmuch reads * as everything only on its own
+		}
+		ts, err = first(past)
+	}
+	if err != nil || ts <= 0 {
+		return time.Time{}, err
+	}
+	return time.Unix(ts, 0), nil
+}
+
 // Count counts messages, or threads when threads is true.
 func (a Account) Count(ctx context.Context, query string, threads bool) (int, error) {
 	output := "--output=messages"
