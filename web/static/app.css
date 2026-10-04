@@ -103,18 +103,19 @@ body:not(.split) #tube {
    Each station is 28px tall with its dot 14px down, 1.8ch in; the line
    runs dot to dot in each group (its ::before), dashed across the drop.
    The capsule (.cap, only inside the active station) sits on its dot, so
-   it stays there whatever the column's width does. The clip takes the
-   easter egg's trip out through the top (and a window too short for the
-   column), never the sides: a folded column's search field floats beside
-   it. */
+   it stays there whatever the column's width does. A window too short
+   for the stations scrolls them (their scrollbar hidden; app.js keeps the
+   active or focused station in view), the mark and the foot staying put.
+   Nothing clips the column itself: the easter egg flies in a layer of
+   its own (.egg) and a folded column's search field is fixed beside it. */
 #tube {
+  position: relative;
   z-index: 3;
   display: flex;
   flex-direction: column;
   min-height: 0;
   background: var(--bar);
   border-right: 1px solid var(--border);
-  clip-path: inset(0 -100vw 0 0);
 }
 #tube a { color: inherit; text-decoration: none; }
 /* The mark is the sync status (SPEC "Sync state"): at rest when current,
@@ -141,7 +142,28 @@ body:not(.split) #tube {
 #mark[data-state=checking] .mark { animation: breathe 1.4s ease-in-out infinite; }
 @keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.88); } }
 
-#tube .line { position: relative; flex: none; padding: 6px 0; }
+#tube .line {
+  position: relative;
+  flex: 0 1 auto;
+  min-height: 0;
+  padding: 6px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+#tube .line::-webkit-scrollbar { display: none; }
+/* The easter egg's trip (app.js shoot): a stand-in pill in a layer the
+   size of the column, which clips it, while the capsule waits unseen. */
+#tube .egg { position: absolute; inset: 0; z-index: 4; overflow: hidden; pointer-events: none; }
+#tube .egg > span {
+  position: absolute;
+  width: 4px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--accent);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 55%, transparent);
+}
+#tube.egging .cap { visibility: hidden; }
 #tube .main, #tube .bins, #tube .drop { position: relative; display: block; }
 #tube .drop { height: 22px; }
 #tube .main::before, #tube .bins::before, #tube .drop::before {
@@ -265,10 +287,12 @@ body:not(.split) #tube {
 :root.tube-fold #tube .x, :root.tube-fold #tube .foot { display: none; }
 :root.tube-fold #tube a[data-station] > kbd { font-size: 12px; vertical-align: baseline; margin: 0; }
 :root.tube-fold #tube .q input {
-  position: absolute;
+  /* Fixed, so the stations' scroller doesn't clip it; app.js sets --q-top
+     to the station's place as it opens. */
+  position: fixed;
   z-index: 5;
   left: 5.5ch;
-  top: 0;
+  top: var(--q-top, 0px);
   width: 24ch;
   padding: 3px 1ch;
   line-height: 20px;

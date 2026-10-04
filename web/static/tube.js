@@ -248,7 +248,25 @@
       if (station === 'q') stop.appendChild(cap);
     }
     if (!station) cap.remove();
+    revealActive();
     return station;
+  }
+
+  // reveal scrolls the stations (app.css #tube .line, which scrolls when
+  // the window is too short for them) just enough to show el, a station
+  // or the search field. Only the stations move, never the page.
+  function reveal(el) {
+    var sc = el && el.closest && el.closest('#tube .line');
+    if (!sc || sc.scrollHeight <= sc.clientHeight) return;
+    var r = el.getBoundingClientRect(), b = sc.getBoundingClientRect(), pad = 6;
+    if (r.top < b.top + pad) sc.scrollTop -= b.top + pad - r.top;
+    else if (r.bottom > b.bottom - pad) sc.scrollTop += r.bottom - (b.bottom - pad);
+  }
+
+  // revealActive shows the lit station.
+  function revealActive() {
+    var t = tube(), cap = t && t.querySelector('.cap');
+    reveal(cap && cap.closest('[data-station]'));
   }
 
   // placeThread keeps the station a thread page came from lit (SPEC
@@ -263,6 +281,8 @@
 
   X.place = place;
   X.placeThread = placeThread;
+  X.reveal = reveal;
+  X.revealActive = revealActive;
 
   // ---- the view transition ------------------------------------------------
 
@@ -287,7 +307,7 @@
     var cap = capsule();
     var to = e.activation && e.activation.entry ? stationOf(e.activation.entry.url) : null;
     var t = tube();
-    if (still() || !cap || !animates(cap.station, to) || (t && t.classList.contains('away'))) {
+    if (still() || !cap || !animates(cap.station, to) || (t && (t.classList.contains('away') || t.classList.contains('egging')))) {
       vt.skipTransition();
       return;
     }
@@ -299,6 +319,7 @@
   // three quarters of the way.
   root.addEventListener('pagereveal', function (e) {
     placeThread();
+    revealActive();
     var vt = e.viewTransition;
     var hand = session(function (s) { var v = s.getItem(HAND); s.removeItem(HAND); return v; });
     if (!vt) return;

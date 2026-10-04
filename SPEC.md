@@ -29,7 +29,9 @@ them here if they're wrong.
     the accent on the active station, and all of them accent while the
     tube is hovered. Every station's name is also its `title`. No counts.
     Pushed to the bottom, under a rule, the foot: the sync status's words
-    (below).
+    (below). A window too short for the stations (or a high zoom) scrolls
+    them, scrollbar hidden, the mark and the foot staying put; the lit
+    station, and one taking focus, are kept in view.
   - *The capsule.* A 4×16px accent pill with a soft accent glow sits on
     the active station's dot. Switching views is a page load, so it moves
     by a cross-document view transition: it is rendered only inside the
@@ -82,7 +84,8 @@ them here if they're wrong.
   - *The easter egg.* Clicking the mark while sync is healthy winds the
     capsule down, shoots it up out through the top of the column, pulses
     the mark, and drops the capsule back onto its station with a bounce
-    (1150ms, clipped to the column). Not under reduced motion; in a
+    (1150ms; a stand-in flies it, clipped to the column, while the
+    capsule waits unseen). Not under reduced motion; in a
     problem state the click opens the sync details.
   Two named panes, the list and the thread, and exactly one is active: it
   gets the keys, its cursor row or message carries the accent edge, and

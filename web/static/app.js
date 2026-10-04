@@ -343,8 +343,12 @@
     input.addEventListener('blur', function () {
       setTimeout(function () { if (searchForm === f && !('sent' in f.dataset)) closeSearchField(); }, 0);
     });
+    // Folded, the field is fixed beside the column (app.css): at the
+    // station's height.
+    input.style.setProperty('--q-top', stop.getBoundingClientRect().top + 'px');
     input.focus();
     input.select();
+    if (tube) tube.reveal(stop);
   }
 
   function closeSearchField() {
@@ -363,6 +367,13 @@
     if (!tube || tube.stationOf(L.url) !== 'q') return false;
     location.assign(presearch());
     return true;
+  }
+
+  // Tab onto a station the short window has scrolled away: show it. As
+  // the window changes, the lit one.
+  if (navEl && tube) {
+    navEl.addEventListener('focusin', function (e) { tube.reveal(e.target.closest('[data-station]') || e.target); });
+    window.addEventListener('resize', tube.revealActive);
   }
 
   if (navEl) navEl.addEventListener('click', function (e) {
@@ -428,11 +439,13 @@
   requestAnimationFrame(function () { requestAnimationFrame(function () { document.documentElement.classList.add('tube-anim'); }); });
 
   // The easter egg: a click on the mark while sync is healthy winds the
-  // capsule down, shoots it up out through the top of the column (which
-  // clips it), pulses the mark as it goes, and drops it back onto its
-  // station with a bounce (the approved mock's timings). Nothing under
-  // reduced motion; a station-to-station navigation meanwhile doesn't
-  // travel (tube.js).
+  // capsule down, shoots it up out through the top of the column, pulses
+  // the mark as it goes, and drops it back onto its station with a bounce
+  // (the approved mock's timings). A stand-in pill flies it, in a layer
+  // the size of the column that clips it (app.css .egg), while the capsule
+  // waits unseen: the stations' own scroller would clip the trip below the
+  // mark. Nothing under reduced motion; a station-to-station navigation
+  // meanwhile doesn't travel (tube.js).
   var eggOn = false;
 
   function shoot() {
@@ -440,10 +453,17 @@
     var mark = document.querySelector('#mark .mark');
     if (eggOn || still() || !cap || !cap.animate) return;
     eggOn = true;
-    var top = -Math.round(cap.getBoundingClientRect().top - navEl.getBoundingClientRect().top) - 30;
+    var t = navEl.getBoundingClientRect(), c = cap.getBoundingClientRect();
+    var top = -Math.round(c.top - t.top) - 30;
     var dur = 1150;
-    navEl.classList.add('away');
-    var a = cap.animate([
+    var layer = el('div', 'egg'), pill = el('span');
+    layer.setAttribute('aria-hidden', 'true');
+    pill.style.left = (c.left - t.left - navEl.clientLeft) + 'px';
+    pill.style.top = (c.top - t.top - navEl.clientTop) + 'px';
+    layer.appendChild(pill);
+    navEl.appendChild(layer);
+    navEl.classList.add('away', 'egging');
+    var a = pill.animate([
       { transform: 'translateY(0) scaleY(1)', easing: 'cubic-bezier(.2,.8,.3,1)' },
       { transform: 'translateY(6px) scaleY(0.6)', offset: 0.12, easing: 'cubic-bezier(.6,0,1,.6)' },
       { transform: 'translateY(' + top + 'px) scaleY(4.5)', offset: 0.38 },
@@ -462,7 +482,13 @@
       ], { duration: 380, easing: 'cubic-bezier(.3,.7,.3,1)' });
     }, dur * 0.3);
     var relight = setTimeout(function () { navEl.classList.remove('away'); }, dur * 0.88);
-    var done = function () { eggOn = false; clearTimeout(pulse); clearTimeout(relight); navEl.classList.remove('away'); };
+    var done = function () {
+      eggOn = false;
+      clearTimeout(pulse);
+      clearTimeout(relight);
+      navEl.classList.remove('away', 'egging');
+      layer.remove();
+    };
     a.finished.then(done, done);
   }
 
