@@ -1193,13 +1193,20 @@
       action = pick(row);
       return tag(action, rowArgs(row)).then(function (resp) {
         var prev = classes(row);
-        if (action === 'star') row.classList.add('flagged');
-        if (action === 'unstar') row.classList.remove('flagged');
+        if (action === 'star') setFlag(row, true);
+        if (action === 'unstar') setFlag(row, false);
         if (action === 'unread') row.classList.add('unread');
         if (inPane(row)) applyChanges(resp.ids, resp.changes, T.items);
         done(action, remember(resp, row.dataset.account, row.dataset.thread, prev));
       });
     }).catch(function (err) { fail(tri.verb(action || 'star'), err); });
+  }
+
+  // setFlag stars or unstars a row; a change pops the star (motion.js).
+  function setFlag(row, on) {
+    if (row.classList.contains('flagged') === on) return;
+    row.classList.toggle('flagged', on);
+    if (mo) mo.star(row, on);
   }
 
   function rowFor(e) {
@@ -1215,7 +1222,7 @@
     var row = rowFor(e);
     if (row && e.prev) {
       row.classList.toggle('unread', !!e.prev.unread);
-      row.classList.toggle('flagged', !!e.prev.flagged);
+      setFlag(row, !!e.prev.flagged);
       return;
     }
     // Taken on a thread page, or before a reload: the row isn't here to put back.
@@ -1256,7 +1263,7 @@
     if (!row) return;
     var st = threadState(arts);
     row.classList.toggle('unread', st.unread);
-    row.classList.toggle('flagged', st.flagged);
+    setFlag(row, st.flagged);
   }
 
   // applyChanges mirrors a response's tag changes onto the articles it named.

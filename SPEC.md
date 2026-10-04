@@ -264,7 +264,7 @@ uncached, the page shows the range first and the total follows.
   mock's). Small, quick, and never in the way: the state changes on the
   key and motion only catches up; the next key ends any row still
   opening or closing (and the cursor moving with it) and acts on the end
-  state, while a glide is retargeted. With
+  state, while a glide is retargeted and a star plays out. With
   `prefers-reduced-motion` none of it runs: every change is what it was
   before (the cursor jumps; a removed row keeps its 120ms fade). Colours
   are the theme's tokens.
@@ -282,6 +282,13 @@ uncached, the page shows the range first and the total follows.
     put. From the last row the cursor moves up in step. Undo is the
     reverse, shorter (240ms): the gap opens, the row fades in from the
     right.
+  - *The star pops.* Starring (`s`, the thread pane's `s` on its row, an
+    undo) scales the star 0 → 1.35 → 1 while it turns −30° → 8° → 0
+    (360ms), six 3px accent sparks burst about 11px from it and fade
+    (420ms after 70ms), and the subject slides over as the star's width
+    opens (150ms). Unstarring shrinks it out (160ms). At rest the star is
+    the same glyph as before. The thread page's stars (one per message)
+    don't pop.
 
 ## Thread page
 

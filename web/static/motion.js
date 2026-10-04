@@ -1,14 +1,15 @@
 // motion.js — the list's small motions (SPEC.md "Index views", Motion): the
 // cursor gliding between rows, a removed row closing its gap (and opening
-// again on undo). Motion only catches up: app.js changes the state first
-// and calls these after, a key press ends any row still opening or closing
-// (settle) before app.js measures, and under prefers-reduced-motion none of
-// it runs.
+// again on undo), the star's pop. Motion only catches up: app.js changes
+// the state first and calls these after, a key press ends any row still
+// opening or closing (settle) before app.js measures, and under
+// prefers-reduced-motion none of it runs.
 (function (root) {
   'use strict';
 
   var GLIDE = 'cubic-bezier(.2,.7,.3,1)';  // the cursor between rows
   var LEAVE = 'cubic-bezier(.3,.6,.2,1)';  // a removed row
+  var OUT = 'cubic-bezier(.2,.8,.2,1)';    // the star's width
   var GLIDE_MS = 110, LEAVE_MS = 280, ENTER_MS = 240;
 
   var P = {};
@@ -177,9 +178,80 @@
     if (cursor) cursor.to(el, { ms: ENTER_MS / 2, ease: LEAVE, h0: 0, h: b.h });
   }
 
+  // ---- the star ----------------------------------------------------------
+  // At rest the star is the subject's ::before (app.css). While it moves, a
+  // real one stands in for it (the row is .popping, which hides the
+  // ::before), then goes, leaving the ::before exactly where it was.
+  var pops = new WeakMap();
+
+  function star(row, on) {
+    var subj = row.querySelector('.subject');
+    if (!subj || still()) return;
+    var prev = pops.get(row);
+    if (prev) prev();
+    var s = doc.createElement('span');
+    s.className = 'star';
+    s.setAttribute('aria-hidden', 'true');
+    s.textContent = '★ ';
+    subj.insertBefore(s, subj.firstChild);
+    row.classList.add('popping');
+    var sr = s.getBoundingClientRect(), w = sr.width;
+    // The glyph (a fallback font's, wider than 1ch) is the pop's centre.
+    var g = doc.createRange();
+    g.setStart(s.firstChild, 0);
+    g.setEnd(s.firstChild, 1);
+    var gr = g.getBoundingClientRect();
+    var cx = gr.left + gr.width / 2, cy = gr.top + gr.height / 2;
+    s.style.transformOrigin = px(cx - sr.left) + ' 55%';
+    var anims = [], sparks = [], timer = 0;
+    function done() {
+      clearTimeout(timer);
+      anims.forEach(function (a) { a.cancel(); });
+      sparks.forEach(function (p) { p.remove(); });
+      s.remove();
+      row.classList.remove('popping');
+      if (pops.get(row) === done) pops.delete(row);
+    }
+    pops.set(row, done);
+    if (!on) {
+      anims.push(s.animate([
+        { width: px(w), transform: 'scale(1)', opacity: 1 },
+        { width: '0px', transform: 'scale(0)', opacity: 0 },
+      ], { duration: 160, easing: 'ease-in', fill: 'forwards' }));
+      timer = setTimeout(done, 180);
+      return;
+    }
+    anims.push(s.animate([{ width: '0px' }, { width: px(w) }], { duration: 150, easing: OUT }));
+    anims.push(s.animate([
+      { transform: 'scale(0) rotate(-30deg)' },
+      { transform: 'scale(1.35) rotate(8deg)', offset: 0.55 },
+      { transform: 'scale(1) rotate(0)' },
+    ], { duration: 360, easing: 'cubic-bezier(.3,.7,.3,1)' }));
+    // Sparks burst from the glyph's centre, hosted by the row (the subject
+    // clips its overflow).
+    var rr = row.getBoundingClientRect();
+    var x = cx - rr.left - row.clientLeft, y = cy - rr.top - row.clientTop;
+    for (var i = 0; i < 6; i++) {
+      var ang = (i / 6) * Math.PI * 2 - Math.PI / 2;
+      var p = doc.createElement('span');
+      p.className = 'spark';
+      p.setAttribute('aria-hidden', 'true');
+      p.style.left = px(x);
+      p.style.top = px(y);
+      row.appendChild(p);
+      sparks.push(p);
+      anims.push(p.animate([
+        { transform: 'translate(0,0) scale(1)', opacity: 1 },
+        { transform: 'translate(' + px(Math.cos(ang) * 11) + ',' + px(Math.sin(ang) * 11) + ') scale(0)', opacity: 0 },
+      ], { duration: 420, delay: 70, easing: 'cubic-bezier(.2,.8,.3,1)', fill: 'both' }));
+    }
+    timer = setTimeout(done, 520);
+  }
+
   P.still = still;
   P.Cursor = Cursor;
   P.leave = leave;
   P.enter = enter;
+  P.star = star;
   (root.Pneu = root.Pneu || {}).motion = P;
 })(this);
