@@ -55,14 +55,25 @@ type listPage struct {
 	Next  string
 	Err   string
 	Empty bool // show the mark as a watermark once the list is empty
-	// Where the page sits, for the pager row (app.js updatePager):
-	// Start is the page's offset, Total the query's thread count or -1
-	// while unknown (app.js asks for it with ?total=1). Range is this
-	// page's slice, "51–100", as first rendered.
-	Range string
-	Start int
-	Total int
+	// Oldest is the view's oldest message date, unix seconds (0: unknown
+	// or none), for the pager row's timeline (viewOldest; rendered by
+	// OldestISO; app.js updatePager). Only a paged list carries it.
+	Oldest int64
 }
+
+// OldestISO is Oldest as data-oldest: RFC 3339 in the server's zone, as
+// the rows' <time datetime> are, so the pager's year is the server's; ""
+// when unknown.
+func (p listPage) OldestISO() string {
+	if p.Oldest <= 0 {
+		return ""
+	}
+	return time.Unix(p.Oldest, 0).Local().Format(time.RFC3339)
+}
+
+// Paged says the view has more than one page: the pager row shows its
+// buttons and timeline (list.html). An unpaged list keeps the row, empty.
+func (p listPage) Paged() bool { return p.Prev != "" || p.Next != "" }
 
 // list serves a merged view. An empty fixed query means "use ?q=" (search).
 func (s *Server) list(view, title, fixed string) http.HandlerFunc {
@@ -78,12 +89,8 @@ func (s *Server) list(view, title, fixed string) http.HandlerFunc {
 		}
 		page, _ := strconv.Atoi(q.Get("page"))
 		page = max(page, 0)
-		if q.Get("total") == "1" {
-			s.listTotal(w, r, query)
-			return
-		}
 
-		data := listPage{Page: s.page(r, title, userQuery, s.viewLabel()), Total: -1}
+		data := listPage{Page: s.page(r, title, userQuery, s.viewLabel())}
 		data.View = view
 		status := http.StatusOK
 		if strings.TrimSpace(query) != "" {
@@ -129,18 +136,8 @@ func (s *Server) list(view, title, fixed string) http.HandlerFunc {
 			if more {
 				data.Next = pageURL(page + 1)
 			}
-			data.Start = page * s.PerPage
-			if len(data.Rows) > 0 {
-				data.Range = commas(data.Start+1) + "–" + commas(data.Start+len(data.Rows))
-			}
-			if data.Prev != "" || data.Next != "" {
-				// Only a cached count here: an uncached one can take a
-				// second, and the page asks for it once it is showing.
-				if n, ok := s.total(r.Context(), query, false); ok {
-					data.Total = n
-				}
-			} else {
-				data.Total = len(data.Rows)
+			if data.Paged() && len(data.Rows) > 0 {
+				data.Oldest = s.viewOldest(r.Context(), data.Label, query, view == "search")
 			}
 		}
 		// Rendered with rows too: triage can empty the list in place, and
@@ -148,75 +145,6 @@ func (s *Server) list(view, title, fixed string) http.HandlerFunc {
 		data.Empty = data.Err == "" && strings.TrimSpace(query) != ""
 		s.render(w, status, "list", data)
 	}
-}
-
-type totalKey struct{ account, query string }
-
-type totalVal struct {
-	rev string
-	n   int
-}
-
-// total is query's thread count summed over the accounts, as the list's
-// rows count them (search.exclude_tags applies). Each account's count is
-// cached at its database revision; a revision check is a few milliseconds.
-// With count false only cached counts answer; ok is false on any miss or
-// error.
-func (s *Server) total(ctx context.Context, query string, count bool) (int, bool) {
-	ns := make([]int, len(s.Accounts))
-	oks := make([]bool, len(s.Accounts))
-	var wg sync.WaitGroup
-	for i, a := range s.Accounts {
-		wg.Go(func() {
-			rev, err := a.Revision(ctx)
-			if err != nil {
-				log.Printf("total %q: %v", query, err)
-				return
-			}
-			key := totalKey{a.Name, query}
-			if v, ok := s.totals.Load(key); ok && v.(totalVal).rev == rev {
-				ns[i], oks[i] = v.(totalVal).n, true
-				return
-			}
-			if !count {
-				return
-			}
-			// rev was read first: a write during the count leaves an entry
-			// whose revision is already stale, so the next look recounts.
-			n, err := a.Count(ctx, query, true)
-			if err != nil {
-				log.Printf("total %q: %v", query, err)
-				return
-			}
-			s.totals.Store(key, totalVal{rev, n})
-			ns[i], oks[i] = n, true
-		})
-	}
-	wg.Wait()
-	sum := 0
-	for i := range s.Accounts {
-		if !oks[i] {
-			return 0, false
-		}
-		sum += ns[i]
-	}
-	return sum, true
-}
-
-// listTotal answers ?total=1 on a list URL: {"total": n}, counted if need
-// be. The list page asks for it when it rendered without one.
-func (s *Server) listTotal(w http.ResponseWriter, r *http.Request, query string) {
-	n, ok := 0, false
-	if strings.TrimSpace(query) != "" {
-		n, ok = s.total(r.Context(), query, true)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if !ok {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error":"count failed"}`))
-		return
-	}
-	fmt.Fprintf(w, `{"total":%d}`, n)
 }
 
 // merged runs query on every account, newest first. Each account returns

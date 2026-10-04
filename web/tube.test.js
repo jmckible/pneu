@@ -64,30 +64,53 @@ test('spamLight: dark on first sight, lit by newer spam, dark again on a visit',
   assert.equal(X.spamLight(200, NaN, false, 500).lit, false);
 });
 
-test('pager: the cursor\'s place in the whole view, the page\'s range and its slice of the track', () => {
-  const p = X.pager(50, 2, 50, 2318);
-  assert.equal(p.at, 53);
-  assert.equal(p.pos, '53');
-  assert.equal(p.of, '\u00a0of 2,318');
-  assert.equal(p.range, '51–100');
-  assert.ok(Math.abs(p.seg.left - 50 / 2318 * 100) < 1e-9);
-  assert.ok(Math.abs(p.seg.width - 50 / 2318 * 100) < 1e-9);
-  assert.ok(Math.abs(p.dot - 52.5 / 2318 * 100) < 1e-9);
-  assert.equal(X.pager(1000, 0, 50, 44095).range, '1,001–1,050');
-  const u = X.pager(50, 2, 50, -1);
-  assert.equal(u.pos, '53');
-  assert.equal(u.of, '', 'not counted yet: the place alone');
-  assert.equal(u.seg, null);
-  assert.equal(u.dot, null);
-  assert.equal(X.pager(50, 0, 0, 312).range, '', 'an emptied page');
-  assert.equal(X.pager(0, 49, 50, 40).of, '\u00a0of 50', 'a stale total never reads less than the rows shown');
+test('span: the page\'s dates, newest to oldest, the year only when it isn\'t this one', () => {
+  const now = Date.parse('2026-10-04T12:00:00-07:00');
+  const d = (y, m, day, h) => `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(h || 9).padStart(2, '0')}:00:00-07:00`;
+  assert.equal(X.span(d(2026, 9, 23), d(2026, 8, 14), now), 'Sep 23 – Aug 14');
+  assert.equal(X.span(d(2024, 12, 30), d(2024, 11, 2), now), 'Dec 30 – Nov 2, 2024');
+  assert.equal(X.span(d(2025, 1, 3), d(2024, 12, 12), now), 'Jan 3, 2025 – Dec 12, 2024');
+  assert.equal(X.span(d(2026, 1, 3), d(2025, 12, 12), now), 'Jan 3, 2026 – Dec 12, 2025', 'across years, both, this one too');
+  assert.equal(X.span(d(2026, 9, 23, 18), d(2026, 9, 23, 7), now), 'Sep 23', 'one day');
+  assert.equal(X.span(d(2023, 5, 1, 18), d(2023, 5, 1, 7), now), 'May 1, 2023');
+  assert.equal(X.span(d(2026, 8, 14), d(2026, 9, 23), now), 'Sep 23 – Aug 14', 'newest first whatever the order');
+  assert.equal(X.span(null, d(2026, 9, 23), now), '');
+  assert.equal(X.span('Sep 23', d(2026, 9, 23), now), '');
 });
 
-test('rollDir: the direction the place changed', () => {
-  assert.equal(X.rollDir(3, 4), 1);
-  assert.equal(X.rollDir(4, 3), -1);
-  assert.equal(X.rollDir(3, 3), 0);
-  assert.equal(X.rollDir(0, 3), 0);
+test('span: the dates are the server\'s, whatever zone the browser is in', () => {
+  // A UTC server's rows at 00:30 on Jan 1: Los Angeles would call them
+  // Dec 31, 2025, but the rows say Jan 1, and so does the pager. The year
+  // is the server's too: it is already 2026 there.
+  const now = Date.parse('2026-01-01T00:45:00Z');
+  assert.equal(X.span('2026-01-01T00:30:00Z', '2025-12-30T10:00:00Z', now), 'Jan 1, 2026 – Dec 30, 2025');
+  assert.equal(X.span('2026-01-01T00:30:00Z', '2026-01-01T00:10:00Z', now), 'Jan 1');
+  assert.equal(X.span('2026-01-01T00:30:00+00:00', '2026-01-01T00:10:00+00:00', now), 'Jan 1');
+  // A server in Los Angeles at the same instant is still in 2025.
+  assert.equal(X.span('2025-12-31T16:30:00-08:00', '2025-12-31T16:10:00-08:00', now), 'Dec 31');
+});
+
+test('timeline: now on the left, the view\'s oldest on the right, linear in time', () => {
+  const day = 86400e3, now = Date.parse('2026-10-04T12:00:00Z');
+  const iso = (ms) => new Date(ms).toISOString().replace(/\.\d+Z$/, 'Z');
+  const ago = (n) => iso(now - n * day);
+  assert.equal(X.timeline(now, '', ago(100), ago(300), ago(200)), null, 'no oldest date: no track');
+  const p = X.timeline(now, ago(1000), ago(100), ago(300), ago(200));
+  assert.ok(Math.abs(p.seg.left - 10) < 1e-9);
+  assert.ok(Math.abs(p.seg.width - 20) < 1e-9);
+  assert.ok(Math.abs(p.dot - 20) < 1e-9);
+  assert.equal(p.year, Number(ago(1000).slice(0, 4)));
+  assert.equal(X.timeline(now, ago(1000), ago(100), ago(300), null).dot, null, 'no cursor, no dot');
+  // A future-dated row sits at now; a row older than the view's oldest
+  // stretches the far end to it.
+  const f = X.timeline(now, ago(1000), ago(-5), ago(2000), ago(-5));
+  assert.equal(f.seg.left, 0);
+  assert.equal(f.seg.left + f.seg.width, 100);
+  assert.equal(f.dot, 0);
+  assert.equal(f.year, Number(ago(2000).slice(0, 4)));
+  assert.equal(X.timeline(now, ago(-1), ago(-1), ago(-1), null), null, 'nothing in the past');
+  // The far end's year is the server's: a UTC server's Jan 1 00:30.
+  assert.equal(X.timeline(now, '2011-01-01T00:30:00Z', ago(1), ago(2), null).year, 2011);
 });
 
 test('learn: a hint is learned on its third use', () => {

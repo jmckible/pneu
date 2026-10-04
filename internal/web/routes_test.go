@@ -88,7 +88,6 @@ func TestPolicyHeaderSets(t *testing.T) {
 	}{
 		{"list page", do(s, "GET", "/", withCookie), 200, "text/html; charset=utf-8", wantHeaders(PolicyApp, CacheNoStore)},
 		{"thread page", do(s, "GET", thread, withCookie), 200, "text/html; charset=utf-8", wantHeaders(PolicyApp, CacheNoStore)},
-		{"list total (JSON)", do(s, "GET", "/?total=1", withCookie), 200, "application/json", wantHeaders(PolicyData, CacheNoStore)},
 		{"JSON endpoint", do(s, "GET", "/status", withCookie), 200, "application/json", wantHeaders(PolicyData, CacheNoStore)},
 		{"body JSON", do(s, "GET", "/body/work/hostile-15-cid@partner-agency.example", withCookie), 200, "application/json", wantHeaders(PolicyData, CacheNoStore)},
 		{"PDF part", do(s, "GET", "/part/personal/5f2e9a10-trip-photos@fastmail.example/8", withCookie), 200, "application/pdf", wantHeaders(PolicyPDF, CacheNoStore)},

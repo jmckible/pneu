@@ -220,11 +220,9 @@
       want = saved ? { thread: saved, index: slot } : { index: slot };
     }
     var start = tri ? tri.restoreIndex(L.items.map(rowKey), want) : 0;
-    pagerWas = null; // a new list: its place appears, it doesn't roll
     select(L, start, scroll !== undefined ? scroll : start > 0);
-    updatePager(false);
+    updatePager();
     rememberView(L.url);
-    whenReady(function () { listTotal(root); })();
     root.addEventListener('click', function (e) {
       // The pager row's < and > are the keys: the split swaps the pane.
       var pg = e.target.closest('.pager a[rel]');
@@ -539,53 +537,40 @@
   if (keybarEl) requestAnimationFrame(function () { requestAnimationFrame(function () { keybarEl.classList.add('settled'); }); });
 
   // ---- the pager row --------------------------------------------------------
-  // A paged list's top row (list.html .pager): < newer and older >, the
-  // list cursor's place in the whole view ("53 of 2,318"), a track with
-  // this page's slice and the cursor on it, and the page's range. The place
-  // rolls like an odometer when it changes, in the direction of the
-  // change. An unpaged list shows no position at all.
-  var pagerWas = null; // {root, at, pos}
+  // Every list's top row (list.html .pager), empty on an unpaged one so
+  // the rows sit in the same place. A paged list's: < newer and older >,
+  // the page's dates from its first and last rows ("Sep 23 – Aug 14"), and
+  // a timeline from now back to the view's oldest message (data-oldest)
+  // with this page's stretch and the cursor's dot on it (tube.js span,
+  // timeline). It follows the rows: a removal or an undo that changes the
+  // first or last row changes the span, and the dot follows the cursor.
 
-  function updatePager(animate) {
-    var root = L.root, pg = root && root.querySelector(':scope > .pager');
-    if (!pg || !tube) { pagerWas = null; return; }
-    var d = root.dataset, rows = L.items.length, start = parseInt(d.start, 10) || 0;
-    var total = parseInt(d.total, 10);
-    if (isNaN(total)) total = -1;
-    // A removal takes one off the total, an undo puts it back: data-rows
-    // is the row count data-total was counted against.
-    if (total >= 0) total += rows - (parseInt(d.rows, 10) || 0);
-    var p = tube.pager(start, L.sel, rows, total);
-    var odo = pg.querySelector('.odo'), of = pg.querySelector('.of'), range = pg.querySelector('.range');
-    var seg = pg.querySelector('.pseg'), dot = pg.querySelector('.pdot');
-    if (of) of.textContent = p.of;
-    if (range) range.textContent = p.range;
-    if (seg) {
-      seg.hidden = !p.seg;
-      if (p.seg) { seg.style.left = p.seg.left + '%'; seg.style.width = 'max(4px, ' + p.seg.width + '%)'; }
-    }
+  // rowISO is a row's date as the server rendered it (RFC 3339, its zone).
+  function rowISO(el) {
+    var t = el && el.querySelector('time[datetime]');
+    return t ? t.getAttribute('datetime') : null;
+  }
+
+  function updatePager() {
+    var root = L.root, pg = root && root.querySelector(':scope > nav.pager');
+    if (!pg || !tube) return;
+    var n = L.items.length;
+    var newest = n ? rowISO(L.items[0]) : null, oldest = n ? rowISO(L.items[n - 1]) : null;
+    var now = Date.now();
+    var when = pg.querySelector('.pspan');
+    if (when) when.textContent = tube.span(newest, oldest, now);
+    var tl = pg.querySelector('.tl');
+    if (!tl) return;
+    var p = tube.timeline(now, root.dataset.oldest, newest, oldest, L.sel >= 0 ? rowISO(L.items[L.sel]) : null);
+    tl.hidden = !p;
+    if (!p) return;
+    var seg = tl.querySelector('.pseg'), dot = tl.querySelector('.pdot'), end = tl.querySelector('.tend');
+    if (end) end.textContent = String(p.year);
+    if (seg) { seg.style.left = p.seg.left + '%'; seg.style.width = 'max(4px, ' + p.seg.width + '%)'; }
     if (dot) {
       dot.hidden = p.dot === null;
       if (p.dot !== null) dot.style.left = p.dot + '%';
     }
-    var same = pagerWas && pagerWas.root === root;
-    if (!odo || (same && pagerWas.pos === p.pos)) { if (same) pagerWas.at = p.at; return; }
-    roll(odo, p.pos, animate !== false && same ? tube.rollDir(pagerWas.at, p.at) : 0);
-    pagerWas = { root: root, at: p.at, pos: p.pos };
-  }
-
-  // roll replaces el's number: the old one slides out and the new one in,
-  // in direction dir (1 up, -1 down, 0 at once), 260ms.
-  function roll(el, text, dir) {
-    var prev = el.lastElementChild;
-    var next = document.createElement('span');
-    next.textContent = text;
-    if (!dir || still() || !prev || !text || !next.animate) { el.replaceChildren(next); return; }
-    el.appendChild(next);
-    var opt = { duration: 260, easing: 'cubic-bezier(.2,.8,.2,1)' };
-    next.animate([{ transform: 'translateY(' + (dir > 0 ? 100 : -100) + '%)', opacity: 0 }, { transform: 'none', opacity: 1 }], opt);
-    prev.animate([{ transform: 'none', opacity: 1 }, { transform: 'translateY(' + (dir > 0 ? -100 : 100) + '%)', opacity: 0 }], opt)
-      .finished.then(function () { prev.remove(); }, function () {});
   }
 
   // ---- thread page --------------------------------------------------------
@@ -1418,29 +1403,9 @@
     return { unread: el.classList.contains('unread'), flagged: el.classList.contains('flagged') };
   }
 
-  // listCount keeps the key bar's counter with the rows: a removal takes
-  // one off the total, an undo puts it back (updatePager).
+  // listCount keeps the pager row with the rows: a removal or an undo may
+  // change the page's first or last row (updatePager).
   function listCount() { updatePager(); }
-
-  // listTotal fills in a paged list's total when the server had none cached
-  // (read.go total): counting Archive can take a second, so the page shows
-  // first and the count follows. The page's place (data-start, data-rows,
-  // data-total, data-paged) is on main.list (list.html).
-  function listTotal(root) {
-    var d = root.dataset;
-    if (!('paged' in d) || parseInt(d.total, 10) >= 0) return;
-    var url = L.url + (L.url.indexOf('?') < 0 ? '?' : '&') + 'total=1';
-    fetch(url, { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } })
-      .then(function (res) { return res.ok ? res.json() : null; })
-      .then(function (data) {
-        if (!data || typeof data.total !== 'number' || L.root !== root) return;
-        // Counted now: rows triaged away since the render are already out.
-        d.total = String(data.total);
-        d.rows = String(L.items.length);
-        listCount();
-      })
-      .catch(function () {}); // the place alone is still right
-  }
 
   function clearSelection() {
     if (L.items[L.sel]) L.items[L.sel].classList.remove('selected');

@@ -78,35 +78,67 @@
     return { lit: newest > seen, seen: null };
   }
 
-  function num(v) { return Number(v).toLocaleString('en-US'); }
+  // The pager row (list.html .pager) reads in dates, not counts: the
+  // page's span, newest to oldest, from its first and last rows, and a
+  // timeline from now back to the view's oldest message (main.list
+  // data-oldest). Months are the app's (read.go's "Jan 2").
+  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-  // pager is the pager row's reading (list.html .pager) for the cursor at
-  // sel on a page of rows starting at start, of total threads (-1 while
-  // uncounted): at, the cursor's place in the whole view; pos and of, "53"
-  // and " of 2,318" (of empty while uncounted); range, "51–100"; seg, the
-  // page's slice of the track, and dot, the cursor's place on it, in
-  // percent (null while uncounted).
-  function pager(start, sel, rows, total) {
-    var out = { at: 0, pos: '', of: '', range: '', seg: null, dot: null };
-    if (!(rows > 0)) return out;
-    var at = start + Math.max(sel, 0) + 1;
-    out.at = at;
-    out.pos = sel >= 0 ? num(at) : '';
-    out.range = num(start + 1) + '–' + num(start + rows);
-    if (total > 0) {
-      total = Math.max(total, start + rows);
-      out.of = '\u00a0of ' + num(total);
-      out.seg = { left: start / total * 100, width: rows / total * 100 };
-      out.dot = sel >= 0 ? (at - 0.5) / total * 100 : null;
-    }
-    return out;
+  // The server renders every row's <time datetime> as RFC 3339 in its own
+  // zone, and data-oldest the same way, so the pager reads days and years
+  // off those strings: they are the server's, as the rows' dates are, even
+  // where the browser runs in another zone (a client, docs/client.md).
+  var ISO = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+
+  // stamp parses an RFC 3339 date: its wall-clock day there, its offset
+  // in minutes, and the instant in ms; null if it isn't one.
+  function stamp(iso) {
+    var m = typeof iso === 'string' ? ISO.exec(iso) : null;
+    if (!m) return null;
+    var ms = Date.parse(iso);
+    if (isNaN(ms)) return null;
+    var off = m[7] === 'Z' ? 0 : (m[7].charAt(0) === '-' ? -1 : 1) * (parseInt(m[7].slice(1, 3), 10) * 60 + parseInt(m[7].slice(4, 6), 10));
+    return { y: parseInt(m[1], 10), m: parseInt(m[2], 10) - 1, d: parseInt(m[3], 10), off: off, ms: ms };
   }
 
-  // rollDir is the odometer's direction for a change from place a to b: up
-  // (1) when it grows, 0 for no change or no earlier place.
-  function rollDir(a, b) {
-    if (!a || !b || a === b) return 0;
-    return b > a ? 1 : -1;
+  function day(s) { return MONTHS[s.m] + ' ' + s.d; }
+
+  // span is the page's dates, newest to oldest, from its first and last
+  // rows' datetimes, against now (ms), whose year is taken in the newest
+  // row's zone: "Sep 23 – Aug 14"; another year once at the end, "Dec 30
+  // – Nov 2, 2024"; across years both, "Jan 3, 2025 – Dec 12, 2024"; one
+  // day alone, "Sep 23". '' when either is missing.
+  function span(newestISO, oldestISO, now) {
+    var a = stamp(newestISO), b = stamp(oldestISO);
+    if (!a || !b) return '';
+    if (a.ms < b.ms) { var t = a; a = b; b = t; }
+    var y = new Date(now + a.off * 60000).getUTCFullYear();
+    if (a.y === b.y && a.m === b.m && a.d === b.d) return day(a) + (a.y === y ? '' : ', ' + a.y);
+    if (a.y !== b.y) return day(a) + ', ' + a.y + ' – ' + day(b) + ', ' + b.y;
+    return day(a) + ' – ' + day(b) + (b.y === y ? '' : ', ' + b.y);
+  }
+
+  // timeline places the page on the track, which runs from now (ms, 0%)
+  // back to the view's oldest message (100%), linearly in time. The rest
+  // are datetimes: the view's oldest (data-oldest), the page's first and
+  // last rows', the cursor row's (null: none). Returns {seg: {left,
+  // width}, dot, year}, percents and the far end's year as the server
+  // dates it, or null when the view's oldest is unknown ('') or not in the
+  // past, so the track hides. A row older than the view's oldest (a stale
+  // date) stretches the far end to it; a row dated in the future sits at
+  // now.
+  function timeline(now, viewOldestISO, newestISO, oldestISO, curISO) {
+    var v = stamp(viewOldestISO), a = stamp(newestISO), b = stamp(oldestISO), c = stamp(curISO);
+    if (!v || !a || !b) return null;
+    var far = [v, a, b].reduce(function (x, y) { return y.ms < x.ms ? y : x; });
+    if (!(far.ms < now)) return null;
+    var at = function (t) { return Math.min(100, Math.max(0, (now - t) / (now - far.ms) * 100)); };
+    var left = at(Math.max(a.ms, b.ms)), right = at(Math.min(a.ms, b.ms));
+    return {
+      seg: { left: left, width: right - left },
+      dot: c ? at(c.ms) : null,
+      year: far.y,
+    };
   }
 
   // LEARNED: a hint leaves the key bar once its key has been used this
@@ -133,7 +165,7 @@
 
   var X = {
     STATIONS: STATIONS, LEARNED: LEARNED, stationOf: stationOf, queryOf: queryOf, flight: flight, animates: animates,
-    cameFrom: cameFrom, spamLight: spamLight, pager: pager, rollDir: rollDir, learn: learn, parseCounts: parseCounts,
+    cameFrom: cameFrom, spamLight: spamLight, span: span, timeline: timeline, learn: learn, parseCounts: parseCounts,
   };
   if (typeof module === 'object' && module.exports) { module.exports = X; return; }
   var Pneu = (root.Pneu = root.Pneu || {});

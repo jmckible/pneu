@@ -101,7 +101,6 @@ const anyInert = "*"
 
 var (
 	pageTypes    = map[Policy][]string{PolicyApp: {"text/html"}, PolicyData: {"text/plain"}}
-	listTypes    = map[Policy][]string{PolicyApp: {"text/html"}, PolicyData: {"text/plain", "application/json"}} // ?total=1
 	composeTypes = map[Policy][]string{PolicyCompose: {"text/html"}, PolicyData: {"text/plain"}}
 	jsonTypes    = map[Policy][]string{PolicyData: {"application/json", "text/plain"}}
 	partTypes    = map[Policy][]string{PolicyPart: {anyInert}, PolicyPDF: {"application/pdf"}, PolicyData: {"text/plain"}}
@@ -110,7 +109,7 @@ var (
 )
 
 func listRoute(pattern, view, title, fixed string) Route {
-	return Route{Method: "GET", Pattern: pattern, Types: listTypes, Cache: CacheNoStore,
+	return Route{Method: "GET", Pattern: pattern, Types: pageTypes, Cache: CacheNoStore,
 		Handler: func(s *Server) http.Handler { return s.list(view, title, fixed) }}
 }
 

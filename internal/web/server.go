@@ -65,9 +65,9 @@ type Server struct {
 	undo   undoRing
 	// userNames caches each account's user.name for the list's "me".
 	userNames sync.Map
-	// totals caches each account's thread count for a list query at the
-	// database revision it was counted at (totalKey -> totalVal).
-	totals sync.Map
+	// oldest caches each paged list query's oldest date at a view
+	// generation (viewOldest).
+	oldest oldestCache
 	// spam caches the newest spam date at a view generation (spamNewest).
 	spam    spamCache
 	outbox  composeState
