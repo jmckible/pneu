@@ -915,7 +915,8 @@ ul.suggest li.active { background: var(--selection); }
 
 /* The empty list's watermark: pneu's mark, faint in the theme's colours.
    Server-rendered always, shown by :has so triaging the last row away
-   reveals it without a reload. */
+   reveals it without a reload (a row still sliding out, .leaving, already
+   counts as gone: the mark draws itself meanwhile, "motion" below). */
 .empty-mark {
   display: none;
   flex: none;
@@ -929,8 +930,8 @@ ul.suggest li.active { background: var(--selection); }
 /* Centered in the list pane. Split, the pane's grid row gives it a height
    and the mark takes the auto margins below the title; narrow, the list is
    the only pane, so the window's center is the pane's. */
-main.list:not(:has(.row:not(.removing))) { display: flex; flex-direction: column; }
-main.list:not(:has(.row:not(.removing))) .empty-mark { display: block; }
+main.list:not(:has(.row:not(.removing, .leaving))) { display: flex; flex-direction: column; }
+main.list:not(:has(.row:not(.removing, .leaving))) .empty-mark { display: block; }
 body:not(.split) .empty-mark { position: fixed; inset: 0; }
 
 /* ---- motion (motion.js) ------------------------------------------------ */
@@ -997,7 +998,18 @@ body.split #panes[data-focus=thread] main.list ol.cursored > .cursor { border-le
 }
 @keyframes row-wash { from { opacity: 1; } to { opacity: 0; } }
 
+/* The list emptied under you: the mark draws itself (its paths get
+   pathLength="1" from motion.js, so one dash is the whole stroke). A page
+   that loads empty shows it still. */
+.empty-mark.draw {
+  color: color-mix(in srgb, var(--fg) 22%, var(--bg));
+  stroke-dasharray: 1;
+  animation: mark-draw 1300ms cubic-bezier(.45, 0, .2, 1) both;
+}
+@keyframes mark-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+
 @media (prefers-reduced-motion: reduce) {
   main.list ol.cursored > .cursor { transition: none !important; }
   .row.fresh::after { animation: none; display: none; }
+  .empty-mark.draw { animation: none; stroke-dasharray: none; color: color-mix(in srgb, var(--fg) 9%, var(--bg)); }
 }

@@ -1109,6 +1109,7 @@
   // the row slides out and its gap closes, the next row moving up into the
   // cursor, which stays put (or follows up from the last row); the
   // selection changes now and the next key acts on it while that runs.
+  // An emptied list draws its mark.
   function takeRow(i) {
     var el = L.items[i];
     var wasShown = split && shown(el);
@@ -1121,6 +1122,7 @@
       if (n === i) el.scrollIntoView({ block: 'nearest' }); // the slot the next row moves into
       if (n >= 0) select(L, n, n !== i, 'keep');
       mo.leave(el, L.cursor, n >= 0 ? { row: L.items[n], stay: n === i } : null);
+      if (n < 0) mo.draw(L.root.querySelector('.empty-mark'));
     } else {
       el.classList.add('removing');
       setTimeout(function () { if (el.classList.contains('removing')) el.remove(); }, 150);
@@ -1148,6 +1150,7 @@
     else ol.appendChild(h.el);
     clearSelection();
     L.items.splice(i, 0, h.el);
+    if (mo) mo.undraw(L.root.querySelector('.empty-mark'));
     if (moving() && L.cursor) {
       select(L, i, undefined, 'keep');
       mo.enter(h.el, L.cursor);

@@ -1,10 +1,11 @@
 // motion.js — the list's small motions (SPEC.md "Index views", Motion): the
 // cursor gliding between rows, a removed row closing its gap (and opening
-// again on undo), the star's pop, new mail opening in. Motion only catches
-// up: app.js changes the state first and calls these after, a key press
-// ends any row still opening or closing (settle) before app.js measures,
-// and under prefers-reduced-motion none of it runs. freshRows and the
-// stash checks are pure; web/motion.test.js runs them under node --test.
+// again on undo), the star's pop, new mail opening in, the emptied list
+// drawing its mark. Motion only catches up: app.js changes the state first
+// and calls these after, a key press ends any row still opening or closing
+// (settle) before app.js measures, and under prefers-reduced-motion none of
+// it runs. freshRows and the stash checks are pure; web/motion.test.js runs
+// them under node --test.
 (function (root) {
   'use strict';
 
@@ -317,6 +318,19 @@
     timer = setTimeout(done, 520);
   }
 
+  // ---- the empty list's mark ---------------------------------------------
+  // The mark draws itself when the list empties under you. pathLength on
+  // this copy's paths only (the header's mark shares the template) makes
+  // one dash the whole stroke.
+  function draw(svg) {
+    if (!svg || still()) return;
+    Array.prototype.forEach.call(svg.querySelectorAll('path'), function (p) { p.setAttribute('pathLength', '1'); });
+    svg.classList.remove('draw');
+    void svg.getBoundingClientRect();
+    svg.classList.add('draw');
+  }
+  function undraw(svg) { if (svg) svg.classList.remove('draw'); }
+
   P.still = still;
   P.Cursor = Cursor;
   P.leave = leave;
@@ -325,5 +339,7 @@
   P.stash = stash;
   P.unstash = unstash;
   P.star = star;
+  P.draw = draw;
+  P.undraw = undraw;
   (root.Pneu = root.Pneu || {}).motion = P;
 })(this);

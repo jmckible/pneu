@@ -298,6 +298,10 @@ uncached, the page shows the range first and the total follows.
     list) is a bulk change and renders still. A narrow list refreshes by
     reloading, so it keeps the rows it showed across the reload
     (sessionStorage, for 15s) to tell what's new.
+  - *An emptied list draws its mark.* Triaging the last row away draws
+    the watermark's stroke (1.3s, `cubic-bezier(.45,0,.2,1)`), a little
+    brighter than at rest; a list that loads empty shows it still. No
+    words with it.
 
 ## Thread page
 
