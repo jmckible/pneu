@@ -536,7 +536,42 @@ never presents it as a fallback for a security refusal.
      blockedRequests}}`, where picked and none count messages without a
      declared action. A message that fails to render is counted in
      `errors` and never described.
-3. Plain text: not in the first cut.
+3. **Plain text.** Built 2026-10-06 (`textPick`, `textGuess` in
+   actions.js). A text/plain body has nothing drawn to score (no styling,
+   no size, no frame), but its links are the server's own markup
+   (`RenderText`: every address it shows becomes an `<a>` with that
+   address as its href), and magic-link and verification mail is usually
+   plain text. So the guess reads the words around each link, with the
+   heuristic's own word tables (`VERBS`, `CTA_FOOTER`). Not a security
+   boundary either, for the same reason as tier 2: the chip shows the
+   href's destination, and `o` opens only that.
+
+   Decided in building it:
+   - *The sender's own lines.* Links in quoted lines never count, and
+     nothing from a signature separator (`--` or `-- `) or a forwarded or
+     original message's separator line on: a quoted message's magic link
+     is someone else's.
+   - *Context.* A link's line with every link on it removed; when that
+     leaves no letter (the address on a line of its own), the nearest
+     non-blank line above, unless that line is quoted or has a link of its
+     own (it is that link's context, not this one's).
+   - *Choices.* Links to one URL are one choice; a footer word in any of
+     its contexts makes it a footer link, and a verb in any gives it that
+     verb. Footer links go. The pick is the only choice left, or else the
+     only one whose context has a verb (anywhere, at a word's start, not
+     just leading as on a button: "Click the link below to verify your
+     email"). Two or more of those is no pick.
+   - *Name.* The context from the verb to the end of its clause (`.`, `:`,
+     `;`, `!`, `?` before a space or the end, so `exe.dev` stays whole),
+     first letter capitalized, capped at 60; a pick with no verb, the one
+     link of a short note, is "Open link".
+   - *Showing it.* The tier 2 chip, dashed and tagged `guess`. The link is
+     marked in place (`data-pick`, an outline from app.css on the cursor
+     message only): it is this document's markup, not a frame's. Guessed as
+     the thread renders, collapsed messages included.
+   - *At `o`.* The anchor must still be in the document with the same
+     href; otherwise nothing opens, the status line says why, and the
+     message is guessed afresh (`page-narrow-text-guess`).
 
 ### Showing it
 

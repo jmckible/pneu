@@ -67,9 +67,7 @@ type Server struct {
 	userNames sync.Map
 	// oldest caches each paged list query's oldest date at a view
 	// generation (viewOldest).
-	oldest oldestCache
-	// spam caches the newest spam date at a view generation (spamNewest).
-	spam    spamCache
+	oldest  oldestCache
 	outbox  composeState
 	handler http.Handler
 	static  http.Handler // /static/ (staticHandler)
@@ -184,9 +182,6 @@ type Page struct {
 	// Label is the view generation the page was rendered at, read before
 	// its query (viewLabel); app.js compares it with hello and `view`.
 	Label viewLabel
-	// SpamAt is the newest spam message's date, unix seconds (0: none or
-	// unknown), for the Spam station's new-spam light (spamNewest).
-	SpamAt int64
 }
 
 // NavLink is one station on the tube, the left column.
@@ -194,7 +189,6 @@ type NavLink struct {
 	Key, View, Name, Href string
 	Bin                   bool // below the drop (Spam, Trash), not the main line
 	Active                bool
-	Spam                  int64 // Spam's: Page.SpamAt, for its new-spam light
 }
 
 // navViews is the tube in key order: the main line, then the bins below
@@ -214,9 +208,6 @@ func (p Page) Nav() []NavLink {
 	out := make([]NavLink, len(navViews))
 	for i, l := range navViews {
 		l.Active = l.View == p.View
-		if l.View == "spam" {
-			l.Spam = p.SpamAt
-		}
 		out[i] = l
 	}
 	return out
@@ -238,8 +229,7 @@ func (p Page) Searching() bool { return p.View == "search" && strings.TrimSpace(
 // query. Origin is the request's (Server.origin): a peer's pages run in the
 // client's origin.
 func (s *Server) page(r *http.Request, title, query string, at viewLabel) Page {
-	return Page{Origin: s.origin(r), Title: title, Query: query, Accounts: s.accountsJSON(), SyncEvery: int(s.SyncInterval / time.Second), Label: at,
-		SpamAt: s.spamNewest(r.Context(), at)}
+	return Page{Origin: s.origin(r), Title: title, Query: query, Accounts: s.accountsJSON(), SyncEvery: int(s.SyncInterval / time.Second), Label: at}
 }
 
 func (s *Server) render(w http.ResponseWriter, status int, page string, data any) {

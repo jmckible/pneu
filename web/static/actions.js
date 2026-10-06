@@ -342,12 +342,15 @@
     },
   };
 
-  var CTA_VERBS = new RegExp('^(?:' + [
+  var VERBS = [
     'view', 'confirm', 'verify', 'track', 'pay', 'reset', 'sign in', 'log in', 'login', 'accept', 'join',
     'review', 'download', 'open', 'get started', 'activate', 'complete', 'continue', 'shop', 'read', 'reply',
     'see', 'start', 'claim', 'schedule', 'book', 'rsvp', 'check', 'go to', 'retrieve', 'solve', 'apply',
     'share', 'print', 'buy', 'take', 'register', 'update (?:your )?(?:card|payment|billing)', 'manage (?:your )?(?:order|booking|reservation|trip|account)',
-  ].join('|') + ')(?![\\p{L}\\p{N}])', 'u');
+  ].join('|');
+  var CTA_VERBS = new RegExp('^(?:' + VERBS + ')(?![\\p{L}\\p{N}])', 'u');
+  // A verb anywhere in running text, at a word's start (a text body's line).
+  var CTA_VERB_IN = new RegExp('(?:^|[^\\p{L}\\p{N}])((?:' + VERBS + ')(?![\\p{L}\\p{N}]))', 'iu');
   // "manage" alone is a footer word; managing an order or a trip is not.
   var CTA_FOOTER = new RegExp('(?:^|[^\\p{L}\\p{N}])(?:' + [
     'unsubscribe', 'opt[ -]?out', 'preferences', 'privacy', 'terms', 'legal',
@@ -373,6 +376,66 @@
       footer: CTA_FOOTER.test(t) || t === 'x',
       rawURL: CTA_RAW_URL.test(t),
     };
+  }
+
+  // ---- text bodies (o, tier 3) ----------------------------------------------
+  // A text/plain body has no styling to score, so its guess reads the words
+  // around each link instead (docs/actions.md, Primary link). lines is the
+  // body as rendered (textLines): [{text, quoted, links: [{url, start, end,
+  // ...}]}], start and end offsets into text. Only the sender's own lines
+  // count: not quoted ones, nothing from a signature ("-- ") or a forwarded
+  // message on. A link's context is its line less every link on it, or,
+  // when that leaves no letter, the nearest non-blank line above, if that
+  // line has no link of its own. Links whose context has footer words go;
+  // links to one URL are one choice (the one with a verb in its context
+  // stands for it). The pick is the only choice left, or else the only one
+  // whose context has an action verb; anything else is no pick. Its name
+  // is the context from that verb to the end of its clause, its first
+  // letter capitalized, or "Open link" when there is none, capped like a
+  // declared action's. Returns {url,
+  // name, link} (link the lines' own entry) or null.
+  var TEXT_STOP = /^(?:--|-- |-{3,} ?(?:forwarded message|original message) ?-{3,})$/i;
+  function textPick(lines) {
+    var choices = [], byURL = Object.create(null);
+    var stripped = function (l) {
+      var t = '', at = 0;
+      (l.links || []).forEach(function (k) { t += l.text.slice(at, k.start) + ' '; at = k.end; });
+      return (t + l.text.slice(at)).replace(/\s+/g, ' ').trim();
+    };
+    for (var i = 0; i < lines.length; i++) {
+      var l = lines[i];
+      if (l.quoted) continue;
+      if (TEXT_STOP.test(l.text.trim())) break;
+      if (!l.links || !l.links.length) continue;
+      var ctx = stripped(l);
+      if (!/\p{L}/u.test(ctx)) {
+        ctx = '';
+        for (var j = i - 1; j >= 0; j--) {
+          if (lines[j].quoted) break;
+          if (!/\S/.test(lines[j].text)) continue;
+          if (!lines[j].links || !lines[j].links.length) ctx = stripped(lines[j]);
+          break;
+        }
+      }
+      var t = ctaText(ctx), verb = CTA_VERB_IN.exec(ctx);
+      for (var k = 0; k < l.links.length; k++) {
+        var c = { url: l.links[k].url, link: l.links[k], footer: t.footer, verb: verb ? ctx.slice(verb.index + verb[0].length - verb[1].length) : null };
+        var had = byURL[c.url];
+        if (!had) { byURL[c.url] = c; choices.push(c); continue; }
+        if (c.footer) had.footer = true; // one URL in a footer anywhere is a footer link
+        if (!had.verb && c.verb) { had.verb = c.verb; had.link = c.link; }
+      }
+    }
+    var left = choices.filter(function (c) { return !c.footer; });
+    var pick = left.length === 1 ? left[0] : null;
+    if (!pick) {
+      var verbs = left.filter(function (c) { return c.verb; });
+      if (verbs.length === 1) pick = verbs[0];
+    }
+    if (!pick) return null;
+    var name = pick.verb ? pick.verb.split(/[.:;!?](?:\s|$)/)[0].trim() : '';
+    name = name.charAt(0).toUpperCase() + name.slice(1);
+    return { url: pick.url, name: cap(name || 'Open link', NAME_CAP).text, link: pick.link };
   }
 
   // ctaScore is features' weighted sum: {score, parts: {feature: points}}.
@@ -624,7 +687,7 @@
     browserCheck: browserCheck, destination: destination, Arming: Arming, previewURL: previewURL,
     dialogKey: dialogKey,
     LD: LD, declaredAction: declaredAction, redirector: redirector, chipParts: chipParts,
-    CTA: CTA, ctaText: ctaText, ctaScore: ctaScore, ctaRank: ctaRank, contrast: contrast, over: over,
+    CTA: CTA, ctaText: ctaText, textPick: textPick, ctaScore: ctaScore, ctaRank: ctaRank, contrast: contrast, over: over,
     HINT_ALPHABET: HINT_ALPHABET, HINT_MAX: HINT_MAX, hintLabels: hintLabels, intersect: intersect,
     hintURL: hintURL, hintKey: hintKey, placeLabel: placeLabel, inside: inside, primaryKey: primaryKey, usable: usable,
   };
@@ -1749,6 +1812,42 @@
     }
   }
 
+  // textLines reads a text body's <pre> (textbody.go RenderText) as lines
+  // for textPick: its text, top-level links ({url: the href, start, end,
+  // anchor}), and a quoted entry for each quote (blockquote.q) in its place.
+  function textLines(pre) {
+    var lines = [], cur = { text: '', links: [] };
+    var flush = function () { lines.push(cur); cur = { text: '', links: [] }; };
+    Array.prototype.forEach.call(pre.childNodes, function (n) {
+      if (n.nodeType === 3) {
+        var parts = n.data.split('\n');
+        parts.forEach(function (t, i) { if (i) flush(); cur.text += t; });
+      } else if (n.nodeType === 1 && n.localName === 'a' && n.hasAttribute('href')) {
+        var start = cur.text.length;
+        cur.text += n.textContent;
+        cur.links.push({ url: n.getAttribute('href'), start: start, end: cur.text.length, anchor: n });
+      } else if (n.nodeType === 1 && n.localName === 'blockquote') {
+        if (cur.text || cur.links.length) flush();
+        lines.push({ text: '', links: [], quoted: true });
+      } else if (n.nodeType === 1) {
+        cur.text += n.textContent;
+      }
+    });
+    if (cur.text || cur.links.length) flush();
+    return lines;
+  }
+
+  // textGuess is a text body's guess (textPick over its <pre>), as the
+  // chip's action {url, name, guess}, or null. The URL is the anchor's href
+  // (RenderText writes the address it shows); the guess keeps the anchor
+  // for stillPicked.
+  function textGuess(pre) {
+    var p = pre ? textPick(textLines(pre)) : null;
+    if (!p) return null;
+    var a = p.link.anchor;
+    return { url: p.url, name: p.name, guess: { text: true, anchor: a, href: a.getAttribute('href') } };
+  }
+
   // stillPicked is null while the guess g still stands, else why not: the
   // frame holds the same document, the anchor is in it, its href is the
   // one picked, and it still shows (seen) with the same text.
@@ -1757,6 +1856,13 @@
   }
   function standing(g) {
     var D = dom();
+    if (g.text) {
+      // A text body's pick (textGuess): server-rendered markup in this
+      // document, which only a re-render replaces.
+      if (!D.connected.call(g.anchor)) return 'the link is gone';
+      if (D.attr.call(g.anchor, 'href') !== g.href) return 'the link changed after it was picked';
+      return null;
+    }
     if (!g.frame || g.frame.contentDocument !== g.doc) return 'the message was redrawn';
     if (!D.connected.call(g.anchor) || D.owner.call(g.anchor) !== g.doc) return 'the link is gone';
     if (D.attr.call(g.anchor, 'href') !== g.href) return 'the link changed after it was picked';
@@ -1869,6 +1975,7 @@
   }
 
   A.guess = guess;
+  A.textGuess = textGuess;
   A.stillPicked = stillPicked;
   A.mark = mark;
 

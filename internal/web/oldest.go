@@ -17,8 +17,7 @@ import (
 const oldestSearches = 16
 
 // oldestCache is each list query's oldest message date as of one view
-// generation, the way spamCache keeps the newest spam: every write that
-// changes what a list shows, a sync that pulled mail included, bumps the
+// generation: every write that changes what a list shows, a sync that pulled mail included, bumps the
 // generation, so only the first paged render after a change asks notmuch,
 // once per account. The lookup runs on the request path; measured at about
 // 25ms on a 44k-thread account.

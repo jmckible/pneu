@@ -971,6 +971,56 @@ body { margin: 0; font: 13px monospace; }
       if (W.__errors.length) fails.push('page errors: ' + W.__errors.join(' | '));
     } catch (e) { fails.push('harness error: ' + (e && e.stack || e)); }
     results.push({ id: 'page-narrow-guess', pass: fails.length === 0, fails });
+
+    // A text body's guess (actions.js textGuess): the first message's
+    // sign-in link, not its signature's, as a guess chip; the link marked
+    // in place on the cursor message only; o opens it, and once its href
+    // changes o opens nothing and the chip is guessed afresh.
+    const xfails = [];
+    try {
+      if (P.error) throw new Error(P.error);
+      const { W, D } = P;
+      const article = D.querySelector('article.message[data-msgid="h1@hostile.test"]');
+      const pane = D.querySelector('main.thread');
+      const chip = () => article.querySelector(':scope > header > .cta');
+      const statusEl = D.getElementById('status');
+      const press = (target, k) => {
+        const o = { key: k, code: 'Key' + k.toUpperCase(), bubbles: true, cancelable: true };
+        target.dispatchEvent(new W.KeyboardEvent('keydown', o));
+        target.dispatchEvent(new W.KeyboardEvent('keyup', o));
+      };
+      const want = 'https://login.example/m/1';
+      if (!article.classList.contains('selected')) press(pane, 'p');
+      if (article.classList.contains('collapsed')) article.querySelector(':scope > header .from').click();
+      if (!article.classList.contains('selected') || article.classList.contains('collapsed')) xfails.push('the text message is not the expanded cursor');
+      const c = chip();
+      if (!c || !c.classList.contains('guess')) xfails.push('no guess chip on the text message');
+      else {
+        const n = c.querySelector('bdi.name'), d = c.querySelector('bdi.destination');
+        if (!n || n.textContent !== 'Sign in with this link') xfails.push('chip name: ' + (n && n.textContent));
+        if (!d || d.textContent !== 'https://login.example') xfails.push('chip destination: ' + (d && d.textContent));
+      }
+      const a = article.querySelector('.body[data-kind=text] a[href="' + want + '"]');
+      if (!a || !a.hasAttribute('data-pick')) xfails.push('the link is not marked');
+      else if (W.getComputedStyle(a).outlineStyle !== 'dashed') xfails.push('the mark does not show on the cursor message');
+      if (article.querySelectorAll('a[data-pick]').length !== 1) xfails.push('marks: ' + article.querySelectorAll('a[data-pick]').length);
+      chip().scrollIntoView({ block: 'center' });
+      W.__opens.length = 0;
+      press(pane, 'o');
+      if (W.__opens.length !== 1 || W.__opens[0][0] !== want) xfails.push('o opened ' + JSON.stringify(W.__opens));
+      a.setAttribute('href', 'https://evil.example/t');
+      W.__opens.length = 0;
+      press(pane, 'o');
+      if (W.__opens.length) xfails.push('o opened the re-pointed link: ' + W.__opens[0][0]);
+      if (!/^Not opened: the link changed/.test(statusEl.textContent)) xfails.push('status: ' + statusEl.textContent);
+      const d2 = chip() && chip().querySelector('bdi.destination');
+      if (!d2 || d2.textContent !== 'https://evil.example') xfails.push('the chip was not guessed afresh: ' + (d2 && d2.textContent));
+      press(pane, 'n');
+      if (article.classList.contains('selected')) xfails.push('n did not move the cursor');
+      else if (W.getComputedStyle(a).outlineStyle !== 'none') xfails.push('the mark shows off the cursor message');
+      if (W.__errors.length) xfails.push('page errors: ' + W.__errors.join(' | '));
+    } catch (e) { xfails.push('harness error: ' + (e && e.stack || e)); }
+    results.push({ id: 'page-narrow-text-guess', pass: xfails.length === 0, fails: xfails });
     P.frame.remove();
 
     // A throw inside the heuristic (forced: the first computed style of a

@@ -682,6 +682,55 @@ test('usable: the pane less the sticky and fixed chrome over it, in both layouts
   assert.equal(A.inside(r(10, 10, 20, 20), A.usable(r(0, 0, 100, 30), view, [r(0, 0, 100, 40)])), false);
 });
 
+// ---- text bodies (o, tier 3) ------------------------------------------------
+
+// tl builds textLines' shape from plain text: every http(s) address a link,
+// a line starting "> " quoted.
+const tl = (body) => body.split('\n').map((text) => {
+  if (text.startsWith('> ')) return { text: '', links: [], quoted: true };
+  const links = [];
+  for (const m of text.matchAll(/https?:\/\/\S+/g)) links.push({ url: m[0], start: m.index, end: m.index + m[0].length });
+  return { text, links };
+});
+const pick = (body) => { const p = A.textPick(tl(body)); return p && { url: p.url, name: p.name }; };
+
+test('textPick: a magic link, its verb from the line above', () => {
+  assert.deepEqual(pick('Hi,\n\nClick the link below to verify your email:\n\nhttps://exe.dev/verify?t=abc\n\nIt expires in 10 minutes.\n\n-- \nexe.dev https://exe.dev'),
+    { url: 'https://exe.dev/verify?t=abc', name: 'Verify your email' });
+  assert.deepEqual(pick('Sign in to exe.dev: https://exe.dev/l/x'), { url: 'https://exe.dev/l/x', name: 'Sign in to exe.dev' }, 'a dot inside a word ends nothing');
+  // One link and no verb: the link, unnamed.
+  assert.deepEqual(pick('Notes from today:\nhttps://docs.example/d/1'), { url: 'https://docs.example/d/1', name: 'Open link' });
+});
+
+test('textPick: footer links go; of several, only one with a verb', () => {
+  assert.deepEqual(pick('Reset your password: https://a.example/r\n\nNeed help? Contact support: https://a.example/help\nUnsubscribe: https://a.example/u'),
+    { url: 'https://a.example/r', name: 'Reset your password' });
+  assert.equal(pick('See https://a.example and https://b.example'), null, 'two with a verb');
+  assert.equal(pick('https://a.example\nhttps://b.example'), null, 'two, no verb');
+  assert.equal(pick('Unsubscribe here: https://a.example/u'), null, 'only a footer link');
+  // A URL also linked from a footer line is a footer link.
+  assert.equal(pick('Confirm: https://a.example/x\nManage preferences: https://a.example/x'), null);
+  // The same URL twice is one choice.
+  assert.deepEqual(pick('https://a.example/x\n\nConfirm your account: https://a.example/x'), { url: 'https://a.example/x', name: 'Confirm your account' });
+});
+
+test('textPick: quotes, signatures and forwarded mail are not the sender\'s own', () => {
+  assert.equal(pick('Thanks!\n\nOn Mon, Bob wrote:\n> Verify here: https://a.example/v'), null);
+  assert.equal(pick('Cheers\n-- \nJo https://jo.example'), null);
+  assert.equal(pick('FYI\n---------- Forwarded message ----------\nVerify: https://a.example/v'), null);
+  // The line above a link is its context only if it isn't across a quote
+  // or another link's line.
+  assert.deepEqual(pick('Reset: https://a.example/r\nhttps://b.example/x'), { url: 'https://a.example/r', name: 'Reset' },
+    'the bare link takes no verb from the link line above it');
+  assert.deepEqual(pick('Verify below:\n> quoted\nhttps://a.example/v\nhttps://b.example/x'), null, 'nor across a quote');
+});
+
+test('textPick: the name is capped and starts with a capital', () => {
+  const p = A.textPick(tl('Please verify ' + 'a'.repeat(100) + ' https://a.example/v'));
+  assert.equal([...p.name].length, 61);
+  assert.ok(p.name.startsWith('Verify a'));
+});
+
 // ---- button heuristic (o, tier 2) ------------------------------------------
 
 test('ctaText: a leading action verb, footer words, addresses, words', () => {

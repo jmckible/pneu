@@ -51,15 +51,6 @@ them here if they're wrong.
     capsule: the list that opened it, else the tab's last list, else
     Inbox. Another view's key there is a station-to-station trip. Esc and
     Back work as ever.
-  - *New spam.* The Spam station's dot glows (accent, with a glow) when
-    spam has arrived since you last visited Spam, and goes dark when you
-    do. The server renders the newest spam message's date on the Spam
-    station (one notmuch search per account, cached until the view
-    generation moves); the browser compares it with the time of its last
-    visit to Spam (localStorage). A first look counts what's there as
-    seen. It follows the message's Date header, so spam dated in the past
-    doesn't light it. Fetched pages (the split's list, a refetched thread)
-    bring a newer date, so it lights without a reload.
   - *Search is a station.* No permanent box: the search station (`/`
     search) heads the tube. `/` or a click turns it into an inline field
     (dashed accent underline); Enter searches (`/search?q=`), Esc or
@@ -523,7 +514,10 @@ it unknown and uncached. An unpaged list never asks.
   action, a button heuristic may guess one visible, button-like link: the
   chip is dashed and tagged `guess`, the link is outlined over the frame,
   and `o` opens it only if it is still there, visible and pointing where it
-  did when picked. docs/actions.md.
+  did when picked. A plain-text body gets the same guess chip from the
+  words around its links (the one link left after footers, or the one
+  whose line says "verify", "sign in" and the like), the link outlined in
+  place. docs/actions.md.
 - **Link hints** (`L`): labels over every visible http(s)/mailto link in the
   message's body, drawn by the app over the frame. Typing a label selects it
   and shows the full destination on the status line; `Enter` opens it (a

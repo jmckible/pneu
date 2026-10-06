@@ -52,18 +52,6 @@ test('cameFrom: the list this thread was opened from, else the tab\'s last, else
   assert.equal(X.cameFrom(null, '/search', '/t/w/1'), '/', 'an empty search has no station');
 });
 
-test('spamLight: dark on first sight, lit by newer spam, dark again on a visit', () => {
-  // First look: what's there counts as seen.
-  assert.deepEqual(X.spamLight('100', null, false, 500), { lit: false, seen: 100 });
-  assert.deepEqual(X.spamLight(100, 100, false, 500), { lit: false, seen: null });
-  assert.deepEqual(X.spamLight(200, 100, false, 500), { lit: true, seen: null });
-  // Visiting marks everything up to now, and a future-dated spam too.
-  assert.deepEqual(X.spamLight(200, 100, true, 500), { lit: false, seen: 500 });
-  assert.deepEqual(X.spamLight(900, 100, true, 500), { lit: false, seen: 900 });
-  assert.deepEqual(X.spamLight(0, 100, false, 500), { lit: false, seen: null });
-  assert.equal(X.spamLight(200, NaN, false, 500).lit, false);
-});
-
 test('span: the page\'s dates, newest to oldest, the year only when it isn\'t this one', () => {
   const now = Date.parse('2026-10-04T12:00:00-07:00');
   const d = (y, m, day, h) => `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(h || 9).padStart(2, '0')}:00:00-07:00`;

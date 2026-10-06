@@ -218,11 +218,6 @@ body:not(.split) #tube {
   background: color-mix(in oklab, var(--fg) 28%, var(--bar));
   pointer-events: none;
 }
-/* Spam arrived since the last visit (app.js spamLight). */
-#tube a[data-lit]::after {
-  background: var(--accent);
-  box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 70%, transparent);
-}
 /* btop-style: the view's number is a superscript fused to its name (the
    template leaves no space). Muted, but the active view's takes the
    accent, and hovering the tube lights them all. */
@@ -656,6 +651,14 @@ article.message.collapsed > header > .cta { display: none; }
    dialogs stack above it), on the cursor message only. */
 article.message > header > .cta.guess { border-style: dashed; border-color: color-mix(in oklab, var(--accent) 45%, var(--bg)); }
 .cta .tag { flex: none; font-size: 12px; color: var(--muted); }
+/* A text body's guess (actions.js textGuess) is our own markup: its link
+   is marked in place, on the cursor message only. */
+article.message.selected > .body[data-kind=text] a[data-pick] {
+  outline: 2px dashed var(--accent);
+  outline-offset: 1px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
 .body[data-kind=html] { position: relative; }
 .cta-mark { position: absolute; overflow: hidden; pointer-events: none; }
 .cta-mark[hidden], article.message:not(.selected) .cta-mark { display: none; }

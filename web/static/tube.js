@@ -65,18 +65,6 @@
 
   function listy(v) { return v.charAt(0) === '/' && v.charAt(1) !== '/' && v.charAt(1) !== '\\' && !!stationOf(v); }
 
-  // spamLight decides the Spam station's light. newest is the newest spam's
-  // date (unix seconds, 0 none), seen the last visit's mark (null: never),
-  // here whether Spam is showing, now the time in seconds. Returns {lit,
-  // seen}: seen is the mark to store (unchanged when null is returned).
-  // A first look marks what's there as seen, so old spam doesn't light it;
-  // a visit marks everything up to now (a future-dated spam included).
-  function spamLight(newest, seen, here, now) {
-    newest = Number(newest) || 0;
-    if (here) return { lit: false, seen: Math.max(now, newest, seen || 0) };
-    if (seen === null || seen === undefined || isNaN(seen)) return { lit: false, seen: newest };
-    return { lit: newest > seen, seen: null };
-  }
 
   // The pager row (list.html .pager) reads in dates, not counts: the
   // page's span, newest to oldest, from its first and last rows, and a
@@ -224,7 +212,7 @@
 
   var X = {
     STATIONS: STATIONS, LEARNED: LEARNED, stationOf: stationOf, queryOf: queryOf, flight: flight, animates: animates,
-    cameFrom: cameFrom, spamLight: spamLight, span: span, timeline: timeline, learn: learn, parseCounts: parseCounts,
+    cameFrom: cameFrom, span: span, timeline: timeline, learn: learn, parseCounts: parseCounts,
     CORK: CORK, FALL: FALL, eggKind: eggKind, fallTime: fallTime, eggPlan: eggPlan,
   };
   if (typeof module === 'object' && module.exports) { module.exports = X; return; }

@@ -222,7 +222,12 @@ carries harness-only cases that need the live port:
   frame, `o` opens nothing, the status line says `Not opened: …`, and the
   chip is guessed afresh with the new destination; `p` moves the cursor
   away and the highlight hides, its re-validation timer stopped. Then
-  `page-narrow-guess-throw`: the same page with the first computed style
+  `page-narrow-text-guess`, on the same page: the first message's text
+  body (a sign-in link above a signature with a link of its own) gets a
+  guess chip named from its line and pointing at the sign-in link, the
+  link marked in place on the cursor message only, `o` opens it, and once
+  its href is changed `o` opens nothing and the chip is guessed afresh.
+  Then `page-narrow-guess-throw`: the same page with the first computed style
   of a link in the frame forced to throw; the body still renders
   (`data-state=done`) with no chip, highlight, timer or page error.
 - `harness-link-opener-control`: the positive control. The shipping assembly, then

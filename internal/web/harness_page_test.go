@@ -15,8 +15,8 @@ var updateHarness = flag.Bool("update-harness", false, "rewrite testdata/hostile
 
 // harnessPage is the thread page the hostile harness runs app.js on
 // (testdata/hostile/app-thread.html): base.html and thread.html as the
-// server renders them, for a two-message thread whose last message has an
-// HTML body. It is checked in so the harness needs no server; this test
+// server renders them, for a two-message thread whose first message has a
+// text body with a sign-in link and whose last has an HTML body. It is checked in so the harness needs no server; this test
 // fails when the templates change until it is regenerated with
 //
 //	go test ./internal/web -run TestHarnessThreadPage -update-harness
@@ -46,7 +46,8 @@ func TestHarnessThreadPage(t *testing.T) {
 			{
 				ID: "h1@hostile.test", MsgID: "h1@hostile.test", Pos: 1, Class: "message collapsed",
 				FromName: "Robin Hale", FromAddr: "robin@example.com", To: "you@example.com",
-				Date: "Mon, Sep 28, 9:12 AM", ISO: "2026-09-28T09:12:00Z", Kind: "text", Text: "An earlier message.",
+				Date: "Mon, Sep 28, 9:12 AM", ISO: "2026-09-28T09:12:00Z", Kind: "text",
+				Text: RenderText("An earlier message. Sign in with this link:\n\nhttps://login.example/m/1\n\n-- \nRobin https://robin.example", false, false),
 			},
 			{
 				ID: "h2@hostile.test", MsgID: "h2@hostile.test", Pos: 2, Class: "message collapsed",

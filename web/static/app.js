@@ -303,7 +303,6 @@
     on = on && on.closest('[data-station]');
     if (!on || on.dataset.station !== tube.stationOf(url)) stopEgg();
     tube.place(url, presearch());
-    spamLight();
   }
 
   // The search station turns into a field (/ or a click): Enter searches,
@@ -386,36 +385,6 @@
     if (a.classList.contains('x')) { e.preventDefault(); location.assign(presearch()); }
   });
 
-  // The Spam station's dot lights when spam has come in since the last
-  // visit to Spam (SPEC "Layout"). The server renders the newest spam's
-  // date on the link (data-spam, spam.go); the last visit is this
-  // browser's, in localStorage. A fetched page (fetchMain: the split's
-  // list, a thread refetched on a change) brings a newer date.
-  var SPAM_KEY = 'pneu:spam-seen';
-  var spamShown = false; // the light has been drawn once: a change now pops
-
-  function spamLight(newest) {
-    var a = navEl && navEl.querySelector('a[data-spam]');
-    if (!a || !tube) return;
-    if (newest != null) a.dataset.spam = String(newest);
-    var raw = local(function (s) { return s.getItem(SPAM_KEY); });
-    var seen = raw === null || raw === undefined ? null : Number(raw);
-    var d = tube.spamLight(a.dataset.spam, seen, a.classList.contains('active'), Math.floor(Date.now() / 1000));
-    if (d.seen !== null) local(function (s) { s.setItem(SPAM_KEY, String(d.seen)); });
-    var was = a.hasAttribute('data-lit');
-    a.toggleAttribute('data-lit', d.lit);
-    if (d.lit && !was && spamShown && !still() && a.animate) {
-      try {
-        a.animate([{ transform: 'scale(0)' }, { transform: 'scale(1.8)', offset: 0.6 }, { transform: 'scale(1)' }],
-          { duration: 380, easing: 'cubic-bezier(.3,.7,.3,1)', pseudoElement: '::after' });
-      } catch (e) { /* no pseudo-element animation: the light is enough */ }
-    }
-    spamShown = true;
-  }
-
-  // Another window visited Spam.
-  window.addEventListener('storage', function (e) { if (e.key === SPAM_KEY) spamLight(); });
-  spamLight();
   (function () { var x = navEl && navEl.querySelector('.q .x'); if (x) x.setAttribute('href', presearch()); })();
 
   // The fold: the window's layout (triage.js layout, tube.js measured it
@@ -807,6 +776,20 @@
     setChip(article, g.action);
   }
 
+  // guessText: a text body has no frame to lay out, so its guess
+  // (actions.js textGuess) is made from the server's markup as the thread
+  // renders. Its link is marked in place (data-pick; app.css shows it on
+  // the cursor message only).
+  function guessText(article) {
+    var pre = article.querySelector(':scope > .body[data-kind=text] > pre');
+    if (!pre || !Pneu.actions || !Pneu.actions.textGuess) return;
+    Array.prototype.forEach.call(pre.querySelectorAll('a[data-pick]'), function (a) { a.removeAttribute('data-pick'); });
+    var g = null;
+    try { g = Pneu.actions.textGuess(pre); } catch (e) { g = null; }
+    if (g) g.guess.anchor.setAttribute('data-pick', '');
+    setChip(article, g);
+  }
+
   // setGuess replaces the highlight of mail's guessed link.
   function setGuess(article, mail, action) {
     if (mail.mark) { mail.mark.stop(); mail.mark = null; }
@@ -986,6 +969,7 @@
     });
     T.items.forEach(function (a) {
       if (!a.classList.contains('collapsed')) renderBody(a);
+      guessText(a);
       var header = a.querySelector('header');
       if (header) header.addEventListener('click', function (e) {
         if (e.target.closest('a, button')) return;
@@ -1074,9 +1058,6 @@
       var doc = new DOMParser().parseFromString(html, 'text/html');
       var main = doc.querySelector('main.' + kind);
       if (!main) throw new Error('no ' + kind + ' in the page');
-      // Its tube says when the newest spam is dated, as of now.
-      var spam = doc.querySelector('#tube a[data-spam]');
-      if (spam) spamLight(spam.dataset.spam);
       return { main: document.adoptNode(main), title: doc.title, label: pageLabel(doc) };
     });
   }
@@ -2068,6 +2049,7 @@
       flash('Not opened: ' + r.reason, 'error');
       var div = article.querySelector('.body[data-kind=html]'), m = div && div.__mail;
       if (m) guessLink(article, m);
+      else guessText(article);
     } else flash('Refused for safety: ' + r.reason, 'error');
   }
 
