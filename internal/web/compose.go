@@ -270,13 +270,50 @@ func quoteText(s string) string {
 	}
 	var b strings.Builder
 	for line := range strings.SplitSeq(s, "\n") {
-		line = strings.TrimRight(line, " \t") // format=flowed soft breaks become hard
+		line = dropPhoneNotes(strings.TrimRight(line, " \t")) // format=flowed soft breaks become hard
 		if line == "" {
 			b.WriteString(">\n")
 		} else {
 			b.WriteString("> " + line + "\n")
 		}
 	}
+	return b.String()
+}
+
+// phoneNoteRE is an HTML-to-text converter's note of a tel: link's target,
+// as Gmail writes it: "651-379-2240 <(651)%20379-2240>".
+var (
+	phoneNoteRE = regexp.MustCompile(`\s*<(?:tel:)?[-+().\d]*(?:(?:%20|\s)[-+().\d]*)*>`)
+	phoneTailRE = regexp.MustCompile(`[-+().\d][-+().\d ]*$`)
+)
+
+// dropPhoneNotes removes each phone note that only repeats the number before
+// it. Gmail links a bare number in our HTML quote, and its own text part then
+// notes the link again, so every round trip added one; a quote that no
+// longer matches the earlier messages breaks Gmail's fold.
+func dropPhoneNotes(line string) string {
+	if !strings.Contains(line, "<") {
+		return line
+	}
+	digits := func(s string) string {
+		return strings.Map(func(r rune) rune {
+			if r >= '0' && r <= '9' {
+				return r
+			}
+			return -1
+		}, strings.ReplaceAll(s, "%20", ""))
+	}
+	var b strings.Builder
+	last := 0
+	for _, m := range phoneNoteRE.FindAllStringIndex(line, -1) {
+		b.WriteString(line[last:m[0]])
+		last = m[0]
+		note, num := digits(line[m[0]:m[1]]), digits(phoneTailRE.FindString(b.String()))
+		if len(note) >= 7 && len(num) >= 7 && (strings.HasSuffix(note, num) || strings.HasSuffix(num, note)) {
+			last = m[1]
+		}
+	}
+	b.WriteString(line[last:])
 	return b.String()
 }
 

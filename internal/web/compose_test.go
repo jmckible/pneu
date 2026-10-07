@@ -746,6 +746,23 @@ func TestSendAcceptedButNoLocalCopy(t *testing.T) {
 	}
 }
 
+func TestDropPhoneNotes(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		// Gmail's text part, after two round trips through a pneu quote.
+		{"Direct: 651-379-2240 <(651)%20379-2240> <(651)%20379-2240>", "Direct: 651-379-2240"},
+		{"call +1 651 379 2240 <tel:651-379-2240> today", "call +1 651 379 2240 today"},
+		// A note for a different number, or that isn't a phone, stays.
+		{"Direct: 651-379-2240 <(612)%20555-0100>", "Direct: 651-379-2240 <(612)%20555-0100>"},
+		{"*kbruins@bushfound.org* <kbruins@bushfound.org>", "*kbruins@bushfound.org* <kbruins@bushfound.org>"},
+		{"see <123> and 2024 <2024>", "see <123> and 2024 <2024>"},
+		{"pin <6513792240>", "pin <6513792240>"},
+	} {
+		if got := dropPhoneNotes(c.in); got != c.want {
+			t.Errorf("dropPhoneNotes(%q)\n got %q\nwant %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestQuoteHTML(t *testing.T) {
 	bq := `<blockquote class="gmail_quote" style="` + quoteStyle + `">`
 	for _, c := range []struct{ in, want string }{

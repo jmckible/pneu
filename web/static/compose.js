@@ -78,8 +78,9 @@
       each(out, st);
       var text = out.s.slice(start).trim();
       var bare = href.replace(/^mailto:/i, '');
-      // An image link with no alt text adds nothing but a tracking URL.
-      if (text && href && href.charAt(0) !== '#' && text !== href && text !== bare) out.text(' <' + href + '>');
+      // An image link with no alt text adds nothing but a tracking URL; a
+      // tel: link's text is the number (noted, it breaks Gmail's quote fold).
+      if (text && href && href.charAt(0) !== '#' && !/^tel:/i.test(href) && text !== href && text !== bare) out.text(' <' + href + '>');
       return;
     }
     if (nm === 'TD' || nm === 'TH') { each(out, st); out.text(' '); return; }

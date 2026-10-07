@@ -46,9 +46,10 @@ test('htmlToText: links show href only when it differs from the text', () => {
     h('p', h('a', { href: 'https://example.com/y' }, 'https://example.com/y')),
     h('p', h('a', { href: 'mailto:a@example.com' }, 'a@example.com')),
     h('p', h('a', { href: '#top' }, 'top')),
+    h('p', 'Direct: ', h('a', { href: 'tel:(651)%20379-2240' }, '651-379-2240')),
     h('p', h('a', { href: 'https://track.example/z' }, h('img', { src: 'x' }))));
   assert.equal(C.htmlToText(doc),
-    'See the docs <https://example.com/x>.\n\nhttps://example.com/y\n\na@example.com\n\ntop');
+    'See the docs <https://example.com/x>.\n\nhttps://example.com/y\n\na@example.com\n\ntop\n\nDirect: 651-379-2240');
 });
 
 test('htmlToText: blockquote lines get "> ", nested twice', () => {
