@@ -270,6 +270,29 @@
     return ts.some(function (t) { return !!t && t.account === ref.account && t.thread === ref.thread; });
   }
 
+  // threadPatch plans a re-fetched thread onto the one shown, the way a
+  // Turbo morph would (app.js patchThread): each fetched message keeps
+  // the shown node of the same id when its markup (sig) is unchanged, and
+  // takes the fetched one otherwise. A kept node never moves, since moving
+  // a frame reloads it: null if the kept ones would have to (their order
+  // changed, or an id twice). olds, news: [{id, sig}]. One entry per news:
+  // {old: its index in olds, or -1; keep}.
+  function threadPatch(olds, news) {
+    var at = Object.create(null);
+    olds.forEach(function (o, i) { at[o.id] = i; });
+    var last = -1, plan = [];
+    for (var j = 0; j < news.length; j++) {
+      var i = news[j].id in at ? at[news[j].id] : -1;
+      var keep = i >= 0 && olds[i].sig === news[j].sig;
+      if (keep) {
+        if (i <= last) return null;
+        last = i;
+      }
+      plan.push({ old: i, keep: keep });
+    }
+    return plan;
+  }
+
   function appliedKey(epoch, gen) { return epoch + ' ' + gen; }
 
   // viewDecision is what a `view` event does to this window. w: id (this
@@ -313,7 +336,7 @@
     SPLIT_CH: SPLIT_CH, TUBE_CH: TUBE_CH, TUBE_FOLD_CH: TUBE_FOLD_CH, LIST_MIN_CH: LIST_MIN_CH, layout: layout, pathKind: pathKind, listURL: listURL, historyOp: historyOp, restoreIndex: restoreIndex,
     paneView: paneView, refreshStale: refreshStale, rgbHex: rgbHex, cycle: cycle,
     viewLabel: viewLabel, behind: behind, advance: advance, names: names, appliedKey: appliedKey,
-    viewDecision: viewDecision, undoConflicts: undoConflicts,
+    viewDecision: viewDecision, undoConflicts: undoConflicts, threadPatch: threadPatch,
   };
   if (typeof module === 'object' && module.exports) module.exports = T;
   else (root.Pneu = root.Pneu || {}).triage = T;

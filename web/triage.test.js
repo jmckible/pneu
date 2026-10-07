@@ -259,3 +259,26 @@ test('undoConflicts: another window writing the thread after the entry', () => {
   // An entry parse kept from storage survives the round trip with its mark.
   assert.equal(T.parse(JSON.stringify(got))[0].conflict, true);
 });
+
+test('threadPatch: unchanged messages keep their nodes', () => {
+  const olds = [{ id: 'a', sig: '1' }, { id: 'b', sig: '2' }];
+  assert.deepEqual(T.threadPatch(olds, olds), [{ old: 0, keep: true }, { old: 1, keep: true }]);
+});
+
+test('threadPatch: a changed message is replaced, a new one inserted, a gone one dropped', () => {
+  const olds = [{ id: 'a', sig: '1' }, { id: 'b', sig: '2' }, { id: 'c', sig: '3' }];
+  const news = [{ id: 'a', sig: '1' }, { id: 'n', sig: '9' }, { id: 'c', sig: '3x' }];
+  assert.deepEqual(T.threadPatch(olds, news), [{ old: 0, keep: true }, { old: -1, keep: false }, { old: 2, keep: false }]);
+});
+
+test('threadPatch: kept messages out of order, or an id twice, refuse', () => {
+  const olds = [{ id: 'a', sig: '1' }, { id: 'b', sig: '2' }];
+  assert.equal(T.threadPatch(olds, [olds[1], olds[0]]), null);
+  assert.equal(T.threadPatch(olds, [olds[0], olds[0]]), null);
+  // Out of order but replaced anyway: nothing kept has to move.
+  assert.deepEqual(T.threadPatch(olds, [{ id: 'b', sig: '2x' }, olds[0]]), [{ old: 1, keep: false }, { old: 0, keep: true }]);
+});
+
+test('threadPatch: ids are data, not prototype keys', () => {
+  assert.deepEqual(T.threadPatch([], [{ id: 'constructor', sig: '1' }]), [{ old: -1, keep: false }]);
+});

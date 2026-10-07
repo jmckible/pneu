@@ -945,6 +945,29 @@
     if (m && m.guessPending) guessLink(article, m);
   }
 
+  // articleSig is a message's markup as the server sent it, less what
+  // changes without its content changing: the class (read, flagged, and
+  // the page's own collapsed and selected) and its "2 of 3". Taken before
+  // the page adds anything to the article (initThread, patchThread).
+  function articleSig(a) {
+    var c = a.cloneNode(true);
+    c.removeAttribute('class');
+    var pos = c.querySelector(':scope > header > .pos');
+    if (pos) pos.remove();
+    return c.outerHTML;
+  }
+
+  function initArticle(a) {
+    if (!a.classList.contains('collapsed')) renderBody(a);
+    guessText(a);
+    var header = a.querySelector('header');
+    if (header) header.addEventListener('click', function (e) {
+      if (e.target.closest('a, button')) return;
+      select(T, T.items.indexOf(a), false);
+      toggle(a);
+    });
+  }
+
   // initThread drives root: the page's own thread, or one fetched into the
   // right pane. The previous instance's body loads are aborted; its
   // listeners went with its element.
@@ -960,6 +983,7 @@
     T.abort = window.AbortController ? new AbortController() : null;
     T.root = root;
     T.items = Array.prototype.slice.call(root.querySelectorAll('article.message'));
+    T.items.forEach(function (a) { a.__sig = articleSig(a); }); // before anything is added to them
     T.sel = -1;
     leaving = false;
     root.addEventListener('click', function (e) {
@@ -967,16 +991,7 @@
       if (!link || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
       if (openViewer(link)) e.preventDefault();
     });
-    T.items.forEach(function (a) {
-      if (!a.classList.contains('collapsed')) renderBody(a);
-      guessText(a);
-      var header = a.querySelector('header');
-      if (header) header.addEventListener('click', function (e) {
-        if (e.target.closest('a, button')) return;
-        select(T, T.items.indexOf(a), false);
-        toggle(a);
-      });
-    });
+    T.items.forEach(initArticle);
     var first = root.querySelector('article.message.unread');
     var i = first ? T.items.indexOf(first) : T.items.length - 1;
     if (T.items[i] && T.items[i].classList.contains('collapsed')) toggle(T.items[i]);
@@ -2430,6 +2445,11 @@
     fetchMain(url, 'thread').then(function (got) {
       if (seq !== refetchSeq || shownAt !== showSeq || T.root !== root || T.pending) return;
       if (threadBusy()) { threadChanged(); return; } // something started meanwhile
+      if (patchThread(root, got.main)) {
+        T.label = got.label;
+        if (tri.behind(T.label, T.need)) threadChanged();
+        return;
+      }
       var open = {};
       T.items.forEach(function (a) { open[a.dataset.msgid] = !a.classList.contains('collapsed'); });
       var at = cur(T) && cur(T).dataset.msgid;
@@ -2451,6 +2471,74 @@
       // Gone, or the server is: say so, and try again on the next change.
       if (seq === refetchSeq && T.root === root) root.dataset.changed = '';
     });
+  }
+
+  // patchThread brings root up to main, the same thread fetched again, as
+  // a Turbo morph would, keeping root itself. A message whose markup is
+  // unchanged keeps its node and so its frame, which neither reloads nor
+  // changes height; most refetches (a sync that brought mail elsewhere)
+  // change nothing at all. The reader's place holds without restoring it:
+  // nothing kept moves, and the browser's scroll anchoring covers a
+  // message above that changes. false if it can't: kept messages would
+  // have to move, or nothing is left.
+  function patchThread(root, main) {
+    var news = Array.prototype.slice.call(main.querySelectorAll('article.message'));
+    if (!news.length) return false;
+    news.forEach(function (a) { a.__sig = articleSig(a); });
+    var ref = function (a) { return { id: a.dataset.msgid, sig: a.__sig }; };
+    var plan = tri.threadPatch(T.items.map(ref), news.map(ref));
+    if (!plan) return false;
+    var olds = T.items, at = cur(T), kept = [], fresh = [];
+    var first = olds[0] || null, prev = null;
+    var items = plan.map(function (p, j) {
+      var old = p.old >= 0 ? olds[p.old] : null, n = news[j];
+      if (p.keep) {
+        kept[p.old] = true;
+        // The server's read and flagged; collapsed is the page's.
+        old.classList.toggle('unread', n.classList.contains('unread'));
+        old.classList.toggle('flagged', n.classList.contains('flagged'));
+        var pos = old.querySelector(':scope > header > .pos'), npos = n.querySelector(':scope > header > .pos');
+        if (pos && npos) pos.textContent = npos.textContent;
+        prev = old;
+        return old;
+      }
+      if (old) n.classList.toggle('collapsed', old.classList.contains('collapsed'));
+      if (prev) prev.after(n);
+      else root.insertBefore(n, first);
+      prev = n;
+      fresh.push(n);
+      return n;
+    });
+    olds.forEach(function (a, i) {
+      if (kept[i]) return;
+      if (Pneu.actions) Pneu.actions.cancelFor(a);
+      var m = mailOf(a);
+      if (m && m.mark) { m.mark.stop(); m.mark = null; }
+      a.remove();
+    });
+    var h = root.querySelector(':scope > h1'), nh = main.querySelector(':scope > h1');
+    if (h && nh && h.textContent !== nh.textContent) h.textContent = nh.textContent;
+    // The thread's own attributes are the server's (data-changed goes).
+    Array.prototype.slice.call(root.attributes).forEach(function (attr) {
+      if (!main.hasAttribute(attr.name)) root.removeAttribute(attr.name);
+    });
+    Array.prototype.forEach.call(main.attributes, function (attr) {
+      if (root.getAttribute(attr.name) !== attr.value) root.setAttribute(attr.name, attr.value);
+    });
+    T.items = items;
+    fresh.forEach(initArticle);
+    var i = at ? items.indexOf(at) : -1;
+    if (i >= 0) T.sel = i; // the same node, still selected
+    else {
+      var gone = at ? olds.indexOf(at) : -1;
+      for (var k = 0; at && k < items.length; k++) {
+        if (items[k].dataset.msgid === at.dataset.msgid) { gone = k; break; }
+      }
+      T.sel = -1;
+      select(T, Math.max(gone, 0), false);
+    }
+    syncKeybar();
+    return true;
   }
 
   function reloadWhenQuiet() {
