@@ -445,8 +445,24 @@ it unknown and uncached. An unpaged list never asks.
   with a 3px left rail: border color at rest, `--fg` when unread, `--accent`
   under the cursor. Header shows `n of N` on the right.
 - **Expanded message:** from, to/cc, date, then the body in the sandboxed
-  frame (HTML) or a `<pre>` (text). Quoted text folds by default. Attachments
-  as a list under the body.
+  frame (HTML) or a `<pre>` (text). Attachments as a list under the body.
+- **Quote fold.** As Gmail trims content, a reply's trailing copy of what
+  it answers folds behind a `···` pill, closed; a click or `.` (the cursor
+  message's, all of them) opens it. Never the thread's first message (a
+  forward, or a reply to mail that isn't here, shows whole), never a quote
+  with the reply's text after it (inline replies), a body that is all
+  quote, or a forward ("Forwarded message", "Begin forwarded message",
+  Subject: Fwd:). Text (textbody.go): the last `>` run with only blank
+  lines after it, with its "… wrote:" line, or an Outlook-style copy from
+  "-----Original Message-----", an underscore rule or a From:/Sent: block
+  to the end. HTML (mailframe.js, after sanitizing): the first top-level
+  marker with nothing after it, `.gmail_quote`, `blockquote[type=cite]`
+  (with Thunderbird's `.moz-cite-prefix`), `.yahoo_quoted`,
+  `.protonmail_quote`, or Outlook's `#appendonsend`/`<hr>`/`#divRplyFwdMsg`
+  to the end of their container, wrapped in a `<details>`, which toggles
+  without script. Matching quotes against earlier messages' text (Gmail's
+  marker-less trim) is not done. A fold's state outlives a repaint and a
+  refetch.
 - **Attachments.** Each is a link to its `/part` URL: images, PDFs, audio
   and video open in a tab, everything else downloads. What pneu can show
   gets a viewer: `f` opens the cursor message's first (else the thread's

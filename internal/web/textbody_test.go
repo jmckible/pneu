@@ -2,6 +2,7 @@ package web
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jmckible/pneu/internal/notmuch"
@@ -143,5 +144,58 @@ func TestAnalyzeMultipartText(t *testing.T) {
 	a = analyze(m)
 	if a.Kind != "html" || a.Body.ID != 4 || len(a.Attachments) != 0 {
 		t.Errorf("html analysis %+v", a)
+	}
+}
+
+func TestRenderTextFold(t *testing.T) {
+	const open = `<details class="qfold"><summary title="Show quoted text">···</summary>`
+	cases := []struct {
+		name, in, want string
+	}{
+		{"trailing quote with attribution",
+			"Sounds good.\n\nOn Tue, Oct 7, 2026 at 3:00 PM Ann <a@x.example> wrote:\n> Lunch?\n>\n> Ann\n\n",
+			"Sounds good.\n" + open + "\nOn Tue, Oct 7, 2026 at 3:00 PM Ann &lt;a@x.example&gt; wrote:\n" +
+				`<blockquote class="q">Lunch?` + "\n\nAnn\n</blockquote>\n</details>"},
+		{"wrapped attribution",
+			"Yes.\nOn Tue, Oct 7, 2026 at 3:00 PM Ann <\na@x.example> wrote:\n> Lunch?\n",
+			"Yes.\n" + open + "On Tue, Oct 7, 2026 at 3:00 PM Ann &lt;\na@x.example&gt; wrote:\n" +
+				`<blockquote class="q">Lunch?` + "\n</blockquote></details>"},
+		{"no attribution, nested",
+			"Yes.\n> > deep\n> top\n",
+			"Yes.\n" + open + `<blockquote class="q"><blockquote class="q">deep` + "\n</blockquote>top\n</blockquote></details>"},
+		{"outlook copy",
+			"Fine by me.\n\n-----Original Message-----\nFrom: Ann <a@x.example>\nSent: Tuesday\nSubject: RE: lunch\n\nLunch?\n",
+			"Fine by me.\n" + open + "\n-----Original Message-----\nFrom: Ann &lt;a@x.example&gt;\nSent: Tuesday\nSubject: RE: lunch\n\nLunch?\n</details>"},
+		{"outlook web copy",
+			"Fine.\n________________________________\nFrom: Ann\nSent: Tuesday\n> x\n",
+			"Fine.\n" + open + "________________________________\nFrom: Ann\nSent: Tuesday\n" + `<blockquote class="q">x` + "\n</blockquote></details>"},
+		{"own colon line stays out",
+			"Hi.\nHere is the list:\n> a\n> b\n",
+			"Hi.\nHere is the list:\n" + open + `<blockquote class="q">a` + "\nb\n</blockquote></details>"},
+		{"inline reply stays",
+			"> Lunch?\nYes.\n> Where?\nThere.\n",
+			`<blockquote class="q">Lunch?` + "\n</blockquote>Yes.\n" + `<blockquote class="q">Where?` + "\n</blockquote>There.\n"},
+		{"all quote stays",
+			"On Tue Ann wrote:\n> Lunch?\n",
+			"On Tue Ann wrote:\n" + `<blockquote class="q">Lunch?` + "\n</blockquote>"},
+		{"forward stays",
+			"FYI\n\n---------- Forwarded message ---------\nFrom: Ann\nDate: Tue\nSubject: lunch\n> x\n",
+			"FYI\n\n---------- Forwarded message ---------\nFrom: Ann\nDate: Tue\nSubject: lunch\n" + `<blockquote class="q">x` + "\n</blockquote>"},
+		{"outlook forward stays",
+			"FYI\n-----Original Message-----\nFrom: Ann\nSent: Tue\nSubject: FW: lunch\nbody\n",
+			"FYI\n-----Original Message-----\nFrom: Ann\nSent: Tue\nSubject: FW: lunch\nbody\n"},
+		{"apple forward stays",
+			"FYI\nBegin forwarded message:\n> From: Ann\n",
+			"FYI\nBegin forwarded message:\n" + `<blockquote class="q">From: Ann` + "\n</blockquote>"},
+	}
+	for _, c := range cases {
+		if got := string(renderText(c.in, false, false, true)); got != c.want {
+			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
+		}
+	}
+	// Without fold, nothing changes.
+	in := cases[0].in
+	if got, want := string(renderText(in, false, false, false)), string(RenderText(in, false, false)); got != want || strings.Contains(got, "details") {
+		t.Errorf("unfolded: %q", got)
 	}
 }

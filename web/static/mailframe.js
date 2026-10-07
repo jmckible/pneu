@@ -23,6 +23,10 @@
 //             same-origin GETs (30), sizing (27, 28, 33), srcdoc as a DOM
 //             property only (34), loopback/LAN/app-path image and CSS URLs
 //             (35–37), receipt pixels (38).
+//   quote fold — opts.fold: the trailing quote goes into a closed <details>
+//             (foldQuote), which toggles without script. Layout only: a
+//             mail can restyle or fake the pill, which hides nothing it
+//             couldn't hide itself.
 //
 // Remote images load by default (app.js passes remoteImages except for spam
 // and trash, which keep click-to-load). What that gives away is the open, so
@@ -635,6 +639,131 @@
     return remote;
   }
 
+  // ---- quote fold -----------------------------------------------------------
+  // Gmail's trimmed content: a reply's copy of what it answers, at the end
+  // of the body, folds behind "···". Only by the markers clients write
+  // around it, and only when it is trailing (nothing after it but blank
+  // space), something comes before it, and it isn't a forward.
+  var nextSib = getter(Node.prototype, 'nextSibling');
+  var prevSib = getter(Node.prototype, 'previousSibling');
+  var parentOf = getter(Node.prototype, 'parentNode');
+  var nodeTypeOf = getter(Node.prototype, 'nodeType');
+  var localNameOf = getter(Element.prototype, 'localName');
+  var lastChildOf = getter(Node.prototype, 'lastChild');
+  function nameOf(n) { return nodeTypeOf.call(n) === 1 ? localNameOf.call(n) : ''; }
+  var closestEl = Element.prototype.closest;
+  // Gmail (ours too), Apple Mail and Thunderbird, Yahoo, Proton; Outlook's
+  // copy is the rest of its container from #appendonsend, the <hr> or
+  // #divRplyFwdMsg (the From:/Sent: block).
+  var QUOTE_SEL = '.gmail_quote, blockquote[type="cite" i], .yahoo_quoted, .protonmail_quote, #appendonsend, #divRplyFwdMsg';
+  var OUTLOOK_SEL = '#appendonsend, #divRplyFwdMsg';
+  var FORWARD = /forwarded message|begin forwarded|weitergeleitete nachricht|message transf[ée]r[ée]|mensaje reenviado|(?:subject|betreff|objet|asunto)\s*:\s*(?:fwd?|wg|tr|rv)\s*:/i;
+  // How an attribution line ends: "… wrote:", "… a écrit :", "… schrieb …:".
+  var ATTRIBUTION = /(?:wrote|[ée]crit|schrieb[^:]*|escribi[óo]|scritto|schreef|escreveu)\s*:$/i;
+  var NO_TEXT = { style: 1, script: 1, title: 1, template: 1 };
+  var NO_FOLD_IN = { table: 1, tbody: 1, thead: 1, tfoot: 1, tr: 1, ul: 1, ol: 1, dl: 1 };
+
+  // textIn is node's rendered-ish text (no style sheets), up to limit
+  // chars. A walker, not recursion: nesting is the sender's to choose (31).
+  var ownerOf = getter(Node.prototype, 'ownerDocument');
+  var createWalker = Document.prototype.createTreeWalker;
+  var TEXT_FILTER = {
+    acceptNode: function (n) {
+      if (nodeTypeOf.call(n) !== 1) return NodeFilter.FILTER_ACCEPT;
+      return NO_TEXT[localNameOf.call(n)] ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP;
+    },
+  };
+  function textIn(node, limit) {
+    var t = nodeTypeOf.call(node);
+    if (t === 3) return node.data.slice(0, limit);
+    if (t !== 1 || NO_TEXT[localNameOf.call(node)]) return '';
+    var w = createWalker.call(ownerOf.call(node), node, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, TEXT_FILTER);
+    var out = '';
+    for (var n = w.nextNode(); n && out.length < limit; n = w.nextNode()) out += n.data;
+    return out.slice(0, limit);
+  }
+  function blank(node) {
+    if (nameOf(node) === 'img' || (nodeTypeOf.call(node) === 1 && all(node, 'img').length)) return false;
+    return !/\S/.test(textIn(node, 4096));
+  }
+  // anyAfter: something shows after node, up to body.
+  function anyAfter(node, body) {
+    for (var n = node; n && n !== body; n = parentOf.call(n)) {
+      for (var s = nextSib.call(n); s; s = nextSib.call(s)) if (!blank(s)) return true;
+    }
+    return false;
+  }
+  function anyBefore(node, body) {
+    for (var n = node; n && n !== body; n = parentOf.call(n)) {
+      for (var s = prevSib.call(n); s; s = prevSib.call(s)) if (!blank(s)) return true;
+    }
+    return false;
+  }
+  // quoteRange is the run of siblings [first, last] candidate c folds as.
+  function quoteRange(c) {
+    var parent = parentOf.call(c);
+    if (matches.call(c, OUTLOOK_SEL)) {
+      var first = c, p = prevSib.call(c);
+      while (p && nodeTypeOf.call(p) === 3 && blank(p)) p = prevSib.call(p);
+      if (p && nameOf(p) === 'hr') first = p;
+      return { first: first, last: lastChildOf.call(parent) };
+    }
+    // The attribution ("On …, Ann wrote:") just above it goes with it.
+    var a = prevSib.call(c);
+    while (a && (nodeTypeOf.call(a) !== 1 || nameOf(a) === 'br') && blank(a)) a = prevSib.call(a);
+    if (a && (nodeTypeOf.call(a) === 3 || nodeTypeOf.call(a) === 1)) {
+      var t = textIn(a, 401).trim();
+      if ((nodeTypeOf.call(a) === 1 && matches.call(a, '.moz-cite-prefix')) || (t.length <= 400 && ATTRIBUTION.test(t))) return { first: a, last: c };
+    }
+    return { first: c, last: c };
+  }
+  function rangeText(r, limit) {
+    var out = '';
+    for (var n = r.first; n && out.length < limit; n = nextSib.call(n)) {
+      out += textIn(n, limit - out.length) + '\n';
+      if (n === r.last) break;
+    }
+    return out;
+  }
+
+  // foldQuote wraps the body's trailing quote in a closed (or, with open,
+  // open) details.pneu-qfold; true if it found one.
+  function foldQuote(root, doc, open) {
+    var body = all(root, 'body')[0];
+    if (!body) return false;
+    var cands = all(body, QUOTE_SEL).filter(function (c) {
+      var up = parentOf.call(c);
+      return !(up && nodeTypeOf.call(up) === 1 && closestEl.call(up, QUOTE_SEL));
+    });
+    for (var i = 0; i < cands.length; i++) {
+      var r = quoteRange(cands[i]), parent = parentOf.call(r.first);
+      // The blank lines between the reply and the quote go in with it, so
+      // the pill sits right under the reply.
+      for (var b = prevSib.call(r.first); b && (nodeTypeOf.call(b) !== 1 || nameOf(b) === 'br') && blank(b); b = prevSib.call(b)) r.first = b;
+      if (!parent || NO_FOLD_IN[nameOf(parent)]) continue;
+      if (anyAfter(r.last, body) || !anyBefore(r.first, body)) continue;
+      // A forward's marker can sit just above the copy, too.
+      var above = prevSib.call(r.first);
+      if (FORWARD.test(rangeText(r, 600)) || (above && FORWARD.test(textIn(above, 300)))) return false;
+      var details = doc.createElement('details');
+      setAttr.call(details, 'class', 'pneu-qfold');
+      if (open) setAttr.call(details, 'open', '');
+      var summary = doc.createElement('summary');
+      setAttr.call(summary, 'title', 'Show quoted text');
+      summary.textContent = '···';
+      details.appendChild(summary);
+      parent.insertBefore(details, r.first);
+      for (var n = r.first, stop = false; n && !stop; ) {
+        var next = nextSib.call(n);
+        stop = n === r.last;
+        details.appendChild(n);
+        n = next;
+      }
+      return true;
+    }
+    return false;
+  }
+
   // The frame's html{} rule, one of two. Sheet: the mail's own palette on
   // an off-white page, the way it was designed. Themed: the app's colors,
   // which come from our stylesheet (app.js reads --bg/--fg/--accent and
@@ -651,7 +780,11 @@
   var FRAME_STYLE =
     'body{margin:8px;font:14px/1.45 ' + MAIL_SANS + ',sans-serif;overflow-wrap:break-word}' +
     'img{max-width:100%;height:auto}' +
-    'pre{white-space:pre-wrap}';
+    'pre{white-space:pre-wrap}' +
+    'details.pneu-qfold>summary{display:inline-block;list-style:none;cursor:pointer;margin:4px 0;padding:0 .8ch;' +
+    'line-height:1.3;border-radius:2px;background:color-mix(in srgb,currentColor 12%,transparent);opacity:.75;user-select:none}' +
+    'details.pneu-qfold>summary::-webkit-details-marker{display:none}' +
+    'details.pneu-qfold>summary:hover{opacity:1}';
 
   // Builds the srcdoc string. Exposed for tests; callers want renderMailFrame.
   function assemble(html, cids, origin, opts) {
@@ -685,6 +818,7 @@
     var A = Pneu.actions;
     var action = A && A.declaredAction ? A.declaredAction(ld, [origin, location.origin]) : null;
     var remote = postProcess(root, ctx);
+    var folded = opts.fold ? foldQuote(root, doc, !!opts.quotesOpen) : false;
     var themed = ctx.colors ? null : themedRule(opts.theme);
 
     var head = all(root, 'head')[0];
@@ -715,7 +849,7 @@
 
     return {
       srcdoc: '<!DOCTYPE html>' + root.outerHTML, csp: csp, remote: remote,
-      colors: ctx.colors, sheet: !themed, action: action, ldBlocks: ld.length,
+      colors: ctx.colors, sheet: !themed, action: action, ldBlocks: ld.length, folded: folded,
     };
   }
 
@@ -774,7 +908,7 @@
     });
   }
 
-  // renderMailFrame(html, cids, origin, opts) → { frame, remote, colors, sheet, action }
+  // renderMailFrame(html, cids, origin, opts) → { frame, remote, colors, sheet, action, folded }
   //   html    raw message HTML (untrusted)
   //   cids    { "<content-id without brackets>": "/part/…/n" }
   //   origin  the app origin, for img-src and the same-origin checks
@@ -788,6 +922,8 @@
   //   opts.onKeydown     receives keydown events from inside the frame
   //   opts.onKeyup       receives keyup events from inside the frame
   //   opts.base          base URL relative URLs resolve against (default: document.baseURI)
+  //   opts.fold          fold the trailing quote (foldQuote); opts.quotesOpen
+  //                      draws that fold open
   //   opts.theme         { bg, fg, accent: '#rrggbb', scheme: 'light'|'dark' }:
   //                      the app's colors, for a mail that declares none.
   //                      Missing or malformed: the light sheet.
@@ -796,7 +932,8 @@
   // renders as the light sheet (colors, or no usable theme), which is also
   // the frame's class. action is the message's declared JSON-LD action,
   // {url, name} (actions.js declaredAction; null without actions.js loaded),
-  // for the o chip; ldBlocks how many blocks were captured (the harness).
+  // for the o chip; ldBlocks how many blocks were captured (the harness);
+  // folded whether a quote was folded.
   Pneu.renderMailFrame = function (html, cids, origin, opts) {
     opts = opts || {};
     var built = assemble(html, cids, origin, opts);
@@ -817,7 +954,7 @@
     frame.srcdoc = built.srcdoc;
     return {
       frame: frame, remote: built.remote, colors: built.colors, sheet: built.sheet,
-      action: built.action, ldBlocks: built.ldBlocks,
+      action: built.action, ldBlocks: built.ldBlocks, folded: built.folded,
     };
   };
 

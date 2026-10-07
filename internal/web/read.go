@@ -375,6 +375,8 @@ type messageView struct {
 	// HoldImages keeps remote images behind a click: spam and trash, where
 	// an open confirms the address. Everywhere else they load (app.js).
 	HoldImages bool
+	// Fold: mailframe.js folds the HTML body's trailing quote (messageView).
+	Fold bool
 	// Unsub: the message has a List-Unsubscribe header, so the key bar
 	// shows X for it.
 	Unsub  bool
@@ -455,7 +457,7 @@ func (s *Server) thread(w http.ResponseWriter, r *http.Request) {
 		if data.Subject == "" {
 			data.Subject = m.Headers["Subject"]
 		}
-		v := s.messageView(acct, m)
+		v := s.messageView(acct, m, len(data.Messages) > 0)
 		v.Pos = len(data.Messages) + 1
 		drive = mergeDrive(drive, driveViews(driveRefs(m), acct.Email))
 		data.Messages = append(data.Messages, v)
@@ -479,7 +481,12 @@ func (s *Server) thread(w http.ResponseWriter, r *http.Request) {
 	s.render(w, http.StatusOK, "thread", data)
 }
 
-func (s *Server) messageView(acct notmuch.Account, m *notmuch.Message) messageView {
+// messageView renders m for the thread page. fold: a message shown before
+// it in the thread may be what its trailing quote copies, so that quote
+// folds (renderText for text, data-fold for mailframe.js); the first
+// message's never does, so a forward or a reply to mail not in the thread
+// shows whole.
+func (s *Server) messageView(acct notmuch.Account, m *notmuch.Message, fold bool) messageView {
 	esc := url.PathEscape(m.ID)
 	prefix := "/part/" + url.PathEscape(acct.Name) + "/" + esc + "/"
 	class := "message"
@@ -495,7 +502,7 @@ func (s *Server) messageView(acct notmuch.Account, m *notmuch.Message) messageVi
 	}
 	name, addr := splitAddress(m.Headers["From"])
 	when := time.Unix(m.Timestamp, 0).Local()
-	an := analyze(m)
+	an := analyzeFold(m, fold)
 	v := messageView{
 		ID:       m.ID,
 		MsgID:    esc,
@@ -515,6 +522,7 @@ func (s *Server) messageView(acct notmuch.Account, m *notmuch.Message) messageVi
 	if an.Kind == "html" {
 		v.BodyURL = "/body/" + url.PathEscape(acct.Name) + "/" + esc
 		v.HoldImages = holdImages(m.Tags)
+		v.Fold = fold
 	}
 	for _, a := range an.Attachments {
 		mt := effectiveType(a.Type, a.Name)

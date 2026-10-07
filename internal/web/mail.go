@@ -89,7 +89,11 @@ func chooseBody(parts []notmuch.Part) *notmuch.Part {
 // text parts outside multipart/alternative and the text bodies of embedded
 // (forwarded) messages are appended to the rendered text; an embedded
 // message that can't be folded in is offered as a .eml download instead.
-func analyze(m *notmuch.Message) analysis {
+func analyze(m *notmuch.Message) analysis { return analyzeFold(m, false) }
+
+// analyzeFold is analyze, folding the text body's trailing quote when fold
+// (renderText): the thread view's messages after the first.
+func analyzeFold(m *notmuch.Message, fold bool) analysis {
 	var a analysis
 	a.Body = chooseBody(m.Body)
 	if a.Body != nil {
@@ -107,7 +111,7 @@ func analyze(m *notmuch.Message) analysis {
 		if len(m.Body) == 1 && &m.Body[0] == a.Body && len(m.Filename) > 0 {
 			flowed, delsp = flowedParams(m.Filename[0])
 		}
-		text.WriteString(string(RenderText(a.Body.Content, flowed, delsp)))
+		text.WriteString(string(renderText(a.Body.Content, flowed, delsp, fold)))
 	}
 	htmlLower := ""
 	if a.Kind == "html" {

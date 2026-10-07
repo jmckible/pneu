@@ -707,6 +707,23 @@ article.message.collapsed > header .cc { display: none; }
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* A reply's trailing quote (textbody.go renderText; mailframe.js draws the
+   same pill inside the frame) folds behind "···", as Gmail's trimmed
+   content does. Click or . opens it. */
+.body details.qfold > summary {
+  display: inline-block;
+  list-style: none;
+  cursor: pointer;
+  margin: 4px 0;
+  padding: 0 0.8ch;
+  line-height: 1.3;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--fg) 10%, transparent);
+  color: var(--muted);
+  user-select: none;
+}
+.body details.qfold > summary::-webkit-details-marker { display: none; }
+.body details.qfold > summary:hover { color: var(--fg); background: color-mix(in oklab, var(--fg) 16%, transparent); }
 /* The frame is capped to the column; wide mail scrolls inside it. Its height
    is set by mailframe.js from the content, border included. A mail with no
    colors of its own renders in the app's colors on a transparent frame; one

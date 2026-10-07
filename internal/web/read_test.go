@@ -608,7 +608,7 @@ func TestAttachmentInline(t *testing.T) {
 			{ID: 6, ContentType: "application/zip", Filename: "x.zip"},
 		},
 	}}}
-	v := s.messageView(s.Accounts[0], m)
+	v := s.messageView(s.Accounts[0], m, false)
 	got := map[string]bool{}
 	for _, a := range v.Attach {
 		got[a.Name] = a.Inline
@@ -631,7 +631,7 @@ func TestHoldImages(t *testing.T) {
 	}{{[]string{"inbox"}, false}, {[]string{"spam"}, true}, {[]string{"trash", "unread"}, true}} {
 		m := notmuch.Message{ID: "hold@hostile.test", Tags: c.tags, Headers: map[string]string{},
 			Body: []notmuch.Part{{ID: 1, ContentType: "text/html", Content: "<p>x</p>"}}}
-		v := s.messageView(acct, &m)
+		v := s.messageView(acct, &m, false)
 		if v.HoldImages != c.hold {
 			t.Errorf("%v: HoldImages = %v", c.tags, v.HoldImages)
 		}

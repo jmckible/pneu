@@ -748,6 +748,7 @@
       frame: mail.frame || undefined, partBase: mail.partBase,
       onKeydown: function (e) { onKey(e, ident); }, onKeyup: actionKeyup,
       remoteImages: mail.remoteImages, theme: frameTheme(article),
+      fold: mail.fold, quotesOpen: mail.quotesOpen,
     });
     mail.frame = built.frame;
     mail.colors = built.colors;
@@ -757,7 +758,15 @@
     setGuess(article, mail, null);
     setChip(article, built.action);
     if (!mail.onLoad) {
-      mail.onLoad = function () { if (!mail.declared) guessLink(article, mail); };
+      mail.onLoad = function () {
+        // The fold's state outlives a repaint (theme, remote images). toggle
+        // doesn't bubble; a capturing listener still sees it.
+        var doc = mail.frame.contentDocument;
+        if (doc) doc.addEventListener('toggle', function (e) {
+          if (e.target.classList && e.target.classList.contains('pneu-qfold')) mail.quotesOpen = e.target.open;
+        }, true);
+        if (!mail.declared) guessLink(article, mail);
+      };
       mail.frame.addEventListener('load', mail.onLoad);
     }
     return built;
@@ -912,6 +921,7 @@
       // images click, and a theme change (rethemeFrames).
       var mail = div.__mail = {
         html: data.html || '', cids: data.cids || {}, partBase: partBase, remoteImages: !hold, frame: null, colors: false,
+        fold: 'fold' in div.dataset, quotesOpen: !!div.__quotesOpen,
       };
       var built = paintMail(article, mail);
       if (hold && built.remote) {
@@ -943,6 +953,29 @@
     renderBody(article);
     var div = article.querySelector('.body[data-kind=html]'), m = div && div.__mail;
     if (m && m.guessPending) guessLink(article, m);
+  }
+
+  // quoteFolds are article's folded trailing quotes (textbody.go renderText,
+  // mailframe.js foldQuote): in its <pre>, or in its frame.
+  function quoteFolds(article) {
+    var got = Array.prototype.slice.call(article.querySelectorAll('.body[data-kind=text] details.qfold'));
+    var m = mailOf(article), doc = m && m.frame && m.frame.contentDocument;
+    if (doc) got = got.concat(Array.prototype.slice.call(doc.querySelectorAll('details.pneu-qfold')));
+    return got;
+  }
+
+  // toggleQuotes (.) opens the cursor message's quote folds, or closes them
+  // when all are open. A collapsed message expands first.
+  function toggleQuotes() {
+    var a = cur(T);
+    if (!a) return;
+    if (a.classList.contains('collapsed')) toggle(a);
+    var folds = quoteFolds(a);
+    if (!folds.length) { flash('No quoted text folded'); return; }
+    var open = folds.some(function (d) { return !d.open; });
+    folds.forEach(function (d) { d.open = open; });
+    var m = mailOf(a);
+    if (m) m.quotesOpen = open;
   }
 
   // articleSig is a message's markup as the server sent it, less what
@@ -1868,6 +1901,7 @@
       ['> / <', 'Older / newer page (list)'],
       ['Space, ⇧Space', 'Page down / up (thread)'],
       ['Enter, o', 'Open thread (list) · Enter folds a message (thread)'],
+      ['.', "Show / hide the message's quoted text (thread)"],
       ['u, Esc', 'Back to the list (Esc first leaves a field) · Esc on the list closes the thread, else leaves a search'],
     ]],
     ['Panes', [
@@ -2252,6 +2286,7 @@
       X: unsubscribe,
       o: primaryLink,
       L: linkHints,
+      '.': toggleQuotes,
     },
     // Consulted after the active pane's map. On a page with no pane
     // (compose) only ANYWHERE applies: its fields and buttons own the rest.
@@ -2309,8 +2344,8 @@
     var fn = map && own.call(map, key) && map[key];
     if (typeof fn !== 'function' && (kind || own.call(ANYWHERE, key))) fn = own.call(keys.global, key) && keys.global[key];
     if (typeof fn !== 'function') return;
-    // Enter on a focused link or button keeps its native meaning.
-    if (e.key === 'Enter' && t && t.nodeType === 1 && t.closest('a, button')) return;
+    // Enter on a focused link, button or quote fold keeps its native meaning.
+    if (e.key === 'Enter' && t && t.nodeType === 1 && t.closest('a, button, summary')) return;
     e.preventDefault();
     if (L.cursor) L.cursor.settle(); // a new key finishes the list's motion: it acts on the end state
     fn(e, ident);
@@ -2450,17 +2485,28 @@
         if (tri.behind(T.label, T.need)) threadChanged();
         return;
       }
-      var open = {};
-      T.items.forEach(function (a) { open[a.dataset.msgid] = !a.classList.contains('collapsed'); });
+      var open = {}, quotes = {};
+      T.items.forEach(function (a) {
+        open[a.dataset.msgid] = !a.classList.contains('collapsed');
+        if (quoteFolds(a).some(function (d) { return d.open; })) quotes[a.dataset.msgid] = true;
+      });
       var at = cur(T) && cur(T).dataset.msgid;
       var scroller = split ? root : document.scrollingElement;
       var top = scroller ? scroller.scrollTop : 0;
       Array.prototype.forEach.call(got.main.querySelectorAll('article.message'), function (a) {
         if (Object.prototype.hasOwnProperty.call(open, a.dataset.msgid)) a.classList.toggle('collapsed', !open[a.dataset.msgid]);
       });
+      Array.prototype.forEach.call(got.main.querySelectorAll('article.message'), function (a) {
+        var div = quotes[a.dataset.msgid] && a.querySelector('.body[data-kind=html]');
+        if (div) div.__quotesOpen = true;
+      });
       root.replaceWith(got.main);
       T.label = got.label;
       initThread(got.main);
+      // After initThread took each message's signature: open is the page's.
+      T.items.forEach(function (a) {
+        if (quotes[a.dataset.msgid]) quoteFolds(a).forEach(function (d) { d.open = true; });
+      });
       for (var i = 0; i < T.items.length; i++) {
         if (T.items[i].dataset.msgid === at) { select(T, i, false); break; }
       }

@@ -95,6 +95,11 @@ an app path outside the message's parts (35, 36), or a receipt-tracker host (38)
 | `59-cta-image-only.html` | a big, early, styled image link whose `alt` is "Shop the sale", and a styled button with no text | be picked (the alt is not a label; no text, no pick) | rank both as candidates, pick nothing | A |
 | `60-cta-label-hosts.html` | "Track package" twice on real.example (different parameters) and once on other.example | merge other.example into real.example's choice | rank two choices, pick real.example's, other.example the runner-up | A |
 | `61-cta-budget.html` | one link holding 2,100 separately drawn text nodes before a clear button | pick anything once the guess's budget (2,000 text ranges) is spent | report `over`, pick nothing | A |
+| `62-quote-gmail.html` | a Gmail reply whose quote carries a script, an `onerror` image and its own `details ontoggle`, rendered with `fold` | run anything when the fold is made or opened; leave the quote showing closed | fold the quote (attribution included) behind the pill, show it once opened, keep the reply's link | P, A |
+| `63-quote-forward.html` | a Gmail forward: the same `gmail_quote` markup, "Forwarded message" | fold the forwarded message | show it whole | A |
+| `64-quote-inline.html` | an inline reply: a Thunderbird quote with the answer after it, then a trailing one | fold the first quote | fold only the trailing one, its `moz-cite-prefix` with it | A |
+| `65-quote-outlook.html` | an Outlook reply: `#appendonsend`, the `<hr>`, `#divRplyFwdMsg` and the copy as siblings | leave the rule or the From:/Sent: block showing | fold from the rule to the end | A |
+| `66-quote-all.html` | a body that is nothing but quote markup | fold it (a blank message) | show it | A |
 
 ## Sources
 
@@ -153,6 +158,13 @@ carries harness-only cases that need the live port:
   `theme` pass it as `opts.theme`; `colors`, `sheet` and `fits` assert the
   detection result, the frame mode and class, and that the frame's height
   covers its content, sheet border included, without clipping or slack.
+- Quote-fold cases (62–66) carry `fold` (passed as `opts.fold`), `folded`, the
+  expected `built.folded`, `hidden`, selectors the closed fold must hide
+  (`checkVisibility`: a closed details still lays out its content), and
+  `foldOpens`, a selector that must show once the fold is opened from the
+  parent realm. `harness-quote-nofold` is 62 without `fold`: nothing folds.
+  The frame growing to an opened fold is ResizeObserver's, which never fires
+  under `--dump-dom`'s virtual time; it's checked in the app.
 - Button-heuristic cases (54–61) carry `guess`, the pick `{text, host}`
   (text as the chip labels it) or null, from `Pneu.actions.guess` on the
   laid-out frame, and optionally `notCandidates`, hosts that must not be

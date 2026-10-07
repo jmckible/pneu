@@ -762,6 +762,69 @@
   "over": true
  },
  {
+  "id": "62-quote-gmail",
+  "file": "62-quote-gmail.html",
+  "fold": true,
+  "folded": true,
+  "hidden": [
+   ".quoted"
+  ],
+  "present": [
+   ".canary",
+   "details.pneu-qfold > summary"
+  ],
+  "links": [
+   "https://example.com/62"
+  ],
+  "foldOpens": ".quoted"
+ },
+ {
+  "id": "63-quote-forward",
+  "file": "63-quote-forward.html",
+  "fold": true,
+  "folded": false,
+  "present": [
+   ".forwarded"
+  ]
+ },
+ {
+  "id": "64-quote-inline",
+  "file": "64-quote-inline.html",
+  "fold": true,
+  "folded": true,
+  "present": [
+   ".first"
+  ],
+  "hidden": [
+   ".second"
+  ]
+ },
+ {
+  "id": "65-quote-outlook",
+  "file": "65-quote-outlook.html",
+  "fold": true,
+  "folded": true,
+  "hidden": [
+   "#divRplyFwdMsg",
+   ".quoted",
+   "hr"
+  ]
+ },
+ {
+  "id": "66-quote-all",
+  "file": "66-quote-all.html",
+  "fold": true,
+  "folded": false
+ },
+ {
+  "id": "harness-quote-nofold",
+  "file": "62-quote-gmail.html",
+  "folded": false,
+  "present": [
+   ".quoted"
+  ]
+ },
+ {
   "id": "harness-theme-invalid",
   "file": "44-no-colors.html",
   "theme": {

@@ -102,6 +102,7 @@ body { margin: 0; font: 13px monospace; }
         remoteImages: !!c.remoteImages && !c.rerender,
         partBase: c.partBase,
         theme: c.theme,
+        fold: !!c.fold,
         onKeydown: (e) => keys.push(e.key),
       };
       let built = c.control ? renderWithOpener(html) : Pneu.renderMailFrame(html, c.cids || {}, origin, opts);
@@ -125,7 +126,7 @@ body { margin: 0; font: 13px monospace; }
       }
       runs.push({
         c, html, frame: built.frame, remote: built.remote, colors: built.colors, sheet: built.sheet,
-        action: built.action, ldBlocks: built.ldBlocks, keys, blocked, loaded,
+        action: built.action, ldBlocks: built.ldBlocks, folded: built.folded, keys, blocked, loaded,
       });
     }
     for (const r of runs) r.loaded = await r.loaded;
@@ -138,6 +139,25 @@ body { margin: 0; font: 13px monospace; }
       }
     }
     await sleep(50);
+
+    // Quote folds (62-66): what the closed fold hides, then the fold
+    // opened from the parent realm and the quote showing. The frame growing
+    // to it is ResizeObserver's, which never fires here (no rendering
+    // frames under the virtual time budget): checked in the app instead.
+    const shows = (doc, sel) => {
+      const el = doc && doc.querySelector(sel);
+      // checkVisibility, not rects: a closed details hides its content
+      // with content-visibility, which still lays it out.
+      return !!(el && el.checkVisibility());
+    };
+    for (const r of runs) {
+      const doc = r.frame.contentDocument;
+      r.shownBeforeOpen = (r.c.hidden || []).filter((sel) => !doc || !doc.querySelector(sel) || shows(doc, sel));
+      if (!r.c.foldOpens || !doc) continue;
+      const fold = doc.querySelector('details.pneu-qfold');
+      if (fold) fold.open = true;
+      r.opened = { fold: !!fold, shows: shows(doc, r.c.foldOpens) };
+    }
 
     // The button heuristic (54-61) on each laid-out frame, read-only:
     // the frame's document is the same before and after.
@@ -1393,6 +1413,15 @@ body { margin: 0; font: 13px monospace; }
     for (const [sel, want] of c.text || []) {
       const el = q(sel);
       if (!el || !el.textContent.includes(want)) fails.push('text ' + sel);
+    }
+    // Quote folds (62-66): whether one was made, what it hid closed, and
+    // that opening it shows the quote.
+    if ('folded' in c && r.folded !== c.folded) fails.push('folded=' + r.folded + ' want ' + c.folded);
+    if ('folded' in c && !c.folded && qa('details.pneu-qfold').length) fails.push('fold markup without a fold');
+    for (const sel of r.shownBeforeOpen || []) fails.push('not folded away ' + sel);
+    if (c.foldOpens) {
+      const o = r.opened || {};
+      if (!o.fold || !o.shows) fails.push('fold open: ' + JSON.stringify(o));
     }
     for (const sel of c.present || []) {
       const el = q(sel);

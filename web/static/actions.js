@@ -1814,7 +1814,8 @@
 
   // textLines reads a text body's <pre> (textbody.go RenderText) as lines
   // for textPick: its text, top-level links ({url: the href, start, end,
-  // anchor}), and a quoted entry for each quote (blockquote.q) in its place.
+  // anchor}), and a quoted entry for each quote (blockquote.q, or the
+  // folded trailing quote, details.qfold) in its place.
   function textLines(pre) {
     var lines = [], cur = { text: '', links: [] };
     var flush = function () { lines.push(cur); cur = { text: '', links: [] }; };
@@ -1826,7 +1827,8 @@
         var start = cur.text.length;
         cur.text += n.textContent;
         cur.links.push({ url: n.getAttribute('href'), start: start, end: cur.text.length, anchor: n });
-      } else if (n.nodeType === 1 && n.localName === 'blockquote') {
+      } else if (n.nodeType === 1 && (n.localName === 'blockquote' || n.localName === 'details')) {
+        // A folded trailing quote (details.qfold) is quoted as a whole.
         if (cur.text || cur.links.length) flush();
         lines.push({ text: '', links: [], quoted: true });
       } else if (n.nodeType === 1) {

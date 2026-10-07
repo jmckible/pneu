@@ -14,7 +14,7 @@
 <span class="pos">{{.Pos}} of {{$.Total}}</span>
 </header>
 {{- if eq .Kind "html"}}
-<div class="body" data-kind="html" data-body-url="{{.BodyURL}}"{{if .HoldImages}} data-remote-images="click"{{end}}></div>
+<div class="body" data-kind="html" data-body-url="{{.BodyURL}}"{{if .HoldImages}} data-remote-images="click"{{end}}{{if .Fold}} data-fold{{end}}></div>
 {{- else if eq .Kind "text"}}
 <div class="body" data-kind="text"><pre>{{.Text}}</pre></div>
 {{- end}}
