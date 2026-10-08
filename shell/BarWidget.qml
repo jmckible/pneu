@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "status.js" as Status
 
@@ -157,8 +158,8 @@ BarWidget {
     // mail, urgent when the count can't be trusted. Theme tokens only, via
     // `bar.*` where the bar offers one so shell.toml overrides reach it.
     readonly property color stateColor: root.warning
-      ? (root.bar ? root.bar.urgent : Color.urgent)
-      : (root.unread > 0 ? Color.accent : (root.bar ? root.bar.barForeground : Color.foreground))
+      ? (root.bar ? root.bar.urgent : Commons.Color.urgent)
+      : (root.unread > 0 ? Commons.Color.accent : (root.bar ? root.bar.barForeground : Commons.Color.foreground))
     // A first download shows its progress in place of the count.
     readonly property bool pulling: !root.warning && root.pullingAccounts.length > 0
     readonly property bool showCount: !root.minimal && (pulling || root.unread > 0)
@@ -238,7 +239,7 @@ BarWidget {
         wrapMode: Text.WordWrap
         text: Status.RESET_CONFIRM
         textFormat: Text.PlainText
-        color: Color.foreground
+        color: Commons.Color.foreground
         font.family: Style.font.family
         font.pixelSize: Style.font.body
       }
