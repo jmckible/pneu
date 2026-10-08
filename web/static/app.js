@@ -413,7 +413,7 @@
   // ---- the easter egg -----------------------------------------------------
   // A click on the mark while sync is healthy (SPEC "Layout"). The mark is a
   // valve: it turns a quarter open, the capsule falls down the tube to the
-  // floor (the foot's rule, or folded the stations' end), rattling each
+  // floor (the foot's rule, or folded the column's bottom), rattling each
   // label it passes, lands in a puff of dust, bounces twice, rests, is
   // sucked home, and the valve closes with a blink of the mark's bowl. One
   // click in eight (tube.js eggKind) plays the older egg, the cork: up out
@@ -487,11 +487,10 @@
 
   function drop(cap, mark) {
     var L = eggLayer(cap), c = L.c, t = L.t;
-    // The floor: the foot's rule, or, folded (no foot), the stations' end.
-    var foot = navEl.querySelector('.foot'), line = navEl.querySelector('.line');
-    var floor = foot && foot.getClientRects().length ? foot.getBoundingClientRect().top
-      : line ? line.getBoundingClientRect().bottom : t.bottom;
-    floor = Math.min(floor, t.bottom - navEl.clientTop);
+    // The floor: the foot's rule, or, folded (no foot), the column's bottom.
+    var foot = navEl.querySelector('.foot');
+    var floor = t.bottom - navEl.clientTop;
+    if (foot && foot.getClientRects().length) floor = Math.min(floor, foot.getBoundingClientRect().top);
     var p = tube.eggPlan(floor - c.bottom), D = p.drop;
     var r = eggRun('drop', function () { L.layer.remove(); });
     navEl.classList.add('egging');
