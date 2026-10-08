@@ -439,8 +439,11 @@ it unknown and uncached. An unpaged list never asks.
 - **Messages:** newest expanded, everything already read collapses to one
   line (`from · date`). `j/k` scroll the thread three lines and `Space`
   pages it (the thread holds focus while it has the keys, so arrows and
-  PageDown work too); `n/p` move the message cursor; `Enter` folds or
-  unfolds the cursor message. *default*
+  PageDown work too); `n/p` move the message cursor, expanding the
+  message they land on and putting it at the top (the first at the very
+  top, subject and all; one near the end only as far as the thread
+  scrolls), and leave the one they left open; `Enter` folds or unfolds
+  the cursor message. *default*
 - **Message chrome:** flat, no indentation by depth. Each message is a card
   with a 3px left rail: border color at rest, `--fg` when unread, `--accent`
   under the cursor. Header shows `n of N` on the right.

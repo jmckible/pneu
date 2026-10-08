@@ -839,7 +839,7 @@ main.thread[data-changed] > h1::before {
   color: var(--muted);
 }
 /* Cursor moves land below the thread's sticky title. */
-body.split article.message { scroll-margin-top: 36px; }
+body.split article.message { scroll-margin-top: calc(var(--title-h, 33px) + 6px); }
 
 /* Maximized (+): the narrow layout for the active pane, marked in the footer. */
 body.maxed #keybar::after { content: "⤢ max"; flex: none; color: var(--accent); }

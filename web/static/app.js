@@ -103,8 +103,32 @@
       updatePager();
     }
     if (scroll !== false) {
-      el.scrollIntoView({ block: c === L ? 'nearest' : 'start' });
+      if (c === T) alignMessage(i);
+      else el.scrollIntoView({ block: 'nearest' });
     }
+  }
+
+  // alignMessage puts message i at the top of the thread's scroller, below
+  // the sticky title in the split (where it ends, measured here: --title-h);
+  // the first goes to the very top, so the subject shows when narrow too.
+  function alignMessage(i) {
+    var scroller = split && T.root ? T.root : window;
+    if (i === 0) { scroller.scrollTo({ top: 0, behavior: 'instant' }); return; }
+    var h1 = split && T.root.querySelector(':scope > h1');
+    if (h1) T.root.style.setProperty('--title-h', (h1.getBoundingClientRect().bottom - T.root.getBoundingClientRect().top) + 'px');
+    T.items[i].scrollIntoView({ block: 'start', behavior: 'instant' });
+  }
+
+  // n/p: the next or previous message, expanded and at the top. Leaving one
+  // doesn't collapse it.
+  function step(delta) {
+    return function () {
+      if (!T.items.length) return;
+      var i = Math.max(0, Math.min(T.items.length - 1, T.sel < 0 ? 0 : T.sel + delta));
+      select(T, i, false);
+      if (T.items[i].classList.contains('collapsed')) toggle(T.items[i]);
+      alignMessage(i);
+    };
   }
 
   function move(c, delta, then) {
@@ -2267,8 +2291,8 @@
     thread: {
       j: scrollThread(1),
       k: scrollThread(-1),
-      n: move(T, 1),
-      p: move(T, -1),
+      n: step(1),
+      p: step(-1),
       u: backToList,
       Escape: backToList,
       Enter: function () { if (cur(T)) toggle(cur(T)); },
