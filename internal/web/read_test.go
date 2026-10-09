@@ -376,7 +376,7 @@ func threadURL(t *testing.T, s http.Handler, target, subject string) string {
 func TestThread(t *testing.T) {
 	s := newServer(t)
 	body := getOK(t, s, threadURL(t, s, "/", "Cabin weekend"))
-	if !strings.Contains(body, `<main class="thread" data-account="personal" data-thread="`) || !strings.Contains(body, "<h1>Cabin weekend in October?</h1>") {
+	if !strings.Contains(body, `<main class="thread" data-account="personal" data-thread="`) || !strings.Contains(body, `<h1><span class="subject">Cabin weekend in October?</span>`) {
 		t.Fatalf("thread header: %s", body)
 	}
 	var got [][]string

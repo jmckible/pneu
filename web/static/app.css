@@ -806,38 +806,52 @@ body.split #panes[data-focus=list] article.message.selected.unread { border-left
 /* The thread's title row, its subject: sticky at the top of the pane in
    the split, a plain heading when narrow. The list has none (the tube
    names the view; a paged list has its pager row). Which pane has
-   the keys shows on its cursor's accent edge, not here. */
+   the keys shows on its cursor's accent edge, not here. In the split it
+   is the pager's band (height and shade), so the two panes share one top
+   edge, and its text lines up with the messages' text: the subject with
+   the senders (pane padding + rail + header padding), .here with their
+   "n of N". */
 body.split main.thread > h1 {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 2ch;
   position: sticky;
-  top: 0;
+  /* The pane's top padding: sticky holds at the padding edge, which would
+     leave a strip of the scrolled mail showing above the band. */
+  top: -4px;
   z-index: 1;
   max-width: none;
+  box-sizing: border-box;
+  height: var(--pager-h);
   /* Edge to edge: these margins cancel main.thread's padding (4px 2ch). */
-  margin: -4px -2ch 8px;
-  padding: 4px 1ch;
+  margin: -4px -2ch 12px;
+  padding: 0 calc(3ch + 1px) 0 calc(3ch + 3px);
   font: inherit;
-  font-weight: normal;
-  line-height: 1.4;
+  font-weight: bold;
   color: var(--unread);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  background: var(--raised);
+  background: color-mix(in oklab, var(--bar) 50%, var(--bg));
   border-bottom: 1px solid var(--border);
 }
+main.thread > h1 > .subject { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Whose message the band is over once its sender has scrolled under it
+   (app.js syncHere): its sender and "n of N". */
+main.thread > h1 > .here { flex: none; font-size: 12px; font-weight: normal; color: var(--muted); }
+main.thread > h1 > .here:empty, body:not(.split) main.thread > h1 > .here { display: none; }
+main.thread > h1 > .here > .name { color: var(--fg); }
 /* Another window changed the open thread while you were in the middle of
    something in it (app.js threadChanged): said at the title's right end,
-   ahead of the subject so its ellipsis can't cut it; it re-renders when
-   you're done. */
+   where the subject's ellipsis can't cut it; it re-renders when you're
+   done. */
 main.thread[data-changed] > h1::before {
   content: "changed elsewhere";
-  float: right;
-  margin-left: 2ch;
+  order: 1;
+  flex: none;
   font-size: 12px;
   font-weight: normal;
   color: var(--muted);
 }
+body:not(.split) main.thread[data-changed] > h1::before { float: right; margin-left: 2ch; }
 /* Cursor moves land below the thread's sticky title. */
 body.split article.message { scroll-margin-top: calc(var(--title-h, 33px) + 6px); }
 

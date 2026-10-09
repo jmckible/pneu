@@ -119,6 +119,48 @@
     T.items[i].scrollIntoView({ block: 'start', behavior: 'instant' });
   }
 
+  // syncHere names, at the sticky title's right end, the message the
+  // title is over once that message's sender line has scrolled under it (the
+  // split only): its sender and "n of N", from the header's own text.
+  function syncHere() {
+    var h1 = T.root && T.root.querySelector(':scope > h1'), here = h1 && h1.querySelector(':scope > .here');
+    if (!here) return;
+    var a = null;
+    if (split) {
+      var edge = h1.getBoundingClientRect().bottom;
+      for (var i = 0; i < T.items.length; i++) {
+        var r = T.items[i].getBoundingClientRect();
+        if (r.top >= edge) break;
+        if (r.bottom > edge) a = T.items[i];
+      }
+      var from = a && a.querySelector(':scope > header > .from');
+      if (from && from.getBoundingClientRect().bottom > edge) a = null;
+    }
+    var name = a && a.querySelector(':scope > header .name'), pos = a && a.querySelector(':scope > header .pos');
+    var key = a ? (name ? name.textContent : '') + '\n' + (pos ? pos.textContent : '') : '';
+    if (here.__key === key) return;
+    here.__key = key;
+    here.textContent = '';
+    if (!a) return;
+    var n = document.createElement('span');
+    n.className = 'name';
+    n.textContent = name ? name.textContent : '';
+    here.append(n, pos ? ' · ' + pos.textContent : '');
+  }
+
+  // watchHere keeps syncHere current for root: on its scroll, and on any
+  // message changing size (a toggle, a frame filling in, a refresh), at
+  // most once a frame.
+  var hereRO = null, hereRAF = 0;
+  function watchHere(root) {
+    function later() { if (!hereRAF) hereRAF = requestAnimationFrame(function () { hereRAF = 0; syncHere(); }); }
+    root.addEventListener('scroll', later, { passive: true });
+    if (hereRO) hereRO.disconnect();
+    hereRO = window.ResizeObserver ? new ResizeObserver(later) : null;
+    if (hereRO) T.items.forEach(function (a) { hereRO.observe(a); });
+    later();
+  }
+
   // n/p: the next or previous message, expanded and at the top. Leaving one
   // doesn't collapse it.
   function step(delta) {
@@ -1048,6 +1090,7 @@
       if (openViewer(link)) e.preventDefault();
     });
     T.items.forEach(initArticle);
+    watchHere(root);
     var first = root.querySelector('article.message.unread');
     var i = first ? T.items.indexOf(first) : T.items.length - 1;
     if (T.items[i] && T.items[i].classList.contains('collapsed')) toggle(T.items[i]);
@@ -1338,6 +1381,7 @@
       var was = split;
       split = lay.split && !maxed;
       body.classList.toggle('split', split);
+      syncHere();
       if (!split) {
         showSeq++; // an in-flight open must not land on the narrow page
         T.pending = null;
@@ -2580,12 +2624,13 @@
     });
     olds.forEach(function (a, i) {
       if (kept[i]) return;
+      if (hereRO) hereRO.unobserve(a);
       if (Pneu.actions) Pneu.actions.cancelFor(a);
       var m = mailOf(a);
       if (m && m.mark) { m.mark.stop(); m.mark = null; }
       a.remove();
     });
-    var h = root.querySelector(':scope > h1'), nh = main.querySelector(':scope > h1');
+    var h = root.querySelector(':scope > h1 > .subject'), nh = main.querySelector(':scope > h1 > .subject');
     if (h && nh && h.textContent !== nh.textContent) h.textContent = nh.textContent;
     // The thread's own attributes are the server's (data-changed goes).
     Array.prototype.slice.call(root.attributes).forEach(function (attr) {
@@ -2596,6 +2641,7 @@
     });
     T.items = items;
     fresh.forEach(initArticle);
+    if (hereRO) fresh.forEach(function (a) { hereRO.observe(a); });
     var i = at ? items.indexOf(at) : -1;
     if (i >= 0) T.sel = i; // the same node, still selected
     else {
