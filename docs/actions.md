@@ -190,7 +190,7 @@ long label can't push it out.
 - Context: `List-Id` if present, else the From address.
 
 Confirm with `y` or the button, cancel with `Esc`/`n`, under the arming
-rules above. After success the dialog offers `e` to archive the thread.
+rules above. After success the dialog offers `a` to archive the thread.
 
 ### Logging (R13)
 

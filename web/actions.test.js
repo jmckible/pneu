@@ -535,7 +535,7 @@ test('hintKey: typing selects, Enter opens only a selection, Esc closes', () => 
   assert.equal(k('s'), 'select');
   assert.equal(k('A'), 'none', 'labels are lower case');
   assert.equal(k('e', { ctrlKey: true }), 'none');
-  assert.equal(k('e'), 'none', 'archive does nothing here');
+  assert.equal(k('e'), 'none', 'a key no label starts with does nothing');
   assert.deepEqual(st, { typed: 'as', selected: 'as' });
   assert.equal(k('Enter'), 'open');
   assert.equal(k('Escape', { repeat: true }), 'none');

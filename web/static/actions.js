@@ -1217,7 +1217,7 @@
     phase({
       title: 'Done',
       body: [note(text)],
-      actions: [['e', 'Archive the thread', function () {
+      actions: [['a', 'Archive the thread', function () {
         var ident = s.ident, ctx = s.ctx;
         close();
         ctx.archive(ident);

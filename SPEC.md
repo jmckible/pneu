@@ -111,7 +111,7 @@ them here if they're wrong.
   Tab walks its links. `+` maximizes the active pane (the narrow layout)
   until `+` again or the window crosses the split width. The one time a thread
   opens without being asked: archiving, trashing or spamming the open
-  thread (`e`, `t`, `#`, `!`, from either pane) moves the cursor to the next row and opens it,
+  thread (`a`, `t`, `#`, `!`, from either pane) moves the cursor to the next row and opens it,
   keys staying put; an emptied list closes the pane.
   The URL is always the open thread's, or the list's when none is open, so
   a reload or narrow window shows the same thing; a thread URL loaded
@@ -142,9 +142,9 @@ them here if they're wrong.
   first blurs any input; on a search's list with no thread pane open, Esc
   leaves the search).
   Panes: `h` (`←`) list · `l` (`→`) thread · `Tab`/`Shift+Tab` switch · `Esc` (list) closes the thread · `+` maximize.
-  Act: `e` archive · `t` or `#` trash · `!` spam · `s` star · `U` unread ·
-  `z` undo · `r` reply · `a` reply all · `w` or `c` write · `v` open in
-  Gmail (forward, block, RSVP live there) · `R` sync now · `/` search ·
+  Act: `a` archive · `t` or `#` trash · `!` spam · `s` star · `U` unread ·
+  `z` undo · `r` reply all · `R` reply · `w` or `c` write · `v` open in
+  Gmail (forward, block, RSVP live there) · `S` sync now · `/` search ·
   `?` key overlay.
   Number keys work from anywhere, including inside a thread, so getting back
   to the inbox is `1` or `u`. The tube fuses the number to each view
@@ -173,7 +173,7 @@ them here if they're wrong.
   fresh, breathing (opacity and scale, 1.4s) while checking, and in
   `--accent-hot` for every problem below (a service worker, the link
   down, a failing account, stale) and for a client's version nudge. The
-  tube's foot is empty while healthy. When a sync `R` asked for
+  tube's foot is empty while healthy. When a sync `S` asked for
   ends fresh, or sync recovers from a problem, it shows a small check
   (the ring closes, the tick draws) and `Updated just now`, which fades
   after about 10s. A problem's line stays in the foot (wrapping, three
@@ -191,7 +191,7 @@ them here if they're wrong.
   `Can't reach <server> · retrying` in `--accent-hot` while its link to
   the server is down (`<server>` is the SSH target it was paired with;
   the page keeps what it shows, and the line comes back when the link
-  does); `Checking…` while a sync `R` asked for is queued or running, or `R`
+  does); `Checking…` while a sync `S` asked for is queued or running, or `S`
   hasn't been answered yet (the server says queued at once; the line gives
   up waiting after 10s; the mark breathes and the foot stays
   empty): scheduled, launch and focus syncs are quiet, or
@@ -257,7 +257,7 @@ them here if they're wrong.
   while the link is down is the client's own error page: what's wrong in
   local words, the bar-menu action or terminal command that fixes it, and
   a reload once the link is up. A server never shows any of this.
-  `R` asks for a sync on every account now (`POST /sync`, coalesced with
+  `S` asks for a sync on every account now (`POST /sync`, coalesced with
   one already waiting). Opening the window asks too: `pneu open` sends
   `launch` over the control socket (docs/client.md) before it opens or
   focuses the window, so every path in (a new window, a restored one, a
@@ -542,9 +542,9 @@ it unknown and uncached. An unpaged list never asks.
   and shows the full destination on the status line; `Enter` opens it (a
   mailto as a body click does), `Esc` closes; scrolling, resizing or moving
   the cursor closes them. docs/actions.md.
-- **Actions** (`e` `#` `!` `s`) apply to the whole thread and return to the
+- **Actions** (`a` `#` `!` `s`) apply to the whole thread and return to the
   list at the same cursor position.
-- **Reply** is an inline box under the last message: `r` opens it with the
+- **Reply** is an inline box under the last message: `r` (all) or `R` (sender) opens it with the
   quote prefilled, `Ctrl+Enter` sends, `Esc` discards with confirmation if
   non-empty. Sending pulls, and the sent message appears in the thread.
 - **Spam** is `+spam -inbox` only, undone by `-spam +inbox`. Gmail's

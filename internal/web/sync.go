@@ -5,7 +5,7 @@ import (
 	"net/http"
 )
 
-// syncNow handles POST /sync (R in the app): queue an immediate sync on every
+// syncNow handles POST /sync (S in the app): queue an immediate sync on every
 // account. The engine coalesces a request made while one is pending or
 // running, so repeated presses cost one extra run at most. Host, Origin and
 // the session are the middleware's, as for every POST. The answer only says

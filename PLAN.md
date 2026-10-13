@@ -56,7 +56,7 @@
    are rewritten to `target=_blank` after sanitizing (DOMPurify strips `target`).
    The frame gets a white background regardless of theme. `cid:` images served
    from a message-part endpoint.
-3. **Triage as keystrokes.** Gmail bindings: `j`/`k` move, `e` archive (`-inbox`),
+3. **Triage as keystrokes.** Gmail bindings: `j`/`k` move, `a` archive (`-inbox`),
    `#` trash (`+trash -inbox` — lieer allows only one of inbox/spam/trash), `s` star
    (±flagged), `U` mark unread, `z` undo, `/` search. Opening a thread removes
    `unread`. Archive and trash act on the whole thread; star acts on the newest

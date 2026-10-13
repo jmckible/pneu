@@ -84,7 +84,7 @@ unix socket. It admits any native process running as the user. That's the
 boundary: it doesn't prove a click happened in QML, and it doesn't need to.
 
 - `launch`, from `pneu open`. Queues a sync (R13, below). This is separate
-  from the page's own `POST /sync` (`R` and focus), which stays a normal
+  from the page's own `POST /sync` (`S` and focus), which stays a normal
   browser request.
 - `peers-reload <generation> <hash>`, from `pneu peer add|remove` on the
   server. Answered only after that generation is live (R8).
@@ -534,7 +534,7 @@ line:
 
 | State | Shows | When |
 |---|---|---|
-| checking | spinner + `Checking…` in accent | a sync `R` asked for queued or running |
+| checking | spinner + `Checking…` in accent | a sync `S` asked for queued or running |
 | fresh | `Updated just now` → `Updated 3m ago`, muted | idle; age of the oldest account's last successful sync |
 | stale | `Updated 14m ago` in `--accent-hot` | idle and older than 3 ticks |
 | account error | `work: sync failing` in `--accent-hot` | failures ≥ the bar's threshold |
@@ -544,7 +544,7 @@ line:
 - **First paint is right** (R13). `data-accounts` gains `lastSync` and
   `queued/running` per account. A `launch` marks every account queued
   before its request returns.
-- Only `R` shows `Checking…` (changed 2026-10-02, with the 30s sync
+- Only `S` shows `Checking…` (changed 2026-10-02, with the 30s sync
   period): launch, focus and scheduled syncs are quiet, or the line would
   spin every half minute.
 - Clicking it, or `?`, opens the details: each account's last sync,
@@ -598,7 +598,7 @@ When the link isn't up, page requests get a local page (with
 | `protocol` | hello | client and server protocols differ | Update pneu / Update server |
 
 - The daemon retries with backoff (1s → 30s cap), and right away on
-  `launch`, focus, or `R`. `pin-mismatch` is never retried in the
+  `launch`, focus, or `S`. `pin-mismatch` is never retried in the
   background.
 - An open page that loses the link keeps its content and switches the
   status line.

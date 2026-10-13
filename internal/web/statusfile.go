@@ -19,7 +19,7 @@ import (
 // It carries counts, first names, and sync health, never the token, the
 // nonce, or anything from a message body.
 const (
-	// StatusDebounce collapses a burst of tag writes (a run of `e` presses)
+	// StatusDebounce collapses a burst of tag writes (a run of `a` presses)
 	// into one rewrite.
 	StatusDebounce = 500 * time.Millisecond
 	// StatusHeartbeat rewrites the file with nothing else happening, so

@@ -1978,15 +1978,15 @@
       ['+', 'Maximize the active pane · + again restores'],
     ]],
     ['Act', [
-      ['e', 'Archive'],
+      ['a', 'Archive'],
       ['t, #', 'Trash'],
       ['!', 'Mark as spam'],
       ['s', 'Star / unstar'],
       ['U', 'Mark unread'],
       ['z', 'Undo'],
-      ['R', 'Sync now'],
-      ['r', 'Reply to sender (thread)'],
-      ['a', 'Reply all (thread)'],
+      ['S', 'Sync now'],
+      ['r', 'Reply all (thread)'],
+      ['R', 'Reply to sender (thread)'],
       ['w, c', 'Write'],
       ['v', 'Open in Gmail (new tab)'],
       ['X', 'Unsubscribe (headers only) · y confirms'],
@@ -2324,7 +2324,7 @@
       G: function () { select(L, L.items.length - 1, undefined, 'glide'); },
       '>': whenReady(page(1)),
       '<': whenReady(page(-1)),
-      e: whenReady(function () { listRemove('archive'); }),
+      a: whenReady(function () { listRemove('archive'); }),
       '#': whenReady(function () { listRemove('trash'); }),
       t: whenReady(function () { listRemove('trash'); }),
       '!': whenReady(function () { listRemove('spam'); }),
@@ -2340,14 +2340,14 @@
       u: backToList,
       Escape: backToList,
       Enter: function () { if (cur(T)) toggle(cur(T)); },
-      e: whenReady(function () { threadRemove('archive'); }),
+      a: whenReady(function () { threadRemove('archive'); }),
       '#': whenReady(function () { threadRemove('trash'); }),
       t: whenReady(function () { threadRemove('trash'); }),
       '!': whenReady(function () { threadRemove('spam'); }),
       s: whenReady(threadStar),
       U: whenReady(threadUnread),
-      r: reply(false),
-      a: reply(true),
+      r: reply(true),
+      R: reply(false),
       v: openGmail,
       f: viewAttachments,
       X: unsubscribe,
@@ -2359,7 +2359,7 @@
     // (compose) only ANYWHERE applies: its fields and buttons own the rest.
     global: {
       1: goView, 2: goView, 3: goView, 4: goView, 5: goView, 6: goView,
-      R: syncNow,
+      S: syncNow,
       '?': toggleHelp,
       '/': openSearch,
       z: whenReady(undo),
@@ -2371,7 +2371,7 @@
       '+': toggleMax,
     },
   });
-  var ANYWHERE = { 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, R: true, '?': true };
+  var ANYWHERE = { 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, S: true, '?': true };
   // The arrows are hjkl.
   var ARROWS = { ArrowLeft: 'h', ArrowDown: 'j', ArrowUp: 'k', ArrowRight: 'l' };
 
@@ -3122,7 +3122,7 @@
       box.appendChild(ldl);
     }
     var foot = el('p', 'foot', polls.foot + ' · ');
-    foot.appendChild(el('kbd', null, 'R'));
+    foot.appendChild(el('kbd', null, 'S'));
     foot.appendChild(document.createTextNode(' checks now'));
     box.appendChild(foot);
     return box;
