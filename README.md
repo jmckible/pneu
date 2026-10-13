@@ -2,7 +2,7 @@
 
 <p><picture><source media="(prefers-color-scheme: dark)" srcset="brand/wordmark-paper.svg"><img src="brand/wordmark-ink.svg" width="200" alt="pneu"></picture></p>
 
-pneu is a Gmail client designed for Omarchy. It is themeable and keyboard first.
+pneu is a Gmail client designed for Omarchy. It is themeable and keyboard first. [pneu.mckible.com](https://pneu.mckible.com/)
 
 ![pneu's inbox](docs/screenshot.webp)
 
