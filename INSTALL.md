@@ -514,9 +514,9 @@ as the right Google account, and after the first screen
    domains. With the developer's pages:
    - **Branding:**
      `https://console.cloud.google.com/auth/branding?authuser=<address>&project=<project ID>`.
-     Application home page `https://jordan.mckible.com/pneu/`, privacy
-     policy `https://jordan.mckible.com/pneu/privacy/`, terms of service
-     `https://jordan.mckible.com/pneu/terms/`, and `mckible.com` under
+     Application home page `https://pneu.mckible.com/`, privacy
+     policy `https://pneu.mckible.com/privacy/`, terms of service
+     `https://pneu.mckible.com/terms/`, and `mckible.com` under
      Authorized domains. **Leave the logo empty**: a logo makes Google
      require brand verification. **Save.**
    - **Audience:**
