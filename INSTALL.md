@@ -397,8 +397,9 @@ a server where it's set up.
 
 **On a client** this step is one command, after the human's go-ahead, and
 one password dialog: `pkexec "$PWD/install/packages" client`. It installs
-Go and nothing else (no lieer, no notmuch: a client keeps no mail). Then
-run the audit's *after step 1* checks, skipping item 10, and go on to step 2.
+Go and nothing else (no lieer, no notmuch: a client keeps no mail). Offer
+Inter as at the end of this step, then run the audit's *after step 1*
+checks, skipping item 10, and go on to step 2.
 Everything else in this step is the server's.
 
 **Fetch** lieer's AUR files and its source, as you. This installs
@@ -427,6 +428,17 @@ builds and installs lieer, and removes the build-only packages it added.
 If a dependency 404s, your package database is older than the mirror: the
 human decides whether to run `pkexec pacman -Syu` first. Never run `-Sy` on
 its own. `gmi` has no `--version` flag; use `pacman -Q lieer`.
+
+**Inter, optional.** pneu sets what people wrote (plain-text mail, the
+one-line previews in a thread, and HTML mail that asks for Arial or a
+system sans) in the Inter typeface when it's installed, and in Omarchy's
+sans (Liberation Sans) when it isn't; the rest of the app is the desktop's
+monospace font either way. Omarchy doesn't ship Inter. If `pacman -Q
+inter-font` finds it, say so and move on. Otherwise suggest it, saying
+that it's optional and that installing or removing it later takes effect
+at the window's next reload. Only if the human wants it, tell them a
+second password dialog will appear, naming `pacman`, and run `pkexec pacman
+-S --needed --noconfirm inter-font` (Arch's extra repo).
 
 Now run the audit's *after step 1* checks and report before building.
 
@@ -1187,7 +1199,7 @@ removed, what the human chose to keep, and what the check at the end found.
 '~/.local/bin/pneu peer remove <name>'` it prints, forwarding options and
 all (or `pneu peer remove <name>` at the server). There is no mail or Google access to ask about: skip the two
 questions, the `jq` listing, everything about `~/mail`, lieer and Google
-below, and offer only Go among the packages.
+below, and offer only Go (and inter-font, if step 1 installed it) among the packages.
 
 **(human)** Ask both questions before running anything, in one go:
 
@@ -1197,8 +1209,9 @@ below, and offer only Go among the packages.
   which works until the Google step below revokes it; keeping the mail can
   still mean deleting that. Stopping the service interrupts a first download
   that's still running, so mail kept after that is partial.
-- **Packages**, one by one: other software may use Go or notmuch. The
-  choices are lieer (with python-tqdm), notmuch, and Go.
+- **Packages**, one by one: other software may use Go, notmuch or Inter.
+  The choices are lieer (with python-tqdm), notmuch, Go, and inter-font if
+  step 1 installed it.
 
 List what the later steps need while the files that hold it still exist:
 
@@ -1235,7 +1248,7 @@ Remove the packages the human chose in one transaction, so one password
 dialog:
 
 ```sh
-pkexec pacman -Rns --noconfirm lieer python-tqdm notmuch go   # only the chosen ones
+pkexec pacman -Rns --noconfirm lieer python-tqdm notmuch go inter-font   # only the chosen ones
 rm -rf ~/.cache/go-build                             # with Go: the build cache step 2 filled
 ```
 
