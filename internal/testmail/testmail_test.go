@@ -34,7 +34,7 @@ func TestManifestApplied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]int{"personal": 24, "work": 18}
+	want := map[string]int{"personal": 24, "work": 26}
 	for _, a := range env.Accounts {
 		if got := len(manifest[a.Name]); got != want[a.Name] {
 			t.Errorf("%s: manifest has %d messages, want %d", a.Name, got, want[a.Name])
@@ -120,6 +120,7 @@ func TestInboxThreads(t *testing.T) {
 			"Reminder: the annual homeowners association meeting has been rescheduled from Tuesday the 14th to Thursday the 23rd because the community center is being repainted and the board needs quorum to vote on the landscaping contract, the pool resurfacing, and the new guest parking rules",
 		},
 		"work": {
+			"November offsite venue",
 			"[northwind/app] SSO: SAML metadata upload (PR #4821)",
 			"New logo lockup for review",
 			"Deploy summary for 2026-09-18",
@@ -153,7 +154,7 @@ func TestExcludeTags(t *testing.T) {
 		"personal": {"x9q7w.rewards.20260920@rewards-center.example", "digest-2026-37-8812@neighbors.example"},
 		"work":     {"seo-outreach-99812@seo-growth.example", "trial-ending-5521@formstack-trials.example"},
 	}
-	wantThreads := map[string]int{"personal": 18, "work": 11}
+	wantThreads := map[string]int{"personal": 18, "work": 12}
 	for _, a := range env.Accounts {
 		ids := strings.Fields(string(a.Notmuch(t, "search", "--output=messages", "*")))
 		for _, id := range excluded[a.Name] {

@@ -518,7 +518,7 @@ func TestAddresses(t *testing.T) {
 	}
 	eq := func(got []string, want ...string) bool { return strings.Join(got, "|") == strings.Join(want, "|") }
 
-	if got := lookup(""); len(got) != 6 {
+	if got := lookup(""); len(got) != 7 {
 		t.Errorf("all: %v", got) // sent recipients, deduplicated across accounts
 	}
 	if got := lookup("te"); !eq(got, "Tessa Lund <tessa@northwind.example>") {

@@ -83,6 +83,7 @@ func find(t *testing.T, rs []listRow, subject string) listRow {
 }
 
 var inboxOrder = []string{
+	"work: November offsite venue",
 	"personal: Your Quillmate sign-in link",
 	"work: [northwind/app] SSO: SAML metadata upload (PR #4821)",
 	"work: New logo lockup for review",
@@ -213,13 +214,13 @@ func TestPagination(t *testing.T) {
 		got := keys(rows(t, s, target))
 		all = append(all, got...)
 		hasNext := strings.Contains(body, `rel="next"`)
-		if page < 3 && (len(got) != 5 || !hasNext) || page == 3 && (len(got) != 5 || hasNext) {
+		if page < 4 && (len(got) != 5 || !hasNext) || page == 4 && (len(got) != 1 || hasNext) {
 			t.Fatalf("page %d: %d rows, next=%v", page, len(got), hasNext)
 		}
 		if (page > 0) != strings.Contains(body, `rel="prev"`) {
 			t.Fatalf("page %d prev link", page)
 		}
-		if page == 3 {
+		if page == 4 {
 			break
 		}
 	}
@@ -245,7 +246,7 @@ func TestPagination(t *testing.T) {
 	if first := getOK(t, s, "/"); !strings.Contains(first, `<span class="pg prev" aria-disabled="true"><kbd>&lt;</kbd>newer</span>`) || strings.Contains(first, `class="pages"`) {
 		t.Errorf("first page's pager: %s", first)
 	}
-	if last := getOK(t, s, "/?page=3"); !strings.Contains(last, `<span class="pg next" aria-disabled="true">older<kbd>&gt;</kbd></span>`) {
+	if last := getOK(t, s, "/?page=4"); !strings.Contains(last, `<span class="pg next" aria-disabled="true">older<kbd>&gt;</kbd></span>`) {
 		t.Error("last page's older end isn't dimmed")
 	}
 	// Search pages keep the query.
@@ -298,7 +299,7 @@ func TestStarredAndSearch(t *testing.T) {
 		t.Error("empty search: no ghost stop")
 	}
 	got = keys(rows(t, s, "/search?q="+url.QueryEscape("from:owen@northwind.example")))
-	if !slices.Equal(got, []string{"work: Q3 roadmap review", "work: Board deck draft"}) {
+	if !slices.Equal(got, []string{"work: November offsite venue", "work: Q3 roadmap review", "work: Board deck draft"}) {
 		t.Errorf("search from:owen = %q", got)
 	}
 	both := keys(rows(t, s, "/search?q="+url.QueryEscape(`id:CAKv0c-w9-crossacct@mail.gmail.com`)))
@@ -385,7 +386,7 @@ func TestThread(t *testing.T) {
 	}
 	want := [][]string{
 		{"message collapsed", "personal", "CAH7x2Lq-cabin-1@mail.ortega.example", "0"},
-		{"message collapsed", "personal", "CAJm4kR9-cabin-2@mail.gmail.com", "1"},
+		{"message collapsed me", "personal", "CAJm4kR9-cabin-2@mail.gmail.com", "1"},
 		{"message unread", "personal", "b7e1c0d2-44aa-4c1e-9d3e-cabin3@fastmail.example", "2"},
 	}
 	if !slices.EqualFunc(got, want, slices.Equal) {
@@ -393,7 +394,8 @@ func TestThread(t *testing.T) {
 	}
 	for _, s := range []string{
 		`<span class="name">Priya Natarajan</span> <span class="addr">&lt;priya.n@fastmail.example&gt;</span>`,
-		`<div class="cc">Cc: Priya Natarajan &lt;priya.n@fastmail.example&gt;</div>`,
+		// Recipients by name, the whole header in the tooltip; the account's own address is me.
+		`<div class="rcpt"><span title="Robin Hale &lt;robin@hale.example&gt;, Sam Ortega &lt;sam@ortega.example&gt;"><span class="k">to</span> me, Sam Ortega</span></div>`,
 		`data-gmail="https://mail.google.com/mail/?authuser=robin%40hale.example#all/19c8698f3401dced"`,
 		// format=flowed joined, quote wrapped, both server-side.
 		`<div class="body" data-kind="text"><pre>Yes please on the ride. I&#39;ll bring the board games and the good coffee. If we&#39;re doing`,
@@ -677,8 +679,9 @@ func TestSentAndMe(t *testing.T) {
 			`<span class="authors">To: Robin Hale</span> <span class="subject">Contractor W-9`,
 		},
 		"/all": {
-			`<span class="authors">Sam Ortega, me, Priya Natarajan</span>`,
-			`<span class="authors">Owen Pryce, Tessa Lund, me</span>`,
+			// Several authors are first names, the whole list in the tooltip.
+			`<span class="authors" title="Sam Ortega, me, Priya Natarajan">Sam, me, Priya</span>`,
+			`<span class="authors" title="Owen Pryce, Tessa Lund, me">Owen, Tessa, me</span>`,
 		},
 	} {
 		body := getOK(t, s, path)

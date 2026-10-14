@@ -2602,6 +2602,9 @@
     var plan = tri.threadPatch(T.items.map(ref), news.map(ref));
     if (!plan) return false;
     var olds = T.items, at = cur(T), kept = [], fresh = [];
+    // Day dividers are the server's, between articles: taken out here and
+    // put back from the new page once the articles are in place.
+    root.querySelectorAll(':scope > .day').forEach(function (d) { d.remove(); });
     var first = olds[0] || null, prev = null;
     var items = plan.map(function (p, j) {
       var old = p.old >= 0 ? olds[p.old] : null, n = news[j];
@@ -2640,6 +2643,10 @@
       if (root.getAttribute(attr.name) !== attr.value) root.setAttribute(attr.name, attr.value);
     });
     T.items = items;
+    news.forEach(function (n, j) {
+      var d = n.previousElementSibling;
+      if (d && d.classList.contains('day')) items[j].before(d.cloneNode(true));
+    });
     fresh.forEach(initArticle);
     if (hereRO) fresh.forEach(function (a) { hereRO.observe(a); });
     var i = at ? items.indexOf(at) : -1;

@@ -6,6 +6,7 @@ screenshots for the README, videos and marketing never show a real inbox.
 ```sh
 scripts/screenshot docs/screenshot.png /t/personal/000000000000000e
 scripts/screenshot --theme ~/some-theme/theme.css --size 1600x900 shot.png / /search?q=cabin
+scripts/screenshot --unread 'id:os-08-kai@northwind.example' shot.png /t/work/000000000000000e
 ```
 
 It builds the fixture's two notmuch databases in a throwaway directory, stubs
@@ -26,9 +27,22 @@ afterwards.
 - **Theme.** The app's colours come from `theme.css`, not the system's dark
   mode. The default is yours; `--theme` takes any file `install/pneu-theme`
   wrote, so one run per Omarchy theme gives a set.
+- **Unread.** The fixture's inbox is mostly unread, because tests want
+  that; real inboxes are mostly read. `--unread QUERY` marks every message
+  outside the query read before the server starts.
 - **The README image** is `docs/screenshot.webp`: the thread
-  `/t/personal/000000000000000e` ("Cabin weekend in October?") at the
-  defaults, converted with `magick shot.png -quality 90 docs/screenshot.webp`.
+  `/t/work/000000000000000e` ("November offsite venue", eight messages over
+  two days) at the defaults, with `--unread 'id:20260923151204.m4g1c@mail.quillmate.example
+  or id:HVC-esc-4471-2@northwind.example or id:os-08-kai@northwind.example'`,
+  converted with `magick shot.png -quality 90 docs/screenshot.webp`. Its
+  day labels are relative to the day it was taken.
+- **The site's images** (pneu.mckible.com, `themes/` in the pneu-site repo)
+  are the same thread and query per Omarchy theme: `<theme>-app.webp` at
+  `--size 1600x937 --scale 1.25`, `<theme>-app-s.webp` that resized to 900
+  wide, and `<theme>-narrow.webp`, the inbox `/` at `--size 512x846 --scale
+  1.25`. A theme's `theme.css` comes from running `install/pneu-theme` with
+  `HOME` pointed at a directory holding that theme's `colors.toml` under
+  `.local/state/omarchy/current/theme/`.
 
 ## The fake mail
 

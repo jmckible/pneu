@@ -130,6 +130,21 @@
     "sso-plan-share-7Hq2@docs-share.google.com": [],
     "CAJm4kR9-sso-plan-reply@mail.gmail.com": [
       "sent"
+    ],
+    "os-01-owen@northwind.example": [],
+    "os-02-robin@northwind.example": [
+      "sent"
+    ],
+    "os-03-robin@northwind.example": [
+      "sent"
+    ],
+    "os-04-owen@northwind.example": [],
+    "os-05-owen@northwind.example": [],
+    "os-06-kai@northwind.example": [],
+    "os-07-owen@northwind.example": [],
+    "os-08-kai@northwind.example": [
+      "inbox",
+      "unread"
     ]
   }
 }

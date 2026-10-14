@@ -3,7 +3,7 @@
 # Hale's personal and work accounts), never your own. For the README, videos
 # and marketing; see docs/screenshots.md.
 #
-#   scripts/screenshot [--size WxH] [--scale N] [--theme FILE] OUT.png [PATH...]
+#   scripts/screenshot [--size WxH] [--scale N] [--theme FILE] [--unread QUERY] OUT.png [PATH...]
 #
 #   PATH     a page to capture, e.g. / (the default), /t/personal/000000000000000e,
 #            /search?q=cabin. At a width past the split, a thread path shows
@@ -12,6 +12,8 @@
 #   --scale  the device pixel ratio (default 2).
 #   --theme  a theme.css to render in (default: yours, from
 #            ~/.config/pneu/theme.css; see install/pneu-theme).
+#   --unread a notmuch query: every message outside it is marked read first,
+#            for an inbox that looks lived in (the fixture's is mostly unread).
 #
 # Everything runs in a throwaway directory: the fixture's notmuch databases,
 # stubbed lieer files that make both accounts ready, the server's state
@@ -22,12 +24,13 @@
 set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-size=1400x820 scale=2 theme=${XDG_CONFIG_HOME:-$HOME/.config}/pneu/theme.css out= paths=()
+size=1400x820 scale=2 theme=${XDG_CONFIG_HOME:-$HOME/.config}/pneu/theme.css unread= out= paths=()
 while (($#)); do
 	case $1 in
 	--size) size=$2; shift ;;
 	--scale) scale=$2; shift ;;
 	--theme) theme=$2; shift ;;
+	--unread) unread=$2; shift ;;
 	-*) echo "screenshot: unknown option $1" >&2; exit 2 ;;
 	*) if [[ -z $out ]]; then out=$1; else paths+=("$1"); fi ;;
 	esac
@@ -53,6 +56,7 @@ cd "$REPO"
 go build -o "$dir/pneu" ./cmd/pneu
 go run ./internal/testmail/cmd/fixture-server -dir "$dir" -port "$port" >/dev/null
 for acct in personal work; do
+	[[ -n $unread ]] && NOTMUCH_CONFIG=$dir/config/$acct/notmuch-config notmuch tag -unread -- "tag:unread and not ($unread)"
 	g=$dir/mail/$acct/gmail
 	echo '{}' >"$g/.gmailieer.json"
 	echo '{}' >"$g/.credentials.gmailieer.json"

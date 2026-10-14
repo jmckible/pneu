@@ -58,7 +58,7 @@ func TestListOldest(t *testing.T) {
 	if want == 0 {
 		t.Fatal("the fixture's inbox has no dated mail")
 	}
-	for _, p := range []string{"/", "/?page=1", "/?page=3"} {
+	for _, p := range []string{"/", "/?page=1", "/?page=4"} {
 		if got := oldestAt(t, s, p); got != want {
 			t.Errorf("%s: data-oldest %d, want %d", p, got, want)
 		}
@@ -67,7 +67,7 @@ func TestListOldest(t *testing.T) {
 		t.Errorf("cached %+v at %+v, generation %+v", s.oldest.m, s.oldest.at, s.viewLabel())
 	}
 	// The view's oldest thread leaves the inbox: the far end moves.
-	last := rows(t, s, "/?page=3")
+	last := rows(t, s, "/?page=4")
 	oldest := last[len(last)-1]
 	tagOK(t, s, form("action", "archive", "account", oldest.Account, "ids", esc(oldest.ThreadIDs...)))
 	after := oldestOf(t, s, "tag:inbox")

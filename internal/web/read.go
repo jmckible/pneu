@@ -37,15 +37,16 @@ type row struct {
 	MsgIDs  string // matched ids, url.QueryEscape'd, space-separated: star, unread
 	// ThreadIDs is every message of the thread (matched and unmatched, the
 	// excluded left out), same form: archive and trash act on all of them.
-	ThreadIDs string
-	Gmail     string // /gmail/{account}/{thread}: redirects to the newest message in Gmail
-	Class     string
-	Authors   string
-	Subject   string
-	Total     int
-	Date      string
-	ISO       string
-	Title     string // absolute local date, for the tooltip
+	ThreadIDs  string
+	Gmail      string // /gmail/{account}/{thread}: redirects to the newest message in Gmail
+	Class      string
+	Authors    string // first names when there are several (shortAuthors)
+	AllAuthors string // the whole list, for the tooltip
+	Subject    string
+	Total      int
+	Date       string
+	ISO        string
+	Title      string // absolute local date, for the tooltip
 }
 
 type listPage struct {
@@ -103,7 +104,7 @@ func (s *Server) list(view, title, fixed string) http.HandlerFunc {
 			for _, t := range threads {
 				rw := s.row(t, selves[t.Account])
 				if v, ok := to[t.Account+"/"+t.Thread]; ok {
-					rw.Authors = v
+					rw.Authors, rw.AllAuthors = v, v
 				}
 				data.Rows = append(data.Rows, rw)
 			}
@@ -205,20 +206,22 @@ func (s *Server) row(t notmuch.ThreadSummary, me self) row {
 		subject = "(no subject)"
 	}
 	when := time.Unix(t.Timestamp, 0).Local()
+	all := authors(t.Authors, me)
 	return row{
-		Account:   t.Account,
-		Thread:    t.Thread,
-		URL:       "/t/" + url.PathEscape(t.Account) + "/" + url.PathEscape(t.Thread),
-		MsgIDs:    strings.Join(matched, " "),
-		ThreadIDs: strings.Join(thread, " "),
-		Gmail:     "/gmail/" + url.PathEscape(t.Account) + "/" + url.PathEscape(t.Thread),
-		Class:     class,
-		Authors:   authors(t.Authors, me),
-		Subject:   subject,
-		Total:     t.Total,
-		Date:      shortDate(when, s.now()),
-		ISO:       when.Format(time.RFC3339),
-		Title:     longDate(when),
+		Account:    t.Account,
+		Thread:     t.Thread,
+		URL:        "/t/" + url.PathEscape(t.Account) + "/" + url.PathEscape(t.Thread),
+		MsgIDs:     strings.Join(matched, " "),
+		ThreadIDs:  strings.Join(thread, " "),
+		Gmail:      "/gmail/" + url.PathEscape(t.Account) + "/" + url.PathEscape(t.Thread),
+		Class:      class,
+		Authors:    shortAuthors(all),
+		AllAuthors: all,
+		Subject:    subject,
+		Total:      t.Total,
+		Date:       shortDate(when, s.now()),
+		ISO:        when.Format(time.RFC3339),
+		Title:      longDate(when),
 	}
 }
 
@@ -367,11 +370,22 @@ type messageView struct {
 	FromAddr string
 	To       string
 	Cc       string
-	Date     string
+	Date     string // long, for the tooltip
 	ISO      string
-	Gmail    string
-	Kind     string // "html" or "text"; "" when the message has no body
-	BodyURL  string
+	Clock    string
+	// Day is the divider above the first message of each day: Rel, and Gap
+	// when the thread went quiet before it (snippet.go).
+	Day     bool
+	Rel     string
+	Gap     string
+	when    time.Time
+	FromMe  bool
+	Snippet string // the folded row's line (snippet)
+	ToNames string // recipientNames; To and Cc stay whole for the tooltip
+	CcNames string
+	Gmail   string
+	Kind    string // "html" or "text"; "" when the message has no body
+	BodyURL string
 	// HoldImages keeps remote images behind a click: spam and trash, where
 	// an open confirms the address. Everywhere else they load (app.js).
 	HoldImages bool
@@ -459,6 +473,12 @@ func (s *Server) thread(w http.ResponseWriter, r *http.Request) {
 		}
 		v := s.messageView(acct, m, len(data.Messages) > 0)
 		v.Pos = len(data.Messages) + 1
+		if n := len(data.Messages); n == 0 || v.Rel != data.Messages[n-1].Rel {
+			v.Day = true
+			if n > 0 {
+				v.Gap = gapLabel(data.Messages[n-1].when, v.when)
+			}
+		}
 		drive = mergeDrive(drive, driveViews(driveRefs(m), acct.Email))
 		data.Messages = append(data.Messages, v)
 	}
@@ -501,6 +521,9 @@ func (s *Server) messageView(acct notmuch.Account, m *notmuch.Message, fold bool
 		class += " collapsed"
 	}
 	name, addr := splitAddress(m.Headers["From"])
+	if acct.Email != "" && strings.EqualFold(addr, acct.Email) {
+		class += " me"
+	}
 	when := time.Unix(m.Timestamp, 0).Local()
 	an := analyzeFold(m, fold)
 	v := messageView{
@@ -513,6 +536,13 @@ func (s *Server) messageView(acct notmuch.Account, m *notmuch.Message, fold bool
 		To:       m.Headers["To"],
 		Cc:       m.Headers["Cc"],
 		Date:     longDate(when),
+		Clock:    clock(when),
+		Rel:      relDay(when, s.now()),
+		when:     when,
+		FromMe:   acct.Email != "" && strings.EqualFold(addr, acct.Email),
+		Snippet:  snippet(m),
+		ToNames:  recipientNames(m.Headers["To"], acct.Email),
+		CcNames:  recipientNames(m.Headers["Cc"], acct.Email),
 		ISO:      when.Format(time.RFC3339),
 		Gmail:    gmailURL(acct.Email, m.Filename),
 		Kind:     an.Kind,

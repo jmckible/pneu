@@ -8,7 +8,14 @@
   --fg: #d6d8dc;
   --accent: #7fb4ff;
   --selection: #26364f;
-  --font: ui-monospace, "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  /* The generic family comes first: it is the desktop's monospace
+     (fontconfig, which omarchy font set writes); Chromium on Linux skips
+     ui-monospace. */
+  --font: ui-monospace, monospace, "JetBrains Mono", "Cascadia Mono", Menlo, Consolas;
+  /* What people wrote (text bodies, snippets) reads in the sans the mail
+     frame substitutes for Arial and friends (mailframe.js MAIL_SANS), so a
+     plain-text body and an HTML one look alike. */
+  --prose: Inter, sans-serif;
 }
 
 @media (prefers-color-scheme: light) {
@@ -451,7 +458,8 @@ main.list ol { list-style: none; margin: 0; padding: 0; }
   white-space: nowrap;
 }
 .row > span { overflow: hidden; text-overflow: ellipsis; }
-.row .authors { color: var(--fg); }
+/* The subject leads; the sender recedes until the row is unread. */
+.row .authors { color: var(--muted); }
 .row .count {
   align-self: center;
   padding: 0 0.6ch;
@@ -572,35 +580,88 @@ main.thread { padding: 4px 2ch 50vh; max-width: 110ch; overflow-x: hidden; overf
 main.thread:focus { outline: none; }
 main.thread h1 { font-size: 16px; margin: 12px 0; }
 
-/* Cards are the raised sheet; in the split the whole pane is that sheet, so
-   there they read by border and rail alone. app.js hands the frame this
-   surface's color (surfaceHex) so a themed mail body matches it. */
+/* Messages are tiles: the raised sheet, or in the split (where the pane is
+   that sheet) a step off it. A folded one is a single row; the open ones
+   are cards. app.js hands the frame this surface's color (surfaceHex) so a
+   themed mail body matches it. */
 article.message {
-  margin: 0 0 8px;
-  background: var(--raised);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--border);
+  --tile: var(--raised);
+  margin: 0 0 3px;
+  background: var(--tile);
+  border: 1px solid transparent;
+  border-left-width: 3px;
+  border-radius: 4px;
   scroll-margin-top: calc(var(--acc-h) + 8px);
 }
-/* Rail: border at rest, fg when unread, accent under the cursor (wins). */
+body.split article.message {
+  --tile: light-dark(oklch(from var(--raised) calc(l - 0.03) c h), oklch(from var(--raised) calc(l + 0.035) c h));
+}
+article.message.collapsed:hover { background: color-mix(in oklab, var(--tile), var(--fg) 5%); }
+article.message:not(.collapsed) {
+  margin: 0 0 10px;
+  border-color: color-mix(in oklab, var(--fg) 16%, var(--bg));
+  box-shadow: 0 2px 10px -4px light-dark(rgb(0 0 0 / 0.15), rgb(0 0 0 / 0.5));
+}
+/* Rail: none on a folded row, the card's edge on an open one, fg when
+   unread, accent under the cursor (wins). */
 article.message.unread { border-left-color: var(--fg); }
 article.message.selected { border-left-color: var(--accent); }
 article.message.unread > header .name { color: var(--unread); font-weight: bold; }
 
+/* The header: sender and time on one line, recipients under them, a
+   hairline above the body. Folded, it is a row: sender, snippet, time. */
 article.message > header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 2ch;
-  padding: 4px 1ch;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 3px 2ch;
+  margin: 0 1.5ch;
+  padding: 10px 0;
   cursor: pointer;
   color: var(--muted);
 }
+article.message:not(.collapsed) > header { border-bottom: 1px solid color-mix(in oklab, var(--fg) 22%, var(--bg)); }
 article.message > header > * { min-width: 0; }
-article.message > header .from { color: var(--fg); flex: 1 1 auto; }
-article.message > header .to,
-article.message > header .cc { flex-basis: 100%; order: 3; overflow-wrap: anywhere; }
-article.message > header .pos { font-size: 12px; }
+article.message > header .from { color: var(--fg); }
+article.message:not(.collapsed) > header .name { font-weight: 600; }
+article.message > header .addr { margin-left: 0.5ch; font-size: 12px; color: var(--muted); }
+article.message > header .snip { display: none; }
+article.message > header .rcpt { grid-column: 1; font-size: 12px; overflow-wrap: anywhere; }
+article.message > header .rcpt .k { color: color-mix(in oklab, var(--muted) 70%, var(--bg)); }
+article.message > header .rcpt > span + span { margin-left: 1.5ch; }
+article.message > header time { grid-column: 2; grid-row: 1; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* "n of N" stays in the markup for the sticky title (app.js syncHere). */
+article.message > header .pos { display: none; }
 article.message.flagged > header .from::after { content: " ★"; color: var(--accent); }
+
+article.message.collapsed > header { grid-template-columns: 20ch minmax(0, 1fr) auto; padding: 7px 0; }
+body:not(.split) article.message.collapsed > header { grid-template-columns: 14ch minmax(0, 1fr) auto; }
+article.message.collapsed > header .from { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+article.message.collapsed > header .addr,
+article.message.collapsed > header .rcpt { display: none; }
+article.message.collapsed > header .snip {
+  display: block;
+  font-family: var(--prose);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+article.message.collapsed > header time { grid-column: 3; }
+
+/* A divider where the day changes, naming a silence before it. */
+main.thread > .day {
+  display: flex;
+  align-items: center;
+  gap: 1ch;
+  margin: 12px 0 6px;
+  font-size: 12px;
+  color: var(--fg);
+}
+main.thread > h1 + .day { margin-top: 4px; }
+main.thread > .day::before,
+main.thread > .day::after { content: ""; flex: 1; border-top: 1px solid color-mix(in oklab, var(--fg) 16%, var(--bg)); }
+main.thread > .day::before { flex: 0 0 1.5ch; }
+main.thread > .day .gap { color: var(--muted); font-style: italic; }
 
 /* The o chip (actions.js chip): the message's declared link, `o name →
    destination`. The fixed columns (o, the arrow, the gaps) never shrink, so
@@ -611,7 +672,7 @@ article.message.flagged > header .from::after { content: " ★"; color: var(--ac
    <bdi>s with their controls drawn as escapes. Only on an expanded
    message. */
 article.message > header > .cta {
-  order: 4;
+  grid-column: 1 / -1;
   display: flex;
   align-items: baseline;
   gap: 1ch;
@@ -695,15 +756,12 @@ article.message.selected > .body[data-kind=text] a[data-pick] {
 #hints .hint.on { color: var(--accent); background: var(--bg); box-shadow: 0 0 0 2px var(--accent); }
 
 article.message.collapsed > .body,
-article.message.collapsed > .attachments,
-article.message.collapsed > header .to,
-article.message.collapsed > header .cc { display: none; }
+article.message.collapsed > .attachments { display: none; }
 
-.body { border-top: 1px solid var(--border); }
 .body pre {
   margin: 0;
-  padding: 8px 1ch;
-  font: inherit;
+  padding: 10px 1.5ch;
+  font: 14px/1.45 var(--prose);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -796,7 +854,7 @@ body.split #panes > main.list { grid-column: 1; border-right: 1px solid var(--bo
 body.split #panes > main.thread { grid-column: 2; max-width: none; background: var(--raised); }
 body.split main.thread > * { max-width: 110ch; }
 /* The narrow column keeps the subject its room. */
-body.split main.list .row { grid-template-columns: clamp(16ch, 30%, 24ch) minmax(0, 1fr) auto 10ch; }
+body.split main.list .row { grid-template-columns: clamp(18ch, 34%, 28ch) minmax(0, 1fr) auto 9ch; }
 body.split #panes:not(:has(> main.thread)) main.list .row { grid-template-columns: clamp(14ch, 22vw, 28ch) minmax(0, 1fr) auto 10ch; }
 /* The pane without the keys keeps its cursor but loses the accent rail. */
 body.split #panes[data-focus=thread] main.list .row.selected { border-left-color: var(--muted); }
