@@ -85,7 +85,7 @@ button { font: inherit; }
    (html.tube-fold): tube.js sets both from triage.js and decides the fold
    before the first render, and app.js keeps it with the window, the width
    animating once the page has settled (html.tube-anim). */
-:root { --tube-w: 18ch; --tube-fold-w: 6ch; --acc-h: 0px; }
+:root { --tube-w: 18ch; --tube-fold-w: 7ch; --acc-h: 0px; }
 body {
   display: grid;
   grid-template-columns: var(--tube-w) minmax(0, 1fr);
@@ -182,7 +182,7 @@ body:not(.split) #tube {
   border-radius: 50%;
   background: var(--accent);
 }
-#tube.egging a[data-station] > kbd, #tube.egging .q > a { position: relative; }
+#tube.egging a[data-station] > kbd, #tube.egging a[data-station] > .ico, #tube.egging .q > a { position: relative; }
 :root:not(.tube-fold) #tube.egging a[data-station] > .nm { position: relative; }
 #mark .mark path + path { transform-box: fill-box; transform-origin: center; }
 #tube.egging .cap { visibility: hidden; }
@@ -238,6 +238,7 @@ body:not(.split) #tube {
   transition: color 220ms;
 }
 #tube a.active > kbd, #tube .line:hover a[data-station] > kbd { color: var(--accent); }
+#tube .ico { display: none; }
 #tube .cap {
   position: absolute;
   z-index: 2;
@@ -285,8 +286,9 @@ body:not(.split) #tube {
 #tube .q input::placeholder { color: var(--muted); }
 #tube .q input::-webkit-search-cancel-button { display: none; }
 
-/* Folded to its digits: the mark, the /, the digits, on the same line with
-   the capsule and the drop; the names are titles; the foot hides, so the
+/* Folded to its icons: the mark, the /, each station's icon with its
+   digit as a superscript before it, as open, on the same line with the capsule and
+   the drop; the names are titles; the foot hides, so the
    mark's colour carries the sync status alone (the live region still
    speaks); the search field floats beside the column. */
 :root.tube-fold #tube [data-station] { padding-left: 3.4ch; }
@@ -302,13 +304,15 @@ body:not(.split) #tube {
   white-space: nowrap;
 }
 :root.tube-fold #tube .x, :root.tube-fold #tube .foot { display: none; }
-:root.tube-fold #tube a[data-station] > kbd { font-size: 12px; vertical-align: baseline; margin: 0; }
+:root.tube-fold #tube a[data-station] { display: flex; align-items: center; }
+:root.tube-fold #tube a[data-station] > .ico { display: block; flex: none; width: 15px; height: 15px; overflow: visible; }
+:root.tube-fold #tube a[data-station] > kbd { align-self: flex-start; margin: 2px 2px 0 0; vertical-align: 0; }
 :root.tube-fold #tube .q input {
   /* Fixed, so the stations' scroller doesn't clip it; app.js sets --q-top
      to the station's place as it opens. */
   position: fixed;
   z-index: 5;
-  left: 5.5ch;
+  left: 6.5ch;
   top: var(--q-top, 0px);
   width: 24ch;
   padding: 3px 1ch;

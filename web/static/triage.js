@@ -120,19 +120,19 @@
   // layout threshold is here.
   // SPLIT_CH is the panes' width (the window less the tube) at which the
   // list and the thread sit side by side. TUBE_CH and TUBE_FOLD_CH are the
-  // tube's widths, open and folded to its digits (tube.js hands them to
+  // tube's widths, open and folded to its icons (tube.js hands them to
   // app.css as --tube-w and --tube-fold-w). LIST_MIN_CH: a single pane
   // narrower than this with the tube open folds the tube.
   var SPLIT_CH = 140;
   var TUBE_CH = 18;
-  var TUBE_FOLD_CH = 6;
+  var TUBE_FOLD_CH = 7;
   var LIST_MIN_CH = 100;
 
   // layout decides the window at width ch: {split, fold}. The split
   // outranks the tube's labels: it folds the tube before it gives up the
   // split. A single pane folds it when the list would be narrower than
   // LIST_MIN_CH. So, open widths: split from SPLIT_CH + TUBE_CH (158), split
-  // folded from SPLIT_CH + TUBE_FOLD_CH (146), one pane from LIST_MIN_CH +
+  // folded from SPLIT_CH + TUBE_FOLD_CH (147), one pane from LIST_MIN_CH +
   // TUBE_CH (118), folded below that. It depends on the width alone, never
   // on whether a thread is open, so opening one never moves the tube.
   function layout(ch) {

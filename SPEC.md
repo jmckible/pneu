@@ -60,15 +60,17 @@ them here if they're wrong.
     Leaving goes back to the view that search was started from, kept in
     its own history entry, so Back to an older search or a reload still
     returns there. `/` there edits the query.
-  - *Folded.* When there isn't room the tube folds to `6ch`: only the
-    mark, the `/` and the digits stay, on the same line with the capsule
-    and the drop; the names are the stations' titles; the foot hides, so
+  - *Folded.* When there isn't room the tube folds to `7ch`: only the
+    mark, the `/` and each station's icon stay (a tray, a star, a paper
+    plane, a stack, a stop sign, a bin), its digit a superscript before
+    it as on the open tube, on the same line with the capsule and the drop; the names are the
+    stations' titles; the foot hides, so
     the mark's colour carries the sync status alone; the search field
     floats beside the column (`--raised`, an accent border). The width
     animates (260ms), the capsule staying on its dot throughout. The split
     outranks the tube's labels: the split needs `140ch` of panes, so the
     tube is open with the split from `158ch` of window, folded with the
-    split from `146ch`, open again with one pane from `118ch` (a list of
+    split from `147ch`, open again with one pane from `118ch` (a list of
     at least `100ch`), and folded below that. It goes by the width alone,
     never by whether a thread is open, and is decided before the first
     paint. The thresholds live together in triage.js (`layout`).

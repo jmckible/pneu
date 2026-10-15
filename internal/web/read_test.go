@@ -125,12 +125,15 @@ func TestInbox(t *testing.T) {
 		// The tube: the ghost search station, the main line, the drop, the
 		// bins; the capsule only on the active station.
 		`<div class="line"><span class="main"><span class="q ghost" data-station="q"><a href="/search" title="Search (/)"><kbd>/</kbd><span class="nm">search</span></a></span>` +
-			`<a href="/" data-station="1" title="Inbox (1)" class="active" aria-current="page"><kbd>1</kbd><span class="nm">Inbox</span><span class="cap" aria-hidden="true"></span></a>`,
-		`<a href="/starred" data-station="2" title="Starred (2)"><kbd>2</kbd><span class="nm">Starred</span></a>`,
-		`<a href="/sent" data-station="3" title="Sent (3)"><kbd>3</kbd><span class="nm">Sent</span></a>`,
-		`<a href="/all" data-station="4" title="All (4)"><kbd>4</kbd><span class="nm">All</span></a></span><span class="drop" aria-hidden="true"></span>`,
-		`<span class="bins"><a href="/spam" data-station="5" title="Spam (5)"><kbd>5</kbd>`,
-		`<a href="/trash" data-station="6" title="Trash (6)"><kbd>6</kbd><span class="nm">Trash</span></a></span></div>`,
+			`<a href="/" data-station="1" title="Inbox (1)" class="active" aria-current="page"><kbd>1</kbd><svg class="ico" aria-hidden="true" viewBox="0 0 14 14">`,
+		`<span class="nm">Inbox</span><span class="cap" aria-hidden="true"></span></a>`,
+		`<a href="/starred" data-station="2" title="Starred (2)"><kbd>2</kbd><svg class="ico" aria-hidden="true" viewBox="0 0 14 14">`,
+		`<a href="/sent" data-station="3" title="Sent (3)"><kbd>3</kbd><svg class="ico" aria-hidden="true" viewBox="0 0 14 14">`,
+		`<a href="/all" data-station="4" title="All (4)"><kbd>4</kbd><svg class="ico" aria-hidden="true" viewBox="0 0 14 14">`,
+		`<span class="nm">All</span></a></span><span class="drop" aria-hidden="true"></span>`,
+		`<span class="bins"><a href="/spam" data-station="5" title="Spam (5)"><kbd>5</kbd><svg class="ico" aria-hidden="true" viewBox="0 0 14 14">`,
+		`<a href="/trash" data-station="6" title="Trash (6)"><kbd>6</kbd><svg class="ico" aria-hidden="true" viewBox="0 0 14 14">`,
+		`<span class="nm">Trash</span></a></span></div>`,
 		`<button id="mark" type="button"`, `<div class="foot"><button id="sync" type="button" title="Sync details" aria-haspopup="dialog" hidden>`,
 		`<div class="wright"><div id="status"`,
 	} {

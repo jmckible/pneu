@@ -601,7 +601,7 @@
       var share = D > 0 ? (st.getBoundingClientRect().top + 14 - y0) / D : 0;
       if (!(share > 0.02 && share <= 1)) return;
       var when = p.valve + p.fall * tube.fallTime(share);
-      var labels = st.matches('.q') ? st.querySelectorAll(':scope > a') : st.querySelectorAll(folded ? ':scope > kbd' : ':scope > kbd, :scope > .nm');
+      var labels = st.matches('.q') ? st.querySelectorAll(':scope > a') : st.querySelectorAll(folded ? ':scope > kbd, :scope > .ico' : ':scope > kbd, :scope > .nm');
       Array.prototype.forEach.call(labels, function (lab) {
         r.add(lab.animate([{ left: '0px', easing: 'ease-out' }, { left: '1.5px', offset: 0.3, easing: 'ease-in-out' },
           { left: '-0.5px', offset: 0.65, easing: 'ease-in-out' }, { left: '0px' }], { duration: 160, delay: when }));
