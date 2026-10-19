@@ -889,11 +889,16 @@
     if (bar > 0) frame.style.height = Math.min(h + bar, MAX_HEIGHT) + 'px';
   }
 
+  // attach sizes the frame and hands its keys to the app once per document:
+  // as soon as it is parsed (watchParse), or at load, whichever comes first.
+  // load waits for every subresource, so a mail with a slow remote image
+  // would otherwise stay 0 tall until that host answered; the observer
+  // follows the images in as they arrive.
   function attach(frame) {
     var ro = null;
-    frame.addEventListener('load', function () {
-      var doc = frame.contentDocument;
-      if (!doc) return;
+    frame.__pneuSetup = function (doc) {
+      if (!doc || frame.__pneuDoc === doc) return;
+      frame.__pneuDoc = doc;
       if (ro) ro.disconnect();
       ro = new ResizeObserver(function () { sizeFrame(frame); });
       var body = docBody.call(doc);
@@ -905,7 +910,27 @@
       // scripting doesn't apply to it.
       if (frame.__pneuKeys) doc.addEventListener('keydown', frame.__pneuKeys);
       if (frame.__pneuKeyup) doc.addEventListener('keyup', frame.__pneuKeyup);
-    });
+    };
+    frame.addEventListener('load', function () { frame.__pneuSetup(frame.contentDocument); });
+  }
+
+  // watchParse sets the frame up once the srcdoc document replacing old has
+  // been parsed, checking each frame until then (or until load does it).
+  // The frame may not be in the page yet: its document comes once it is;
+  // one left out (or taken out) for a second is given up on.
+  function watchParse(frame, old) {
+    var seq = frame.__pneuParse = (frame.__pneuParse || 0) + 1, away = 0;
+    (function check() {
+      if (frame.__pneuParse !== seq) return; // re-rendered meanwhile
+      if (!frame.isConnected && ++away > 60) return;
+      var doc = frame.contentDocument;
+      if (doc && doc === frame.__pneuDoc && doc !== old) return; // load got there
+      if (doc && doc !== old && doc.URL === 'about:srcdoc' && doc.readyState !== 'loading') {
+        frame.__pneuSetup(doc);
+        return;
+      }
+      requestAnimationFrame(check);
+    })();
   }
 
   // renderMailFrame(html, cids, origin, opts) → { frame, remote, colors, sheet, action, folded }
@@ -951,7 +976,9 @@
     frame.setAttribute('referrerpolicy', 'no-referrer');
     frame.classList.toggle('sheet', built.sheet);
     // The only unsafe sink: a DOM property, never string-built markup (34).
+    var old = frame.contentDocument;
     frame.srcdoc = built.srcdoc;
+    watchParse(frame, old);
     return {
       frame: frame, remote: built.remote, colors: built.colors, sheet: built.sheet,
       action: built.action, ldBlocks: built.ldBlocks, folded: built.folded,
