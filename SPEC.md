@@ -71,9 +71,11 @@ them here if they're wrong.
     outranks the tube's labels: the split needs `140ch` of panes, so the
     tube is open with the split from `158ch` of window, folded with the
     split from `147ch`, open again with one pane from `118ch` (a list of
-    at least `100ch`), and folded below that. It goes by the width alone,
-    never by whether a thread is open, and is decided before the first
-    paint. The thresholds live together in triage.js (`layout`).
+    at least `100ch`), and folded below that. A portrait window (taller
+    than wide) stacks the split instead (below), from the one-pane width
+    (`118ch`) with the tube open; narrower, one pane, folded.
+    It goes by the window's shape alone, never by whether a thread is
+    open, and is decided before the first paint. The thresholds live together in triage.js (`layout`).
   - *The easter egg.* Clicking the mark while sync is healthy opens it
     like a valve: the mark turns a quarter on a small spring (160ms) as
     the capsule winds up (a 2px lift, a squash); the capsule falls down
@@ -98,12 +100,20 @@ them here if they're wrong.
   the footer lists its keys. At `140ch` of panes and above (beside the
   tube), with a thread open, they sit side by side: the list takes 40%
   of the panes (clamped to
-  `64ch`-`100ch`), the thread the rest (at least `48ch`). The thread has a
+  `64ch`-`100ch`), the thread the rest (at least `48ch`), its column
+  (`110ch` at most) centered in the pane. A portrait window stacks them
+  instead, since there the thread beside the list would be a strip at the
+  right edge: the list is a strip across the top (its pager and seven
+  rows, its columns as wide as a full list's, the cursor kept to its
+  middle so the threads around the open one show), the thread below it
+  with its column centered on the window. Stacked is the split in every
+  other respect: keys, focus, history, opening and moving on. The thread has a
   one-line sticky title row, its subject; the list has none (the tube
   names the view; every list has its pager row). The pane without
   the keys dims its cursor's edge; nothing shifts when focus moves. With
-  no thread open the list fills the window. Below `140ch` the active pane
-  is the whole screen (list or thread).
+  no thread open the list fills the window. Without a split the active
+  pane is the whole screen (list or thread), a thread's column centered on
+  the window (against the tube when there isn't room).
   Opening is explicit: `j/k` on the list only move the cursor. `Enter`,
   `o`, `l`, `Tab` or a click opens the cursor row (in the pane when split,
   as its own page when narrow), marks it read, and gives it the keys.
@@ -111,7 +121,8 @@ them here if they're wrong.
   pane open; `Esc` on the list closes the pane (the list fills the window
   again). `Tab`/`Shift+Tab` switch panes, except inside a mail body, where
   Tab walks its links. `+` maximizes the active pane (the narrow layout)
-  until `+` again or the window crosses the split width. The one time a thread
+  until `+` again or the window crosses the split width or turns between
+  landscape and portrait. The one time a thread
   opens without being asked: archiving, trashing or spamming the open
   thread (`a`, `t`, `#`, `!`, from either pane) moves the cursor to the next row and opens it,
   keys staying put; an emptied list closes the pane.
@@ -429,6 +440,16 @@ it unknown and uncached. An unpaged list never asks.
     list) is a bulk change and renders still. A narrow list refreshes by
     reloading, so it keeps the rows it showed across the reload
     (sessionStorage, for 15s) to tell what's new.
+  - *Key scrolling eases.* `j/k` on a thread, `n/p`, and the stacked
+    list keeping its cursor centered move the pane by an exponential
+    approach (time constant 45ms, so it settles within ~200ms of the last
+    press at any frame rate). A press moves the target, not the start, so
+    a held key is one continuous glide; a wheel or drag meanwhile wins and
+    the glide stops. Opening a thread lands at once.
+  - *A thread slides in.* One replacing another in the pane (a click, a
+    key, moving on after a removal) comes in from where it lies in the
+    list, 10px from below or above, fading up (180ms, its first blocks
+    12ms apart); the pane's sheet and title band stay put.
   - *An emptied list draws its mark.* Triaging the last row away draws
     the watermark's stroke (1.3s, `cubic-bezier(.45,0,.2,1)`), a little
     brighter than at rest; a list that loads empty shows it still. No

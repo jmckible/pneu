@@ -1,7 +1,8 @@
 // motion.js — the list's small motions (SPEC.md "Index views", Motion): the
 // cursor gliding between rows, a removed row closing its gap (and opening
 // again on undo), the star's pop, new mail opening in, the emptied list
-// drawing its mark. Motion only catches up: app.js changes the state first
+// drawing its mark; and the panes' key scrolling, eased (scrollTo, scrollBy)
+// and a thread sliding in when it replaces another (slideIn). Motion only catches up: app.js changes the state first
 // and calls these after, a key press ends any row still opening or closing
 // (settle) before app.js measures, and under prefers-reduced-motion none of
 // it runs. freshRows and the stash checks are pure; web/motion.test.js runs
@@ -318,6 +319,76 @@
     timer = setTimeout(done, 520);
   }
 
+  // ---- key scrolling -------------------------------------------------------
+  // A key that scrolls a pane (j/k, n/p, the stacked list keeping its
+  // cursor centered) eases there instead of jumping. Each press moves the
+  // target, not the start, so a held key is one continuous glide that
+  // catches up within ~200ms of the last press (an exponential approach,
+  // time constant SCROLL_TAU, so it's the same at any frame rate). A wheel
+  // or a drag meanwhile wins: the glide stops where it finds the pane
+  // moved under it. sc is the scrolling element (document.scrollingElement
+  // for the page).
+  var SCROLL_TAU = 45;
+  var glides = typeof WeakMap === 'function' ? new WeakMap() : null;
+  function scrollTo(sc, top) {
+    if (!sc) return;
+    var max = Math.max(0, sc.scrollHeight - sc.clientHeight);
+    top = Math.max(0, Math.min(max, top));
+    if (still() || !glides || !root.requestAnimationFrame) { glides && glides.delete(sc); sc.scrollTop = top; return; }
+    var g = glides.get(sc);
+    if (g) { g.target = top; return; }
+    g = { target: top, at: sc.scrollTop, t: 0 };
+    glides.set(sc, g);
+    function step(now) {
+      if (glides.get(sc) !== g) return;
+      if (Math.abs(sc.scrollTop - g.at) > 2) { glides.delete(sc); return; }
+      var dt = g.t ? Math.min(now - g.t, 50) : 16;
+      g.t = now;
+      var d = g.target - g.at;
+      if (Math.abs(d) < 0.5) { sc.scrollTop = g.target; glides.delete(sc); return; }
+      g.at += d * (1 - Math.exp(-dt / SCROLL_TAU));
+      sc.scrollTop = g.at;
+      g.at = Math.abs(sc.scrollTop - g.at) <= 2 ? g.at : sc.scrollTop; // clamped at an end
+      root.requestAnimationFrame(step);
+    }
+    root.requestAnimationFrame(step);
+  }
+  // scrollBy adds dy to where the pane is headed (a glide's target).
+  function scrollBy(sc, dy) {
+    if (!sc) return;
+    var g = glides && glides.get(sc);
+    scrollTo(sc, (g ? g.target : sc.scrollTop) + dy);
+  }
+  // target is where sc would scroll to put el at block 'start' (under the
+  // pane's scroll padding and el's scroll margin) or 'center' (in the middle
+  // of what's below the padding), measured now, whatever is in flight.
+  function target(sc, el, block) {
+    var page = sc === doc.scrollingElement;
+    var top = page ? 0 : sc.getBoundingClientRect().top;
+    var h = page ? root.innerHeight : sc.clientHeight;
+    var pad = parseFloat(root.getComputedStyle(sc).scrollPaddingTop) || 0;
+    var r = el.getBoundingClientRect();
+    var off = r.top - top - pad;
+    if (block === 'center') return sc.scrollTop + off - (h - pad - r.height) / 2;
+    return sc.scrollTop + off - (parseFloat(root.getComputedStyle(el).scrollMarginTop) || 0);
+  }
+
+  // slideIn: a thread replacing another in the pane comes in from the
+  // direction it lies in the list (dir 1, below; -1, above) and fades up,
+  // briefly; the pane itself (its sheet, its title band) stays put.
+  function slideIn(main, dir) {
+    if (!main || still()) return;
+    var kids = main.children;
+    for (var i = 0, n = 0; i < kids.length && n < 12; i++) {
+      if (kids[i].tagName === 'H1') continue;
+      n++;
+      kids[i].animate([
+        { opacity: 0, transform: 'translateY(' + (dir < 0 ? -10 : 10) + 'px)' },
+        { opacity: 1, transform: 'none' },
+      ], { duration: 180, delay: Math.min(n - 1, 5) * 12, easing: OUT, fill: 'backwards' });
+    }
+  }
+
   // ---- the empty list's mark ---------------------------------------------
   // The mark draws itself when the list empties under you. pathLength on
   // this copy's paths only (the header's mark shares the template) makes
@@ -341,5 +412,9 @@
   P.star = star;
   P.draw = draw;
   P.undraw = undraw;
+  P.scrollTo = scrollTo;
+  P.scrollBy = scrollBy;
+  P.target = target;
+  P.slideIn = slideIn;
   (root.Pneu = root.Pneu || {}).motion = P;
 })(this);

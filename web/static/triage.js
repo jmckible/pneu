@@ -128,17 +128,25 @@
   var TUBE_FOLD_CH = 7;
   var LIST_MIN_CH = 100;
 
-  // layout decides the window at width ch: {split, fold}. The split
-  // outranks the tube's labels: it folds the tube before it gives up the
-  // split. A single pane folds it when the list would be narrower than
-  // LIST_MIN_CH. So, open widths: split from SPLIT_CH + TUBE_CH (158), split
-  // folded from SPLIT_CH + TUBE_FOLD_CH (147), one pane from LIST_MIN_CH +
-  // TUBE_CH (118), folded below that. It depends on the width alone, never
-  // on whether a thread is open, so opening one never moves the tube.
-  function layout(ch) {
-    if (ch - TUBE_CH >= SPLIT_CH) return { split: true, fold: false };
-    if (ch - TUBE_FOLD_CH >= SPLIT_CH) return { split: true, fold: true };
-    return { split: false, fold: ch - TUBE_CH < LIST_MIN_CH };
+  // layout decides the window at width ch: {split, stack, fold}. A
+  // portrait window (taller than wide) stacks its split: the thread beside
+  // the list would be a narrow strip off to the right, so it goes below a
+  // short list instead, where the window has height to spare. Stacked, the
+  // panes are the window's whole width, so it needs only a list's
+  // (LIST_MIN_CH beside the open tube); narrower, one pane, folded. The
+  // landscape split outranks the tube's labels: it folds the tube before
+  // it gives up the split. A single pane folds it when the list would be
+  // narrower than LIST_MIN_CH. So, landscape, open widths:
+  // split from SPLIT_CH + TUBE_CH (158), split folded from SPLIT_CH +
+  // TUBE_FOLD_CH (147), one pane from LIST_MIN_CH + TUBE_CH (118), folded
+  // below that. It depends on the window's shape alone, never on whether a
+  // thread is open, so opening one never moves the tube.
+  function layout(ch, portrait) {
+    var list = ch - TUBE_CH >= LIST_MIN_CH;
+    if (portrait) return { split: list, stack: list, fold: !list };
+    if (ch - TUBE_CH >= SPLIT_CH) return { split: true, stack: false, fold: false };
+    if (ch - TUBE_FOLD_CH >= SPLIT_CH) return { split: true, stack: false, fold: true };
+    return { split: false, stack: false, fold: !list };
   }
 
   // The index views' paths (server.go); search keeps its ?q=.

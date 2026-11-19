@@ -159,14 +159,22 @@ test('restoreIndex: same thread if still listed, else same slot', () => {
 });
 
 test('layout: the split folds the tube before giving up; one pane folds it under 100ch of list', () => {
-  assert.deepEqual(T.layout(200), { split: true, fold: false });
-  assert.deepEqual(T.layout(158), { split: true, fold: false }, '140 of panes beside the open tube');
-  assert.deepEqual(T.layout(157.9), { split: true, fold: true });
-  assert.deepEqual(T.layout(147), { split: true, fold: true }, '140 of panes beside the folded tube');
-  assert.deepEqual(T.layout(146.9), { split: false, fold: false });
-  assert.deepEqual(T.layout(118), { split: false, fold: false }, 'a 100ch list beside the open tube');
-  assert.deepEqual(T.layout(117.9), { split: false, fold: true });
-  assert.deepEqual(T.layout(40), { split: false, fold: true });
+  assert.deepEqual(T.layout(200), { split: true, stack: false, fold: false });
+  assert.deepEqual(T.layout(158), { split: true, stack: false, fold: false }, '140 of panes beside the open tube');
+  assert.deepEqual(T.layout(157.9), { split: true, stack: false, fold: true });
+  assert.deepEqual(T.layout(147), { split: true, stack: false, fold: true }, '140 of panes beside the folded tube');
+  assert.deepEqual(T.layout(146.9), { split: false, stack: false, fold: false });
+  assert.deepEqual(T.layout(118), { split: false, stack: false, fold: false }, 'a 100ch list beside the open tube');
+  assert.deepEqual(T.layout(117.9), { split: false, stack: false, fold: true });
+  assert.deepEqual(T.layout(40), { split: false, stack: false, fold: true });
+});
+
+test('layout: a portrait window stacks the split from a list\'s width, else one pane folded', () => {
+  assert.deepEqual(T.layout(200, true), { split: true, stack: true, fold: false });
+  assert.deepEqual(T.layout(150, true), { split: true, stack: true, fold: false }, 'the folded split in landscape');
+  assert.deepEqual(T.layout(118, true), { split: true, stack: true, fold: false }, 'a 100ch list beside the open tube');
+  assert.deepEqual(T.layout(117.9, true), { split: false, stack: false, fold: true });
+  assert.deepEqual(T.layout(200, false), { split: true, stack: false, fold: false });
 });
 
 test('paneView: the entry\'s own list first, then the tab\'s last list, vetted', () => {

@@ -246,9 +246,9 @@
 
   var ch = measureCh();
 
-  // layout is the window's {split, fold} now.
+  // layout is the window's {split, stack, fold} now.
   function layout() {
-    return tri ? tri.layout(root.innerWidth / ch) : { split: false, fold: false };
+    return tri ? tri.layout(root.innerWidth / ch, root.innerHeight > root.innerWidth) : { split: false, stack: false, fold: false };
   }
 
   // fold folds the tube (on) or opens it; app.js animates the change once

@@ -104,19 +104,36 @@
     }
     if (scroll !== false) {
       if (c === T) alignMessage(i);
-      else el.scrollIntoView({ block: 'nearest' });
+      else rowInView(el, how === 'glide');
     }
+  }
+
+  // rowInView brings a list row into view. Stacked, the list is a few rows
+  // above the thread, there to show what's around the open one, so its
+  // cursor keeps to the middle, easing there for a key (glide); otherwise
+  // the list moves only as it must.
+  function rowInView(el, glide) {
+    if (split && lay.stack && glide && moving() && L.root) mo.scrollTo(L.root, mo.target(L.root, el, 'center'));
+    else el.scrollIntoView({ block: split && lay.stack ? 'center' : 'nearest' });
   }
 
   // alignMessage puts message i at the top of the thread's scroller, below
   // the sticky title in the split (where it ends, measured here: --title-h);
   // the first goes to the very top, so the subject shows when narrow too.
-  function alignMessage(i) {
+  // A key's move (glide: n/p) eases there; opening a thread lands at once.
+  function alignMessage(i, glide) {
     var scroller = split && T.root ? T.root : window;
-    if (i === 0) { scroller.scrollTo({ top: 0, behavior: 'instant' }); return; }
+    var sc = split && T.root ? T.root : document.scrollingElement;
+    glide = glide && moving();
+    if (i === 0) {
+      if (glide) mo.scrollTo(sc, 0);
+      else scroller.scrollTo({ top: 0, behavior: 'instant' });
+      return;
+    }
     var h1 = split && T.root.querySelector(':scope > h1');
     if (h1) T.root.style.setProperty('--title-h', (h1.getBoundingClientRect().bottom - T.root.getBoundingClientRect().top) + 'px');
-    T.items[i].scrollIntoView({ block: 'start', behavior: 'instant' });
+    if (glide) mo.scrollTo(sc, mo.target(sc, T.items[i], 'start'));
+    else T.items[i].scrollIntoView({ block: 'start', behavior: 'instant' });
   }
 
   // syncHere names, at the sticky title's right end, the message the
@@ -169,7 +186,7 @@
       var i = Math.max(0, Math.min(T.items.length - 1, T.sel < 0 ? 0 : T.sel + delta));
       select(T, i, false);
       if (T.items[i].classList.contains('collapsed')) toggle(T.items[i]);
-      alignMessage(i);
+      alignMessage(i, true);
     };
   }
 
@@ -209,10 +226,12 @@
   }
 
   // scrollThread: j/k on a thread scroll it three lines (the pane in the
-  // split, the page when narrow); n/p move between messages.
+  // split, the page when narrow), eased so a held key glides; n/p move
+  // between messages.
   function scrollThread(dir) {
     return function () {
       var line = parseFloat(getComputedStyle(body).lineHeight) || 19.6;
+      if (moving()) { mo.scrollBy(split && T.root ? T.root : document.scrollingElement, dir * 3 * line); return; }
       var opts = { top: dir * 3 * line, behavior: 'instant' };
       if (split && T.root) T.root.scrollBy(opts);
       else window.scrollBy(opts);
@@ -460,7 +479,7 @@
   // split width is initSplit's.
   // The window may have changed since tube.js folded the tube for the
   // first paint: this decision is the one that holds.
-  var lay = tube ? tube.layout() : { split: false, fold: false };
+  var lay = tube ? tube.layout() : { split: false, stack: false, fold: false };
   if (tube) tube.fold(lay.fold);
   var onSplitChange = null;
 
@@ -468,7 +487,7 @@
     if (!tube) return;
     var now = tube.layout();
     if (now.fold !== lay.fold) { stopEgg(); tube.fold(now.fold); }
-    var crossed = now.split !== lay.split;
+    var crossed = now.split !== lay.split || now.stack !== lay.stack;
     lay = now;
     if (crossed && onSplitChange) onSplitChange();
   }
@@ -1235,6 +1254,7 @@
       if (seq !== showSeq) return;
       T.pending = null;
       if (!split) { leaving = false; return; } // went narrow meanwhile: the page stays what its URL says
+      var dir = T.root ? listDir(T.url, url) : 0;
       if (T.root) T.root.replaceWith(got.main);
       else panes.appendChild(got.main);
       T.url = url;
@@ -1245,6 +1265,7 @@
       else readOnOpen();
       if (got.title) document.title = got.title;
       after();
+      if (dir && moving()) mo.slideIn(got.main, dir);
       if (tri.behind(T.label, T.need)) threadChanged();
     }).catch(function (err) {
       if (seq !== showSeq) return;
@@ -1253,6 +1274,17 @@
       if (leaving) { leaving = false; if (split) clearThread(); }
       fail('Open', err);
     });
+  }
+
+  // listDir: where the thread at url lies in the list from the one at
+  // from: 1 below (or not in it), -1 above.
+  function listDir(from, url) {
+    var a = -1, b = -1;
+    for (var i = 0; i < L.items.length; i++) {
+      if (L.items[i].dataset.url === from) a = i;
+      if (L.items[i].dataset.url === url) b = i;
+    }
+    return a >= 0 && b >= 0 && b < a ? -1 : 1;
   }
 
   // advance opens the cursor row after the open thread was removed; the
@@ -1311,7 +1343,7 @@
       initList(got.main, want, false);
       got.main.scrollTop = top;
       var row = cur(L);
-      if (row) row.scrollIntoView({ block: 'nearest' });
+      if (row) rowInView(row);
       if (before && moving()) mo.arrive(L.items, mo.freshRows(before, L.shown.keys), L.sel, L.cursor);
       // Rendered before a change this window has since heard of: again.
       if (tri.behind(L.label, L.need)) refreshList();
@@ -1381,6 +1413,7 @@
       var was = split;
       split = lay.split && !maxed;
       body.classList.toggle('split', split);
+      body.classList.toggle('stack', split && lay.stack);
       syncHere();
       if (!split) {
         showSeq++; // an in-flight open must not land on the narrow page
@@ -1664,7 +1697,7 @@
     L.items.splice(i, 1);
     var n = tri.nextIndex(i, L.items.length);
     if (anim) {
-      if (n === i) el.scrollIntoView({ block: 'nearest' }); // the slot the next row moves into
+      if (n === i) rowInView(el); // the slot the next row moves into
       if (n >= 0) select(L, n, n !== i, 'keep');
       mo.leave(el, L.cursor, n >= 0 ? { row: L.items[n], stay: n === i } : null);
       if (n < 0) mo.draw(L.root.querySelector('.empty-mark'));

@@ -579,8 +579,18 @@ body.split main.list:has(> .pager) { scroll-padding-top: var(--pager-h); }
 
 /* Everything in a thread wraps, unbreakable tokens included (a URL for a
    subject, a long address): body{overflow-x:clip} would otherwise clip it
-   at the right edge with no way to scroll to it. */
-main.thread { padding: 4px 2ch 50vh; max-width: 110ch; overflow-x: hidden; overflow-wrap: anywhere; }
+   at the right edge with no way to scroll to it. The column is centered
+   on the window, not on the space beside the tube: % is that space, so
+   its left margin is half of what's left once the tube is counted, and
+   against the tube when there isn't room for that. */
+/* --col (the reading column) and --tube-at (the tube's width now) are
+   lengths computed on #panes, in the app's font, so a child in a smaller
+   one (the day dividers, the pager) gets the same column. */
+@property --col { syntax: '<length>'; inherits: true; initial-value: 0px; }
+@property --tube-at { syntax: '<length>'; inherits: true; initial-value: 0px; }
+#panes { --col: 110ch; --tube-at: var(--tube-w); }
+:root.tube-fold #panes { --tube-at: var(--tube-fold-w); }
+main.thread { padding: 4px 2ch 50vh; max-width: var(--col); margin: 0 auto 0 max(0px, (100% - var(--tube-at) - var(--col)) / 2); overflow-x: hidden; overflow-wrap: anywhere; }
 main.thread:focus { outline: none; }
 main.thread h1 { font-size: 16px; margin: 12px 0; }
 
@@ -855,11 +865,30 @@ body.split #panes:not(:has(> main.thread)) { grid-template-columns: minmax(0, 1f
 body.split #panes:not(:has(> main.thread)) > main.list { border-right: 0; }
 body.split #panes > main { grid-row: 1; min-height: 0; overflow-y: auto; }
 body.split #panes > main.list { grid-column: 1; border-right: 1px solid var(--border); }
-body.split #panes > main.thread { grid-column: 2; max-width: none; background: var(--raised); }
-body.split main.thread > * { max-width: 110ch; }
+body.split #panes > main.thread { grid-column: 2; max-width: none; margin-inline: 0; background: var(--raised); }
+/* The pane is the sheet edge to edge; its column sits in the middle. The
+   id outranks the children's own margin shorthands (.day, the cards),
+   whose horizontal margins are all 0; the title band keeps its own. */
+body.split main.thread > * { max-width: var(--col); }
+body.split #panes > main.thread > :not(h1) { margin-inline: auto; }
 /* The narrow column keeps the subject its room. */
 body.split main.list .row { grid-template-columns: clamp(18ch, 34%, 28ch) minmax(0, 1fr) auto 9ch; }
 body.split #panes:not(:has(> main.thread)) main.list .row { grid-template-columns: clamp(14ch, 22vw, 28ch) minmax(0, 1fr) auto 10ch; }
+/* Stacked (a portrait window, triage.js layout): the list is a strip of
+   rows across the top, the pager and seven rows (a row is its line, 4px
+   padding each side and its rule), and the thread takes the rest below
+   it. With nothing open the list fills the window as in the split. The
+   list is full width, so its rows keep the wide columns. */
+body.split.stack #panes { grid-template-columns: minmax(0, 1fr); grid-template-rows: calc(var(--pager-h) + 7 * (1.4em + 9px)) minmax(0, 1fr); }
+body.split.stack #panes:not(:has(> main.thread)) { grid-template-rows: minmax(0, 1fr); }
+body.split.stack #panes > main.list { grid-row: 1; border-right: 0; border-bottom: 1px solid var(--border); }
+body.split.stack #panes > main.thread { grid-row: 2; grid-column: 1; }
+body.split.stack main.list .row { grid-template-columns: clamp(14ch, 22vw, 28ch) minmax(0, 1fr) auto 10ch; }
+/* The thread pane spans the window less the tube, so its column centers on
+   the window as one pane's does: % is the pane's content width, which is
+   the window less the tube and the pane's padding. */
+body.split.stack #panes > main.thread > :not(h1) { margin-left: max(0px, (100% - var(--tube-at) - var(--col)) / 2); margin-right: auto; }
+body.split.stack main.thread > h1 { --inset: max(0px, (100% - var(--tube-at) - var(--col)) / 2); }
 /* The pane without the keys keeps its cursor but loses the accent rail. */
 body.split #panes[data-focus=thread] main.list .row.selected { border-left-color: var(--muted); }
 body.split #panes[data-focus=list] article.message.selected { border-left-color: var(--border); }
@@ -871,8 +900,9 @@ body.split #panes[data-focus=list] article.message.selected.unread { border-left
    the keys shows on its cursor's accent edge, not here. In the split it
    is the pager's band (height and shade), so the two panes share one top
    edge, and its text lines up with the messages' text: the subject with
-   the senders (pane padding + rail + header padding), .here with their
-   "n of N". */
+   the senders (pane padding + rail + header padding, plus the centered
+   column's inset: half of what the pane has past 110ch; % here is the
+   pane's content width), .here with their "n of N". */
 body.split main.thread > h1 {
   display: flex;
   align-items: center;
@@ -887,7 +917,8 @@ body.split main.thread > h1 {
   height: var(--pager-h);
   /* Edge to edge: these margins cancel main.thread's padding (4px 2ch). */
   margin: -4px -2ch 12px;
-  padding: 0 calc(3ch + 1px) 0 calc(3ch + 3px);
+  --inset: max(0px, (100% - var(--col)) / 2);
+  padding: 0 calc(var(--inset) + 3ch + 1px) 0 calc(var(--inset) + 3ch + 3px);
   font: inherit;
   font-weight: bold;
   color: var(--unread);
