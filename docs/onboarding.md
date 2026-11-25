@@ -173,6 +173,13 @@ the hazard and the flag juggling.
   `google.auth.exceptions.RefreshError: ('invalid_grant: …')` and gmi exits
   non-zero with a traceback. That's the signature of the Testing-mode 7-day
   expiry, a revoked grant, and a password change on the Google account.
+- **Dead clients.** A deleted OAuth client or Cloud project fails the same
+  way but says `deleted_client`, `invalid_client` or `Project #N has been
+  deleted.` pneu reports it as `ErrClientGone`, never `ErrReauth`: a consent
+  with the same client can't succeed, only a new client can. On 2026-11-25
+  lieer's shared client went this way, breaking every account authorized
+  without `-c`; the server now logs such accounts (credentials but no
+  `client_secret.json`) at start.
 
 ### lieer's shared client
 

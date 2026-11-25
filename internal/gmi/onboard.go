@@ -42,6 +42,13 @@ var (
 	// ErrReauth wraps a run that failed with lieer's invalid_grant: the
 	// refresh token expired (Testing-mode OAuth apps: 7 days) or was revoked.
 	ErrReauth = errors.New("Gmail access expired or was revoked")
+	// ErrClientGone wraps a run that failed because the OAuth client lieer
+	// refreshes with, or its Cloud project, no longer exists (deleted_client,
+	// invalid_client, "Project #N has been deleted"). A consent with the same
+	// client can't fix it: only a new client can (INSTALL.md step 4). It hit
+	// accounts authorized before onboarding without -c, so on lieer's shared
+	// client, when that client's project was deleted (2026-11-25).
+	ErrClientGone = errors.New("Google OAuth client was deleted: make a new Desktop client (INSTALL.md step 4), save it as the account's client_secret.json, then run `pneu account auth <account> --force`")
 	// ErrStalled wraps a first pull the watchdog stopped.
 	ErrStalled = errors.New("gmi: first pull stalled")
 	// ErrNoReauth is Reauth refusing: the account's token hasn't failed.
@@ -350,6 +357,49 @@ func CheckAuthPort() error {
 	return ln.Close()
 }
 
+// authPortClosing reports whether only a closing connection blocks
+// AuthPort: lieer's strict bind fails, but a SO_REUSEADDR bind (Go's
+// default), which a listener would still refuse, succeeds.
+func authPortClosing() bool {
+	if CheckAuthPort() == nil {
+		return false
+	}
+	ln, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", AuthPort))
+	if err != nil {
+		return false
+	}
+	ln.Close()
+	return true
+}
+
+// AuthPortWait bounds WaitAuthPort: Linux holds TIME_WAIT for 60s.
+const AuthPortWait = 75 * time.Second
+
+// WaitAuthPort is CheckAuthPort that waits out a closing connection, the
+// leftover of a consent that ran a moment ago, rather than failing on it:
+// waiting is called once if it has to, and it gives up after max or with
+// ctx. Something listening on AuthPort fails at once with ErrAuthPort.
+func WaitAuthPort(ctx context.Context, max time.Duration, waiting func()) error {
+	deadline := time.Now().Add(max)
+	for told := false; ; {
+		if CheckAuthPort() == nil {
+			return nil
+		}
+		if !authPortClosing() || time.Now().After(deadline) {
+			return ErrAuthPort
+		}
+		if !told {
+			waiting()
+			told = true
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+}
+
 // Reauth reconnects an account whose token has failed: it returns the
 // consent URL for the app to open, from `gmi auth -f -c <client secret>`.
 //
@@ -551,11 +601,7 @@ func (e *Engine) checkAuth(ctx context.Context, a *account) error {
 		if msg == "" {
 			msg = err.Error()
 		}
-		err = fmt.Errorf("gmi pull -t [%s]: %s", a.Name, msg)
-		if strings.Contains(string(out), "invalid_grant") {
-			err = fmt.Errorf("%w: %w", ErrReauth, err)
-		}
-		return err
+		return classify(string(out), fmt.Errorf("gmi pull -t [%s]: %s", a.Name, msg))
 	}
 	return nil
 }

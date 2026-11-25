@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -42,8 +43,8 @@ func sandbox(t *testing.T) string {
 	// The stub's instant consent never binds localhost:8080, so a real
 	// consent, or a browser test's redirect still in TIME_WAIT, mustn't
 	// fail these tests.
-	checkAuthPort = func() error { return nil }
-	t.Cleanup(func() { checkAuthPort = gmi.CheckAuthPort })
+	checkAuthPort = func(context.Context, time.Duration, func()) error { return nil }
+	t.Cleanup(func() { checkAuthPort = gmi.WaitAuthPort })
 	for _, k := range []string{"STUBGMI_FAIL", "STUBGMI_AUTH", "STUBGMI_DURATION"} {
 		t.Setenv(k, "")
 	}

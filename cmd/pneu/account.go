@@ -583,7 +583,10 @@ func doAuth(cfgPath, name string, force bool, o acctOut) error {
 		if _, err := gmi.CleanClientSecret(b); err != nil {
 			return fmt.Errorf("%s: %w (rerun `pneu account add` with --client-secret)", secret, err)
 		}
-		if err := checkAuthPort(); err != nil {
+		waiting := func() {
+			o.say("Port %d is still closing from the last consent; waiting for it (up to a minute)...", gmi.AuthPort)
+		}
+		if err := checkAuthPort(o.ctx(), gmi.AuthPortWait, waiting); err != nil {
 			return fmt.Errorf("%w (`ss -tanp 'sport = :8080'` shows what holds it)", err)
 		}
 	}
@@ -657,9 +660,9 @@ func doAuth(cfgPath, name string, force bool, o acctOut) error {
 	return nil
 }
 
-// checkAuthPort is gmi.CheckAuthPort; tests whose stub consent never binds
+// checkAuthPort is gmi.WaitAuthPort; tests whose stub consent never binds
 // the port replace it.
-var checkAuthPort = gmi.CheckAuthPort
+var checkAuthPort = gmi.WaitAuthPort
 
 // consentOpener reads `gmi auth`'s output line by line and opens the
 // consent URL it announces, once, without waiting for the browser. lieer

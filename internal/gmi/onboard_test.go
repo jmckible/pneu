@@ -601,3 +601,86 @@ func TestCheckAuthPortSeesTimeWait(t *testing.T) {
 		t.Fatalf("CheckAuthPort with the port in TIME_WAIT: %v", err)
 	}
 }
+
+// timeWaitAuthPort leaves AuthPort's server side in TIME_WAIT, as a
+// consent's redirect does (or finds it so already, from an earlier test),
+// or skips if something listens there.
+func timeWaitAuthPort(t *testing.T) {
+	t.Helper()
+	if err := CheckAuthPort(); err != nil {
+		if authPortClosing() {
+			return
+		}
+		t.Skip(err)
+	}
+	ln, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", AuthPort))
+	if err != nil {
+		t.Skip(err)
+	}
+	client, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln.Close()
+	server.Close()
+	client.Close()
+	time.Sleep(50 * time.Millisecond)
+}
+
+// A closing connection is waited on (and said so, once) until max; a
+// listener fails at once without waiting.
+func TestWaitAuthPort(t *testing.T) {
+	timeWaitAuthPort(t)
+	told := 0
+	start := time.Now()
+	err := WaitAuthPort(context.Background(), 2*time.Second, func() { told++ })
+	if !errors.Is(err, ErrAuthPort) || told != 1 || time.Since(start) < 2*time.Second {
+		t.Fatalf("TIME_WAIT: err %v, told %d, after %v; want ErrAuthPort, 1, >= 2s", err, told, time.Since(start))
+	}
+
+	ln, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", AuthPort))
+	if err != nil {
+		t.Skip(err)
+	}
+	defer ln.Close()
+	told = 0
+	start = time.Now()
+	err = WaitAuthPort(context.Background(), time.Minute, func() { told++ })
+	if !errors.Is(err, ErrAuthPort) || told != 0 || time.Since(start) > time.Second {
+		t.Fatalf("listener: err %v, told %d, after %v; want ErrAuthPort at once", err, told, time.Since(start))
+	}
+}
+
+func TestWaitAuthPortCancel(t *testing.T) {
+	timeWaitAuthPort(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	if err := WaitAuthPort(ctx, time.Minute, func() {}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("got %v, want the context's error", err)
+	}
+}
+
+// lieer's failures as Google words them (2026-11-25 for the dead client).
+func TestClassify(t *testing.T) {
+	base := errors.New("gmi pull [a]: exit 1")
+	for _, c := range []struct {
+		out          string
+		gone, reauth bool
+	}{
+		{"google.auth.exceptions.RefreshError: ('deleted_client: The OAuth client was deleted.', {'error': 'deleted_client'})", true, false},
+		{`<HttpError 403 ... returned "Project #753933720722 has been deleted.". Details: ...>`, true, false},
+		{"oauthlib.oauth2.rfc6749.errors.InvalidClientError: (invalid_client) Unauthorized", true, false},
+		{"google.auth.exceptions.RefreshError: ('invalid_grant: Token has been expired or revoked.', ...)", false, true},
+		{"socket.timeout: timed out", false, false},
+		{"pulled: Re: the old project has been deleted.", false, false},
+	} {
+		err := classify(c.out, base)
+		if errors.Is(err, ErrClientGone) != c.gone || errors.Is(err, ErrReauth) != c.reauth || !errors.Is(err, base) {
+			t.Errorf("%q: %v", c.out, err)
+		}
+	}
+}

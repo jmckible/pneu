@@ -285,6 +285,21 @@ func (e *Engine) Run(ctx context.Context) error {
 	e.mu.Lock()
 	e.runCtx = ctx
 	e.mu.Unlock()
+	for _, a := range e.order {
+		// Credentials with no client JSON beside them came from a `gmi auth`
+		// without -c: lieer's shared client, which can vanish under every
+		// lieer user at once (it did, 2026-11-25). Stat only; the token
+		// stays unread.
+		if a.ClientSecret == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(a.GmiDir, CredentialsFile)); err != nil {
+			continue
+		}
+		if _, err := os.Stat(a.ClientSecret); errors.Is(err, os.ErrNotExist) {
+			e.opts.Logf("gmi: [%s] has credentials but no OAuth client at %s, so it is on lieer's shared client; make your own (INSTALL.md step 4), save it there, and run `pneu account auth %s --force`", a.Name, a.ClientSecret, a.Name)
+		}
+	}
 	var wg sync.WaitGroup
 	for _, a := range e.order {
 		wg.Go(func() { e.loop(ctx, a) })
@@ -982,10 +997,7 @@ func (e *Engine) run(ctx context.Context, a *account, op Op, args []string, o ru
 		if msg == "" || r.ExitCode == -1 { // killed: its last line is whatever it was printing
 			msg = err.Error()
 		}
-		r.Err = fmt.Errorf("gmi %s [%s]: exit %d: %s", op, a.Name, r.ExitCode, msg)
-		if strings.Contains(r.Output, "invalid_grant") {
-			r.Err = fmt.Errorf("%w: %w", ErrReauth, r.Err)
-		}
+		r.Err = classify(r.Output, fmt.Errorf("gmi %s [%s]: exit %d: %s", op, a.Name, r.ExitCode, msg))
 	default:
 		r.Changed = changed(op, r.Output)
 	}
@@ -1137,6 +1149,21 @@ func (s *refusalScan) Write(p []byte) (int, error) {
 		s.line = s.line[:0]
 	}
 	return len(p), nil
+}
+
+// classify marks a failed gmi run's error by what its output says: a dead
+// refresh token (ErrReauth: a consent fixes it) or a dead OAuth client
+// (ErrClientGone: only a new client does, so it is never ErrReauth, whose
+// Reconnect would send Google the same dead client).
+func classify(out string, err error) error {
+	switch {
+	case strings.Contains(out, "deleted_client"), strings.Contains(out, "invalid_client"),
+		strings.Contains(out, "Project #") && strings.Contains(out, "has been deleted."):
+		return fmt.Errorf("%w (%w)", ErrClientGone, err)
+	case strings.Contains(out, "invalid_grant"):
+		return fmt.Errorf("%w: %w", ErrReauth, err)
+	}
+	return err
 }
 
 func lastLine(s string) string {
