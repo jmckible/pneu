@@ -40,18 +40,22 @@
   --border: color-mix(in oklab, var(--fg) 12%, var(--bg));
   --unread: light-dark(color-mix(in oklab, var(--fg) 60%, black), color-mix(in oklab, var(--fg) 60%, white));
   /* Surfaces: the bars sit below the page, the thread's sheet above it. */
-  /* Surfaces are fixed OKLCH lightness steps from --bg (relative color
+  /* Surfaces are fixed OKLab lightness steps from --bg (relative color
      syntax), not mixes: a mix toward fg or black scales with each theme's
      contrast, so a dim-foreground theme got a flatter UI than Nord. Steps
      are Nord's measured deltas. Dark: bar 0.10 below, raised 0.05 above.
-     Light: both below (bg is already near white). */
-  --bar: light-dark(oklch(from var(--bg) calc(l - 0.07) c h), oklch(from var(--bg) calc(l - 0.10) c h));
-  --raised: light-dark(oklch(from var(--bg) calc(l - 0.035) c h), oklch(from var(--bg) calc(l + 0.05) c h));
+     Light: both below (bg is already near white). oklab, never oklch:
+     Chromium 158 calls the hue of a low-chroma color (One Dark's bg, at
+     0.016) missing when it converts to oklch, and a missing hue is 0, so
+     a blue-grey bg derived brown surfaces. a and b carry the hue with no
+     angle to lose. */
+  --bar: light-dark(oklab(from var(--bg) calc(l - 0.07) a b), oklab(from var(--bg) calc(l - 0.10) a b));
+  --raised: light-dark(oklab(from var(--bg) calc(l - 0.035) a b), oklab(from var(--bg) calc(l + 0.05) a b));
   /* The accent with its chroma pushed up, for the one thing that should
      sing (the mark and the status text when sync is in trouble). An
      already-vivid accent maps back into
      gamut and just stays put, so no theme overshoots. */
-  --accent-hot: oklch(from var(--accent) l calc(c * 1.35) h);
+  --accent-hot: oklab(from var(--accent) l calc(a * 1.35) calc(b * 1.35));
   --keybar-h: 28px;
 }
 
@@ -608,7 +612,7 @@ article.message {
   scroll-margin-top: calc(var(--acc-h) + 8px);
 }
 body.split article.message {
-  --tile: light-dark(oklch(from var(--raised) calc(l - 0.03) c h), oklch(from var(--raised) calc(l + 0.035) c h));
+  --tile: light-dark(oklab(from var(--raised) calc(l - 0.03) a b), oklab(from var(--raised) calc(l + 0.035) a b));
 }
 article.message.collapsed:hover { background: color-mix(in oklab, var(--tile), var(--fg) 5%); }
 article.message:not(.collapsed) {

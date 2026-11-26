@@ -12,7 +12,7 @@
 }
 :root {
   --muted: color-mix(in oklab, var(--fg) 75%, var(--bg));
-  --accent-hot: oklch(from var(--accent) l calc(c * 1.35) h);
+  --accent-hot: oklab(from var(--accent) l calc(a * 1.35) calc(b * 1.35));
 }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 var(--font); }
 main { max-width: 64ch; margin: 12vh auto; padding: 0 2ch; }
